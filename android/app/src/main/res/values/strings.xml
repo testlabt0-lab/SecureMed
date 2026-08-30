@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">SecureMed</string>
+    <string name="welcome">Welcome to SecureMed</string>
+    <string name="login">Login</string>
+    <string name="biometric_login">Login with Fingerprint</string>
+    <string name="email">Email</string>
+    <string name="password">Password</string>
+    <string name="channels">Channels</string>
+    <string name="patients">Patients</string>
+    <string name="profile">Profile</string>
+    <string name="logout">Logout</string>
+    <string name="enable_biometric">Enable Biometric</string>
+    <string name="biometric_prompt_title">Biometric Authentication</string>
+    <string name="biometric_prompt_subtitle">Use your fingerprint to access SecureMed</string>
+    <string name="biometric_prompt_description">SecureMed requires biometric authentication to access sensitive data</string>
+    <string name="biometric_prompt_negative">Cancel</string>
+</resources>

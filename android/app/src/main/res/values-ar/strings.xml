@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">SecureMed</string>
+    <string name="welcome">مرحباً بك في SecureMed</string>
+    <string name="login">تسجيل الدخول</string>
+    <string name="biometric_login">تسجيل الدخول بالبصمة</string>
+    <string name="email">البريد الإلكتروني</string>
+    <string name="password">كلمة المرور</string>
+    <string name="channels">القنوات</string>
+    <string name="patients">المرضى</string>
+    <string name="profile">الملف الشخصي</string>
+    <string name="logout">تسجيل الخروج</string>
+    <string name="enable_biometric">تفعيل البصمة</string>
+    <string name="biometric_prompt_title">المصادقة بالبصمة</string>
+    <string name="biometric_prompt_subtitle">استخدم بصمتك للدخول إلى SecureMed</string>
+    <string name="biometric_prompt_description">SecureMed يتطلب المصادقة البيومترية للوصول للبيانات الحساسة</string>
+    <string name="biometric_prompt_negative">إلغاء</string>
+</resources>

@@ -1,0 +1,30 @@
+# Version control / CI
+.git
+.github
+.gitignore
+
+# Python
+**/__pycache__
+**/*.pyc
+backend/htmlcov
+backend/.coverage
+backend/.pytest_cache
+backend/venv
+backend/.venv
+
+# Node
+frontend/node_modules
+ai-service/node_modules
+
+# Local artifacts (never ship)
+backend/db.sqlite3
+backend/logs
+backend/media
+backend/staticfiles
+**/.env
+**/.z-ai-config
+**/certs/*.pem
+
+# Docs & build tooling not needed at runtime
+docs
+*.zip

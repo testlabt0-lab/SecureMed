@@ -1,0 +1,86 @@
+# Bandit configuration for SecureMed
+# https://bandit.readthedocs.io/en/latest/config.html
+
+# Skip specific tests if needed
+# skips: ['B101', 'B311']
+
+# Target tests
+tests:
+  - B101  # assert_used
+  - B102  # exec_builtins
+  - B103  # set_bad_file_permissions
+  - B105  # hardcoded_password_string
+  - B106  # hardcoded_password_funcarg
+  - B107  # hardcoded_password_default
+  - B108  # hardcoded_tmp_directory
+  - B110  # try_except_pass
+  - B112  # try_except_continue
+  - B201  # flask_debug_true
+  - B301  # pickle
+  - B302  # marshal
+  - B303  # md5
+  - B304  # pycrypto
+  - B305  # cipher_modes
+  - B306  # mktemp_q
+  - B307  # eval
+  - B308  # mark_safe
+  - B310  # urllib_urlopen
+  - B311  # random
+  - B312  # telnetlib
+  - B313  # xml_etree_element
+  - B314  # xml_expatbuilder
+  - B315  # xml_minidom
+  - B316  # xml_pulldom
+  - B317  # xml_lxml
+  - B318  # xml_sax
+  - B319  # xml_etree
+  - B320  # xml_xxe
+  - B321  # ftplib
+  - B322  # input
+  - B323  # unverified_context
+  - B324  # hashlib_insecure_functions
+  - B401  # blacklist_telnetlib
+  - B402  # blacklist_ftplib
+  - B403  # blacklist_pickle
+  - B404  # blacklist_subprocess
+  - B405  # blacklist_xml_etree
+  - B406  # blacklist_xml_sax
+  - B407  # blacklist_xml_expat
+  - B408  # blacklist_xml_minidom
+  - B409  # blacklist_xml_pulldom
+  - B411  # blacklist_xmlrpclib
+  - B412  # blacklist_lxml
+  - B413  # blacklist_pycrypto
+  - B501  # request_with_no_cert_validation
+  - B502  # ssl_with_bad_version
+  - B503  # ssl_with_bad_defaults
+  - B504  # ssl_with_no_version
+  - B505  # weak_cryptographic_key
+  - B506  | yaml_load
+  - B507  | ssh_no_host_key_verification
+  - B508  | snmp_insecure_version
+  - B601  | paramiko_calls
+  - B602  | subprocess_popen_with_shell_equals_true
+  - B603  | subprocess_without_shell_equals_true
+  - B604  | any_other_function_with_shell_equals_true
+  - B605  | start_process_with_a_shell
+  - B606  | start_process_with_no_shell
+  - B607  | start_process_with_partial_path
+  - B608  | hardcoded_sql_expressions
+  - B609  | linux_commands_wildcard_injection
+  - B610  | django_extra_used
+  - B611  | django_rawsql_used
+  - B701  | jinja2_autoescape_false
+  - B702  | use_of_mako_templates
+  - B703  | django_mark_safe
+
+# Directories to exclude
+exclude_dirs:
+  - tests
+  - migrations
+  - __pycache__
+  - .git
+  - node_modules
+
+# Output settings
+recursive: true

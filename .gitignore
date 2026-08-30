@@ -1,0 +1,45 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+backend/htmlcov/
+backend/.coverage
+backend/.pytest_cache/
+backend/staticfiles/
+backend/logs/
+backend/media/
+backend/cache/
+
+# ---------- Environment & secrets (NEVER commit) ----------
+.env
+**/.env
+!.env.example
+.z-ai-config
+**/.z-ai-config
+certs/*.pem
+backend/certs/*.pem
+
+# ---------- Local databases ----------
+*.sqlite3
+*.db
+
+# ---------- Node ----------
+node_modules/
+frontend/dist/.vite/
+
+# ---------- Build artifacts ----------
+*.zip
+*.apk
+android/app/build/
+android/.gradle/
+android/build/
+android/local.properties
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+.DS_Store
+*.swp
+backups/
+*.zip
+backend/backups/

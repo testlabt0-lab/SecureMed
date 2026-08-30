@@ -1,0 +1,4 @@
+#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+GRADLE_HOME=/tmp/gradle-8.8
+exec "$GRADLE_HOME/bin/gradle" "$@"

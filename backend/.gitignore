@@ -1,0 +1,64 @@
+# Dependencies
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.env
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Database
+*.sqlite3
+db.sqlite3-journal
+
+# Certificates (NEVER commit)
+certs/
+*.pem
+*.key
+*.crt
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Pytest
+.pytest_cache/
+
+# Media
+media/
+
+# Static files (collected in production)
+staticfiles/
+
+# Node
+node_modules/
+
+# Android
+*.apk
+*.aab
+*.keystore
+local.properties

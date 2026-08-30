@@ -1,0 +1,59 @@
+# Dockerfile for SecureMed Backend
+# Multi-stage build for smaller image
+
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY backend/requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Production image
+FROM python:3.11-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN useradd -m -s /bin/bash securemed
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /root/.local /home/securemed/.local
+
+# Copy application code
+COPY backend/ /app/
+
+# Set ownership
+RUN chown -R securemed:securemed /app
+
+# Switch to non-root user
+USER securemed
+
+# Set Python path
+ENV PATH=/home/securemed/.local/bin:$PATH
+ENV PYTHONPATH=/app
+ENV DJANGO_SETTINGS_MODULE=config.settings
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health/ || exit 1
+
+EXPOSE 8000
+
+# Run with gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", \
+     "--threads", "2", "--timeout", "60", \
+     "--access-logfile", "-", "--error-logfile", "-", \
+     "config.wsgi:application"]

@@ -1,0 +1,89 @@
+# =============================================================================
+#  SecureMed — Full local stack with Docker Compose
+# =============================================================================
+#  يشغّل المنصة كاملة بأمر واحد:
+#      docker compose up --build
+#
+#  الخدمات:
+#    backend   : Django + Gunicorn على المنفذ 8000 (يقدم الواجهة أيضاً في الإنتاج)
+#    ai        : خدمة الذكاء الاصطناعي (GLM) على المنفذ 8100 — داخلية فقط
+#    postgres  : قاعدة بيانات PostgreSQL 16 (اختيارية — انظر PROFILES أدناه)
+#
+#  أوضاع التشغيل (profiles):
+#    docker compose up backend ai        → SQLite (عرض سريع، بلا قاعدة بيانات)
+#    docker compose --profile db up      → مع PostgreSQL (الأقرب للإنتاج)
+#
+#  متغيرات البيئة: ضعها في ملف backend/.env (يُقرأ تلقائياً)
+#
+#  ملاحظة: صورة backend تضم واجهة React المبنية مسبقاً (frontend/dist) —
+#  شغّل `cd frontend && npm install && npm run build` قبل أول تشغيل.
+# =============================================================================
+
+services:
+  # ----------------------------------------------------------- PostgreSQL ---
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["db"]            # يعمل فقط مع: --profile db
+    environment:
+      POSTGRES_DB: securemed
+      POSTGRES_USER: securemed
+      POSTGRES_PASSWORD: securemed-db-pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U securemed -d securemed"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------- AI service ---
+  ai:
+    build:
+      context: ./ai-service
+    environment:
+      # ضع مفتاح Z.ai هنا أو في بيئة النظام (مطلوب فعلياً لتوليد الملخصات)
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - PORT=8100
+    expose:
+      - "8100"                  # داخلي فقط — Django هو من يتحدث معه
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ------------------------------------------------------------- Backend ---
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    # .env اختياري — بدونها: SECRET_KEY افتراضي + SQLite (للعرض فقط)
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      # داخل شبكة Docker: اسم الخدمة بدل 127.0.0.1
+      AI_SERVICE_URL: http://ai:8100
+      ALLOWED_HOSTS: localhost,127.0.0.1,0.0.0.0
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8000}
+      # عند تفعيل profile db استخدم PostgreSQL، وإلا SQLite
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_HOST: ${DB_HOST:-}
+    depends_on:
+      ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health/')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+
+volumes:
+  pgdata:

@@ -14,6 +14,12 @@ if [ -n "${AI_SERVICE_HOST:-}" ] && [ -z "${AI_SERVICE_URL:-}" ]; then
 fi
 echo "==> AI service URL: ${AI_SERVICE_URL:-<not set — AI features disabled>}"
 
+# Password-reset links: default to the live Render URL (auto-injected by Render)
+if [ -z "${FRONTEND_URL:-}" ] && [ -n "${RENDER_EXTERNAL_URL:-}" ]; then
+  export FRONTEND_URL="${RENDER_EXTERNAL_URL}"
+fi
+echo "==> Frontend URL: ${FRONTEND_URL:-<not set — reset links will use localhost>}"
+
 echo "==> Applying migrations"
 python manage.py migrate --noinput
 

@@ -25,9 +25,16 @@ services:
     startCommand: bash ../deploy/start.sh
     healthCheckPath: /health/
     envVars:
+      # Pin Python 3.12 — Django 5.0.6 / psycopg2-binary 2.9.9 / matplotlib 3.9.2
+      # have no cp313 wheels, so Render's newer default Python would fail to build.
+      - key: PYTHON_VERSION
+        value: "3.12.7"
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings
       - key: SECRET_KEY
+        generateValue: true
+      # AES-256 field-encryption key (any random string — PBKDF2-derived)
+      - key: ENCRYPTION_KEY
         generateValue: true
       - key: DEBUG
         value: "0"
@@ -71,6 +78,8 @@ services:
     startCommand: bash start.sh
     healthCheckPath: /health
     envVars:
+      - key: NODE_VERSION
+        value: "20"
       - key: ZAI_BASE_URL
         sync: false   # e.g. https://api.z.ai/v1
       - key: ZAI_API_KEY

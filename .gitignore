@@ -35,11 +35,5 @@ android/.gradle/
 android/build/
 android/local.properties
 
-# ---------- IDE / OS ----------
-.vscode/
-.idea/
-.DS_Store
-*.swp
-backups/
-*.zip
-
+# ---------- Runtime backup dumps (NOT the apps/backups Django app!) ----------
+backend/backups/

@@ -2,15 +2,42 @@ package com.securemed.app.data
 
 import com.securemed.app.data.api.NetworkModule
 import com.securemed.app.data.api.SecureMedApi
+import com.securemed.app.data.local.LocalCache
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.*
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * Repository for authentication and data operations.
+ *
+ * Offline mode: every cached GET stores its JSON response on disk on success
+ * and falls back to the last cached copy when the network fails, so the app
+ * stays browsable without connectivity.
  */
 class SecureMedRepository {
 
     private val api: SecureMedApi = NetworkModule.api
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    private inline fun <reified T> cacheSave(key: String, value: T) {
+        try {
+            LocalCache.save(key, json.encodeToString(value))
+        } catch (_: Exception) {
+            // Never let cache failures break a successful network call.
+        }
+    }
+
+    private inline fun <reified T> cacheLoad(key: String): T? = try {
+        LocalCache.load(key)?.let { json.decodeFromString<T>(it) }
+    } catch (_: Exception) {
+        null
+    }
 
     // ===== AUTH =====
     suspend fun login(email: String, password: String): Result<LoginResponse> = try {
@@ -21,24 +48,22 @@ class SecureMedRepository {
         SecurePreferences.userEmail = response.user.email
         SecurePreferences.userName = response.user.fullName
         SecurePreferences.userRole = response.user.role
+        SecurePreferences.lastEmail = email
         Result.success(response)
     } catch (e: Exception) {
         Result.failure(e)
     }
 
+    /**
+     * Biometric login step 2: submit the Keystore signature over the
+     * challenge obtained from [requestBiometricChallenge].
+     */
     suspend fun biometricLogin(
-        email: String,
-        biometricTemplate: String
+        challengeId: String,
+        signatureBase64: String
     ): Result<LoginResponse> = try {
-        val challenge = api.getBiometricChallenge(
-            BiometricChallengeRequest(email, SecurePreferences.deviceId)
-        )
         val response = api.biometricLogin(
-            BiometricLoginRequest(
-                challengeId = challenge.challengeId,
-                biometricResponse = "android-response-${challenge.challengeId}",
-                biometricTemplate = biometricTemplate
-            )
+            BiometricLoginRequest(challengeId, signatureBase64)
         )
         SecurePreferences.accessToken = response.tokens.access
         SecurePreferences.refreshToken = response.tokens.refresh
@@ -46,35 +71,60 @@ class SecureMedRepository {
         SecurePreferences.userEmail = response.user.email
         SecurePreferences.userName = response.user.fullName
         SecurePreferences.userRole = response.user.role
+        SecurePreferences.lastEmail = response.user.email
         Result.success(response)
     } catch (e: Exception) {
         Result.failure(e)
     }
 
-    suspend fun enrollBiometric(deviceName: String, biometricTemplate: String): Result<Unit> = try {
+    /**
+     * Biometric login step 1: ask the server for a challenge bound to
+     * this email + device.
+     */
+    suspend fun requestBiometricChallenge(
+        email: String
+    ): Result<BiometricChallengeResponse> = try {
+        Result.success(
+            api.getBiometricChallenge(
+                BiometricChallengeRequest(email, SecurePreferences.deviceId)
+            )
+        )
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** Enroll this device's Keystore public key for biometric login. */
+    suspend fun enrollBiometric(
+        deviceName: String,
+        publicKeyBase64: String
+    ): Result<Unit> = try {
         api.enrollBiometric(
             BiometricEnrollRequest(
                 deviceId = SecurePreferences.deviceId,
                 deviceName = deviceName,
                 platform = "ANDROID",
-                biometricTemplate = biometricTemplate
+                publicKey = publicKeyBase64
             )
         )
         SecurePreferences.biometricEnabled = true
+        SecurePreferences.lastEmail = SecurePreferences.userEmail
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
     }
 
     fun logout() {
-        SecurePreferences.clear()
+        SecurePreferences.clearSession()
     }
 
     // ===== CHANNELS =====
     suspend fun getChannels(): Result<List<Channel>> = try {
-        Result.success(api.getChannels())
+        val data = api.getChannels().results
+        cacheSave("channels", data)
+        Result.success(data)
     } catch (e: Exception) {
-        Result.failure(e)
+        cacheLoad<List<Channel>>("channels")?.let { Result.success(it) }
+            ?: Result.failure(e)
     }
 
     suspend fun getChannel(id: String): Result<Channel> = try {
@@ -84,20 +134,87 @@ class SecureMedRepository {
     }
 
     suspend fun getChannelMembers(id: String): Result<List<ChannelMembership>> = try {
-        Result.success(api.getChannelMembers(id))
+        Result.success(api.getChannelMembers(id).results)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    // ===== CHAT =====
+    suspend fun getMessages(channelId: String): Result<List<ChatMessage>> = try {
+        val data = api.getMessages(channelId)
+        // Cache per channel for offline reading
+        cacheSave("chat_$channelId", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        cacheLoad<List<ChatMessage>>("chat_$channelId")?.let { Result.success(it) }
+            ?: Result.failure(e)
+    }
+
+    suspend fun sendMessage(channelId: String, body: String): Result<ChatMessage> = try {
+        Result.success(api.sendMessage(channelId, ChatMessageRequest(body)))
     } catch (e: Exception) {
         Result.failure(e)
     }
 
     // ===== PATIENTS =====
     suspend fun getPatients(): Result<List<Patient>> = try {
-        Result.success(api.getPatients())
+        val data = api.getPatients().results
+        cacheSave("patients", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        cacheLoad<List<Patient>>("patients")?.let { Result.success(it) }
+            ?: Result.failure(e)
+    }
+
+    suspend fun getMedicalRecords(channelId: String? = null): Result<List<MedicalRecord>> = try {
+        val data = api.getMedicalRecords(channelId).results
+        if (channelId != null) cacheSave("records_$channelId", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        if (channelId != null) {
+            cacheLoad<List<MedicalRecord>>("records_$channelId")
+                ?.let { return Result.success(it) }
+        }
+        Result.failure(e)
+    }
+
+    // ===== MEDICATIONS =====
+    suspend fun getMedications(patientId: String? = null): Result<List<Medication>> = try {
+        val data = api.getMedications(patientId).results
+        cacheSave("medications", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        cacheLoad<List<Medication>>("medications")?.let { Result.success(it) }
+            ?: Result.failure(e)
+    }
+
+    suspend fun createMedication(request: MedicationCreateRequest): Result<Medication> = try {
+        Result.success(api.createMedication(request))
     } catch (e: Exception) {
         Result.failure(e)
     }
 
-    suspend fun getMedicalRecords(channelId: String? = null): Result<List<MedicalRecord>> = try {
-        Result.success(api.getMedicalRecords(channelId))
+    suspend fun getTodayDoses(patientId: String? = null): Result<TodayDosesResponse> = try {
+        val data = api.getTodayDoses(patientId)
+        cacheSave("today_doses", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        cacheLoad<TodayDosesResponse>("today_doses")?.let { Result.success(it) }
+            ?: Result.failure(e)
+    }
+
+    suspend fun logDose(
+        medicationId: String,
+        scheduledFor: String,
+        status: String
+    ): Result<MedicationLogResponse> = try {
+        Result.success(api.logDose(LogDoseRequest(medicationId, scheduledFor, status)))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun getAdherence(patientId: String? = null): Result<AdherenceStats> = try {
+        Result.success(api.getAdherence(patientId))
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -111,9 +228,12 @@ class SecureMedRepository {
 
     // ===== NOTIFICATIONS =====
     suspend fun getNotifications(): Result<List<Notification>> = try {
-        Result.success(api.getNotifications())
+        val data = api.getNotifications().results
+        cacheSave("notifications", data)
+        Result.success(data)
     } catch (e: Exception) {
-        Result.failure(e)
+        cacheLoad<List<Notification>>("notifications")?.let { Result.success(it) }
+            ?: Result.failure(e)
     }
 
     suspend fun getUnreadCount(): Result<Map<String, Int>> = try {
@@ -136,7 +256,46 @@ class SecureMedRepository {
 
     // ===== ANALYTICS =====
     suspend fun getDashboardOverview(): Result<DashboardStats> = try {
-        Result.success(api.getDashboardOverview())
+        val data = api.getDashboardOverview()
+        cacheSave("dashboard_overview", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        cacheLoad<DashboardStats>("dashboard_overview")?.let { Result.success(it) }
+            ?: Result.failure(e)
+    }
+
+    // ===== USERS (admin) =====
+    suspend fun getUsers(): Result<List<User>> = try {
+        val data = api.getUsers().results
+        cacheSave("users", data)
+        Result.success(data)
+    } catch (e: Exception) {
+        cacheLoad<List<User>>("users")?.let { Result.success(it) }
+            ?: Result.failure(e)
+    }
+
+    suspend fun deactivateUser(id: String): Result<String> = try {
+        Result.success(api.deactivateUser(id)["detail"] ?: "تم إلغاء تفعيل المستخدم")
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun activateUser(id: String): Result<String> = try {
+        Result.success(api.activateUser(id)["detail"] ?: "تم تفعيل المستخدم")
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    // ===== CHANGE PASSWORD =====
+    suspend fun changePassword(
+        oldPassword: String,
+        newPassword: String,
+        confirmPassword: String
+    ): Result<String> = try {
+        val response = api.changePassword(
+            ChangePasswordRequest(oldPassword, newPassword, confirmPassword)
+        )
+        Result.success(response["detail"] ?: "تم تغيير كلمة المرور بنجاح")
     } catch (e: Exception) {
         Result.failure(e)
     }

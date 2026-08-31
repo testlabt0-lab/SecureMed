@@ -84,6 +84,11 @@ class LoginSerializer(serializers.Serializer):
                     {'detail': 'بيانات الاعتماد غير صحيحة'}
                 )
 
+            if not user.is_active:
+                raise serializers.ValidationError(
+                    {'detail': 'هذا الحساب معطل — اتصل بمدير النظام'}
+                )
+
             if user.is_locked:
                 raise serializers.ValidationError(
                     {'detail': f'الحساب مقفل حتى {user.locked_until}'}
@@ -110,19 +115,34 @@ class BiometricEnrollSerializer(serializers.Serializer):
     """
     Serializer for enrolling biometric authentication.
     Security requirement #4: تسجيل الدخول بالبصمة
+
+    Modern flow: the mobile app generates an EC key pair inside the
+    Android Keystore (biometric-gated) and submits the PUBLIC key here.
+    At login the device signs a server challenge; the server verifies the
+    signature with the stored public key. Raw biometric data never
+    leaves the device.
+
+    Legacy `biometric_template` is still accepted for old clients.
     """
     device_id = serializers.CharField(max_length=255)
     device_name = serializers.CharField(max_length=255, required=False)
     platform = serializers.ChoiceField(choices=['ANDROID', 'IOS', 'WEB'])
-    biometric_template = serializers.CharField(write_only=True)
+    public_key = serializers.CharField(write_only=True, required=False)
+    biometric_template = serializers.CharField(write_only=True, required=False)
+
+    def validate(self, attrs):
+        if not attrs.get('public_key') and not attrs.get('biometric_template'):
+            raise serializers.ValidationError(
+                {'detail': 'المفتاح العام (public_key) مطلوب لتسجيل البصمة'}
+            )
+        return attrs
 
     def create(self, validated_data):
         user = self.context['request'].user
         salt = secrets.token_hex(32)
-        biometric_hash = hash_biometric(validated_data['biometric_template'], salt)
-
-        # Generate challenge keys
-        challenge, expected_response = generate_challenge()
+        public_key = validated_data.get('public_key', '')
+        template = validated_data.get('biometric_template', public_key)
+        biometric_hash = hash_biometric(template, salt)
 
         profile, created = BiometricProfile.objects.update_or_create(
             user=user,
@@ -132,6 +152,7 @@ class BiometricEnrollSerializer(serializers.Serializer):
                 'platform': validated_data['platform'],
                 'biometric_hash': encrypt_field(biometric_hash),
                 'salt': salt,
+                'public_key': encrypt_field(public_key) if public_key else '',
                 'is_active': True,
             }
         )
@@ -199,12 +220,20 @@ class BiometricChallengeSerializer(serializers.Serializer):
 
 class BiometricLoginSerializer(serializers.Serializer):
     """
-    Verify biometric login response.
+    Verify biometric login by signature.
     Returns JWT tokens on success.
+
+    Modern flow: client signs the challenge bytes with the private key
+    stored in the Android Keystore (unlocked by the fingerprint), and
+    sends the base64 signature. The server verifies it against the
+    enrolled public key — a real biometric-bound proof of possession.
+
+    Legacy `biometric_template` matching is kept for old clients.
     """
     challenge_id = serializers.UUIDField()
-    biometric_response = serializers.CharField(write_only=True)
-    biometric_template = serializers.CharField(write_only=True)
+    signature = serializers.CharField(write_only=True, required=False)
+    biometric_response = serializers.CharField(write_only=True, required=False)
+    biometric_template = serializers.CharField(write_only=True, required=False)
 
     def validate(self, attrs):
         try:
@@ -217,31 +246,44 @@ class BiometricLoginSerializer(serializers.Serializer):
 
         user = challenge.user
 
-        # Verify biometric
-        try:
-            profile = BiometricProfile.objects.get(
-                user=user, is_active=True
-            )
-        except BiometricProfile.DoesNotExist:
+        # The user may have several enrolled devices — try each active
+        # profile (get() would crash with MultipleObjectsReturned).
+        profiles = list(
+            BiometricProfile.objects.filter(user=user, is_active=True)
+        )
+        if not profiles:
             raise serializers.ValidationError({'detail': 'الملف البيوميتري غير موجود'})
 
-        # Verify the biometric template matches stored hash
-        stored_hash = decrypt_field(profile.biometric_hash)
-        provided_hash = hash_biometric(attrs['biometric_template'], profile.salt)
+        profile = None
+        error_detail = 'فشل التحقق البيوميتري'
+        signature_b64 = attrs.get('signature')
+        template = attrs.get('biometric_template')
 
-        if not secrets.compare_digest(stored_hash, provided_hash):
-            profile.failed_attempts += 1
-            profile.save()
+        if signature_b64:
+            profile = _verify_signature(
+                profiles, challenge.challenge, signature_b64
+            )
+            error_detail = 'التوقيع البيوميتري غير صالح'
+        elif template:
+            error_detail = 'البصمة غير مطابقة'
+            for candidate in profiles:
+                stored_hash = decrypt_field(candidate.biometric_hash)
+                provided_hash = hash_biometric(template, candidate.salt)
+                if secrets.compare_digest(stored_hash, provided_hash):
+                    profile = candidate
+                    break
+        else:
+            error_detail = 'التوقيع البيوميتري مطلوب (signature أو biometric_template)'
+
+        if profile is None:
+            first = profiles[0]
+            first.failed_attempts += 1
+            first.save()
             user.failed_login_attempts += 1
             if user.failed_login_attempts >= 5:
                 user.lock_account()
             user.save()
-            raise serializers.ValidationError({'detail': 'البصمة غير مطابقة'})
-
-        # Verify challenge response
-        expected = decrypt_field(challenge.expected_response)
-        if not verify_challenge(expected, attrs['biometric_response']):
-            raise serializers.ValidationError({'detail': 'فشل التحقق من الاستجابة'})
+            raise serializers.ValidationError({'detail': error_detail})
 
         challenge.mark_used()
         profile.last_used = timezone.now()
@@ -251,6 +293,50 @@ class BiometricLoginSerializer(serializers.Serializer):
 
         attrs['user'] = user
         return attrs
+
+
+def _verify_signature(profiles, challenge_text, signature_b64):
+    """
+    Verify a base64 ECDSA-SHA256 signature over the challenge bytes
+    against the stored public key of each active profile.
+    The stored key may be PEM or raw base64 DER (SubjectPublicKeyInfo).
+    Returns the matching profile or None.
+    """
+    import base64 as _base64
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives.asymmetric import ec as _ec
+    from cryptography.hazmat.primitives import serialization as _serialization
+    from cryptography.exceptions import InvalidSignature
+
+    try:
+        signature_bytes = _base64.b64decode(signature_b64)
+    except Exception:
+        return None
+
+    challenge_bytes = challenge_text.encode('utf-8')
+    for candidate in profiles:
+        stored = candidate.public_key
+        if not stored:
+            continue
+        try:
+            pem = decrypt_field(stored)
+            if '-----BEGIN' in pem:
+                public_key = _serialization.load_pem_public_key(pem.encode('utf-8'))
+            else:
+                public_key = _serialization.load_der_public_key(
+                    _base64.b64decode(pem)
+                )
+            public_key.verify(
+                signature_bytes,
+                challenge_bytes,
+                _ec.ECDSA(_hashes.SHA256()),
+            )
+            return candidate
+        except InvalidSignature:
+            continue
+        except Exception:
+            continue
+    return None
 
 
 class ChangePasswordSerializer(serializers.Serializer):

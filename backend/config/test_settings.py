@@ -56,6 +56,7 @@ REST_FRAMEWORK = {
         **REST_FRAMEWORK.get('DEFAULT_THROTTLE_RATES', {}),
         'anon': '10000/hour',
         'password_reset': '10000/hour',
+        'biometric': '10000/hour',
     },
 }
 

@@ -13,8 +13,8 @@ android {
         applicationId = "com.securemed.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -76,6 +76,9 @@ dependencies {
 
     // Biometric
     implementation("androidx.biometric:biometric:1.1.0")
+    // FragmentActivity-based registerForActivityResult + BiometricPrompt
+    // need fragment >= 1.3.0 (biometric 1.1.0 only pulls 1.2.x transitively)
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
 
     // Networking
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

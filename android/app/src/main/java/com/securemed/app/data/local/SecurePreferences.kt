@@ -19,6 +19,7 @@ object SecurePreferences {
     private const val KEY_DEVICE_ID = "device_id"
     private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
     private const val KEY_DARK_MODE = "dark_mode"
+    private const val KEY_LAST_EMAIL = "last_email"
 
     private lateinit var prefs: EncryptedSharedPreferences
 
@@ -68,6 +69,11 @@ object SecurePreferences {
         get() = prefs.getBoolean(KEY_DARK_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_DARK_MODE, value).apply()
 
+    /** Last successfully logged-in email — prefills the biometric login tab. */
+    var lastEmail: String?
+        get() = prefs.getString(KEY_LAST_EMAIL, null)
+        set(value) = prefs.edit().putString(KEY_LAST_EMAIL, value).apply()
+
     val deviceId: String
         get() {
             var id = prefs.getString(KEY_DEVICE_ID, null)
@@ -77,6 +83,25 @@ object SecurePreferences {
             }
             return id
         }
+
+    /**
+     * End the session WITHOUT wiping device-bound data.
+     *
+     * deviceId must survive logout: it identifies the biometric enrollment
+     * on the server. Wiping it used to break fingerprint login after the
+     * first logout (device no longer recognized).
+     */
+    fun clearSession() {
+        val keepDeviceId = prefs.getString(KEY_DEVICE_ID, null)
+        val keepBiometric = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
+        val keepEmail = prefs.getString(KEY_LAST_EMAIL, null)
+        prefs.edit().clear().apply()
+        prefs.edit()
+            .putString(KEY_DEVICE_ID, keepDeviceId)
+            .putBoolean(KEY_BIOMETRIC_ENABLED, keepBiometric)
+            .putString(KEY_LAST_EMAIL, keepEmail)
+            .apply()
+    }
 
     fun clear() {
         prefs.edit().clear().apply()

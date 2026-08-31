@@ -27,6 +27,8 @@ fun DashboardScreen(
     onNavigateToPatients: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToNotifications: () -> Unit,
+    onNavigateToUsers: () -> Unit,
+    onNavigateToMedications: () -> Unit,
     onLogout: () -> Unit
 ) {
     val viewModel: DashboardViewModel = viewModel()
@@ -127,6 +129,54 @@ fun DashboardScreen(
                         color = MaterialTheme.colorScheme.error,
                         onClick = {}
                     )
+                }
+            }
+
+            // Medications + notifications shortcuts (patient core features)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    StatCard(
+                        modifier = Modifier.weight(1f),
+                        title = "الأدوية",
+                        count = 0,
+                        countText = "التذكيرات",
+                        icon = Icons.Default.Medication,
+                        color = MaterialTheme.colorScheme.secondary,
+                        onClick = onNavigateToMedications
+                    )
+                    StatCard(
+                        modifier = Modifier.weight(1f),
+                        title = "الإشعارات",
+                        count = 0,
+                        countText = "المركز",
+                        icon = Icons.Default.Notifications,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        onClick = onNavigateToNotifications
+                    )
+                }
+            }
+
+            // Admin-only: user management shortcut
+            if (SecurePreferences.userRole in listOf("SUPER_ADMIN", "HOSPITAL_ADMIN")) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatCard(
+                            modifier = Modifier.weight(1f),
+                            title = "المستخدمون",
+                            count = 0,
+                            countText = "إدارة",
+                            icon = Icons.Default.ManageAccounts,
+                            color = MaterialTheme.colorScheme.primary,
+                            onClick = onNavigateToUsers
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
             }
 

@@ -110,6 +110,21 @@ class TestLoginAPI:
 
         assert response.status_code == 400
 
+    def test_login_deactivated_user_rejected(self):
+        """Deactivated accounts must not be able to login (production hardening)."""
+        user = UserFactory()
+        user.set_password('TestPassword123!')
+        user.is_active = False
+        user.save()
+
+        response = self.client.post('/api/v1/auth/login/', {
+            'email': user.email,
+            'password': 'TestPassword123!',
+        }, format='json')
+
+        assert response.status_code == 400
+        assert 'معطل' in str(response.data)
+
 
 @pytest.mark.django_db
 class TestUserManagementAPI:

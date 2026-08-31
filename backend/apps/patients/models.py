@@ -2,6 +2,7 @@
 Patient and MedicalRecord models.
 """
 import uuid
+import datetime
 import os
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -307,3 +308,149 @@ class MedicalFile(models.Model):
         self.last_accessed = timezone.now()
         self.last_accessed_by = user
         self.save(update_fields=['access_count', 'last_accessed', 'last_accessed_by'])
+
+
+class Medication(models.Model):
+    """
+    Medication plan for a patient with daily dose times.
+
+    Powers the mobile medication reminders: `dose_times` holds the daily
+    schedule (HH:MM comma separated) that the Android app mirrors into
+    local system alarms, while MedicationLog records adherence.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    patient = models.ForeignKey(
+        Patient, on_delete=models.CASCADE,
+        related_name='medications',
+        verbose_name=_('المريض')
+    )
+    channel = models.ForeignKey(
+        'channels.Channel', on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='medications',
+        verbose_name=_('القناة')
+    )
+    name = models.CharField(_('اسم الدواء'), max_length=255)
+    dosage = models.CharField(
+        _('الجرعة'), max_length=100,
+        help_text=_('مثال: 500 ملغ، قرص واحد')
+    )
+    dose_times = models.CharField(
+        _('أوقات الجرعات'), max_length=255, default='08:00',
+        help_text=_('مواعيد الجرعات مفصولة بفواصل بصيغة HH:MM — مثال: 08:00,14:00,20:00')
+    )
+    start_date = models.DateField(_('تاريخ البدء'))
+    end_date = models.DateField(_('تاريخ الانتهاء'), null=True, blank=True)
+    instructions = models.TextField(_('التعليمات'), blank=True)
+    prescribed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name='prescribed_medications',
+        verbose_name=_('الطبيب الواصف')
+    )
+    is_active = models.BooleanField(_('نشط'), default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('دواء')
+        verbose_name_plural = _('الأدوية')
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['patient', 'is_active']),
+            models.Index(fields=['is_active', 'start_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.name} — {self.patient.full_name}'
+
+    @property
+    def times(self):
+        """Parsed dose times as a sorted list of HH:MM strings."""
+        out = []
+        for part in (self.dose_times or '').split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                # normalize e.g. "8:5" -> "08:05"
+                hour, minute = part.split(':')[:2]
+                out.append(f'{int(hour):02d}:{int(minute):02d}')
+            except (ValueError, TypeError):
+                continue
+        return sorted(set(out)) or ['08:00']
+
+    def clean(self):
+        from django.core.exceptions import ValidationError as DjValidationError
+        errors = {}
+        for part in (self.dose_times or '').split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                datetime.datetime.strptime(part, '%H:%M')
+            except ValueError:
+                errors['dose_times'] = f'صيغة وقت غير صالحة: {part} (المطلوب HH:MM)'
+        if self.end_date and self.start_date and self.end_date < self.start_date:
+            errors['end_date'] = 'تاريخ الانتهاء يجب أن يكون بعد تاريخ البدء'
+        if errors:
+            raise DjValidationError(errors)
+
+    def is_scheduled_today(self):
+        today = timezone.localdate()
+        if self.start_date > today:
+            return False
+        if self.end_date and self.end_date < today:
+            return False
+        return self.is_active
+
+
+class MedicationLog(models.Model):
+    """
+    Adherence record for a single scheduled dose.
+    """
+
+    class Status(models.TextChoices):
+        TAKEN = 'TAKEN', _('تم تناوله')
+        SKIPPED = 'SKIPPED', _('تم تخطيه')
+        MISSED = 'MISSED', _('فائت')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    medication = models.ForeignKey(
+        Medication, on_delete=models.CASCADE,
+        related_name='logs',
+        verbose_name=_('الدواء')
+    )
+    scheduled_for = models.DateTimeField(_('موعد الجرعة'))
+    status = models.CharField(
+        _('الحالة'), max_length=10,
+        choices=Status.choices, default=Status.TAKEN
+    )
+    taken_at = models.DateTimeField(_('وقت التناول الفعلي'), null=True, blank=True)
+    notes = models.TextField(_('ملاحظات'), blank=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='medication_logs',
+        verbose_name=_('سجله')
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('سجل جرعة')
+        verbose_name_plural = _('سجلات الجرعات')
+        ordering = ['-scheduled_for']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['medication', 'scheduled_for'],
+                name='unique_medication_scheduled_dose'
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.medication.name} @ {self.scheduled_for:%Y-%m-%d %H:%M} — {self.get_status_display()}'
+
+    def save(self, *args, **kwargs):
+        if self.status == self.Status.TAKEN and self.taken_at is None:
+            self.taken_at = timezone.now()
+        super().save(*args, **kwargs)

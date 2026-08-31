@@ -42,4 +42,4 @@ android/local.properties
 *.swp
 backups/
 *.zip
-backend/backups/
+

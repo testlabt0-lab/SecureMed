@@ -217,6 +217,7 @@ git push
 
 | المشكلة في السجل/المتصفح | السبب | الحل |
 |---|---|---|
+| **`Exited with status 1 while building your code`** (فشل أول نشر) | السبب الأشهر: Render بنى الكود بـ **Python 3.13 الافتراضي** بينما الحزم القديمة (psycopg2 2.9.9 وغيرها) لا تملك نسخاً جاهزة له → يفشل `pip install`. أو أن Root Directory / Build Command غير مضبوطة في النشر اليدوي | **الحل السريع (دقيقتان، بدون رفع كود):** لوحة الخدمة → **Environment** → Add Environment Variable → الاسم `PYTHON_VERSION` والقيمة `3.12.7` → Save → **Manual Deploy → Deploy latest commit**. وإن كنت تنشر يدوياً: تأكد أن Root Directory = `backend` وأن Build Command = `bash ../deploy/build.sh`. **الحل الجذري:** ارفع نسخة v7 من المشروع (متطلبات محدثة تصمد على أي إصدار Python) ثم أعد النشر |
 | فشل البناء في `pip install` (خطأ psycopg2) | Python 3.13 الافتراضي لا يوجد له wheels | تأكد من وجود `PYTHON_VERSION=3.12.7` في Environment |
 | `Application error` / فشل Health Check | `DATABASE_URL` خاطئة أو migrate فشل | افتح Logs → صحّح رابط Neon (لا تنسَ `?sslmode=require`) → Manual Deploy |
 | `DisallowedHost` | الدومين غير مسموح | أضفه إلى `ALLOWED_HOSTS` (مثل `.onrender.com`) |

@@ -1,4 +1,5 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation, useOutlet } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { useQuery } from '@tanstack/react-query';
@@ -28,6 +29,8 @@ export default function Layout() {
   const { user, logout, tokens } = useAuthStore();
   const { theme, toggleTheme } = useThemeStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const outlet = useOutlet();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
@@ -128,141 +131,233 @@ export default function Layout() {
     { path: '/profile', label: 'الملف الشخصي', icon: UserIcon },
   ].filter(item => !item.roles || (user && item.roles.includes(user.role)));
 
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex">
-      {/* Sidebar */}
-      <aside
-        className={`fixed lg:sticky top-0 right-0 z-40 h-screen w-72 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 transition-transform duration-300 ${
-          sidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'
-        }`}
+  const sidebarContent = (
+    <>
+      {/* Logo */}
+      <motion.div
+        className="flex items-center justify-between h-16 px-5 border-b border-gray-100 dark:border-gray-700/60"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
       >
-        <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-medical-600 rounded-xl flex items-center justify-center">
-              <Stethoscope className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="font-bold text-gray-900 dark:text-white">SecureMed</h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400">منصة صحية آمنة</p>
-            </div>
-          </div>
-          <button
-            className="lg:hidden p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-            onClick={() => setSidebarOpen(false)}
+        <div className="flex items-center gap-2.5">
+          <motion.div
+            className="relative w-10 h-10 bg-gradient-to-br from-primary-500 via-primary-600 to-medical-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary-600/30"
+            whileHover={{ rotate: -8, scale: 1.08 }}
+            transition={{ type: 'spring', stiffness: 300 }}
           >
-            <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-          </button>
+            <Stethoscope className="w-6 h-6 text-white" />
+            <span className="absolute -top-0.5 -left-0.5 w-2.5 h-2.5 rounded-full bg-medical-400 border-2 border-white dark:border-gray-800" />
+          </motion.div>
+          <div>
+            <h1 className="font-black font-heading text-gray-900 dark:text-white leading-tight">
+              Secure<span className="text-gradient">Med</span>
+            </h1>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">منصة صحية آمنة</p>
+          </div>
         </div>
+        <button
+          className="lg:hidden p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          onClick={() => setSidebarOpen(false)}
+        >
+          <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+        </button>
+      </motion.div>
 
-        <nav className="p-4 space-y-1">
-          {navItems.map((item) => (
+      {/* Nav — scrollable, with animated active pill */}
+      <nav className="flex-1 overflow-y-auto p-3.5 space-y-1">
+        {navItems.map((item, i) => (
+          <motion.div
+            key={item.path}
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.04 * i, duration: 0.35 }}
+          >
             <NavLink
-              key={item.path}
               to={item.path}
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                `group relative flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                   isActive
-                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    ? 'text-primary-700 dark:text-primary-300'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-300'
                 }`
               }
             >
-              <item.icon className="w-5 h-5" />
-              <span className="flex-1">{item.label}</span>
-              {item.badge && item.badge > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                  {item.badge}
-                </span>
-              ) : null}
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.span
+                      layoutId="nav-active-pill"
+                      className="absolute inset-0 rounded-xl bg-gradient-to-l from-primary-500/15 to-medical-500/10 border border-primary-500/25 dark:border-primary-400/20"
+                      transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                    />
+                  )}
+                  {isActive && (
+                    <motion.span
+                      layoutId="nav-active-bar"
+                      className="absolute -right-1.5 top-1/2 -mt-3 h-6 w-1.5 rounded-full bg-gradient-to-b from-primary-500 to-medical-500"
+                      transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                    />
+                  )}
+                  <item.icon
+                    className={`w-5 h-5 relative z-10 transition-transform duration-200 group-hover:scale-110 ${
+                      isActive ? 'text-primary-600 dark:text-primary-300' : ''
+                    }`}
+                  />
+                  <span className="flex-1 relative z-10">{item.label}</span>
+                  {item.badge && item.badge > 0 ? (
+                    <motion.span
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="relative z-10 bg-gradient-to-l from-red-500 to-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-md shadow-red-500/30"
+                    >
+                      {item.badge}
+                    </motion.span>
+                  ) : null}
+                </>
+              )}
             </NavLink>
-          ))}
-        </nav>
+          </motion.div>
+        ))}
+      </nav>
 
+      {/* Bottom section */}
+      <div className="border-t border-gray-100 dark:border-gray-700/60 p-4 space-y-2">
         {/* Dark mode toggle */}
-        <div className="absolute bottom-20 left-0 right-0 px-4">
-          <button
-            onClick={toggleTheme}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-          >
+        <motion.button
+          onClick={toggleTheme}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
+          whileTap={{ scale: 0.97 }}
+        >
+          <AnimatePresence mode="wait" initial={false}>
             {theme === 'light' ? (
-              <>
+              <motion.span
+                key="moon"
+                className="flex items-center gap-2"
+                initial={{ rotate: -90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: 90, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+              >
                 <Moon className="w-4 h-4" />
                 الوضع الليلي
-              </>
+              </motion.span>
             ) : (
-              <>
+              <motion.span
+                key="sun"
+                className="flex items-center gap-2"
+                initial={{ rotate: 90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: -90, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+              >
                 <Sun className="w-4 h-4" />
                 الوضع النهاري
-              </>
+              </motion.span>
             )}
-          </button>
-        </div>
+          </AnimatePresence>
+        </motion.button>
 
         {/* User info */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center">
-              <span className="text-primary-700 dark:text-primary-400 font-semibold">
+        <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-gray-50 dark:bg-gray-700/40">
+          <div className="relative">
+            <div className="w-10 h-10 bg-gradient-to-br from-primary-500/20 to-medical-500/20 border border-primary-500/30 rounded-full flex items-center justify-center">
+              <span className="text-primary-700 dark:text-primary-300 font-bold">
                 {user?.full_name?.charAt(0) || 'م'}
               </span>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                {user?.full_name}
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {user ? roleLabels[user.role] : ''}
-              </p>
-            </div>
+            <span className="absolute bottom-0 left-0 w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-white dark:border-gray-800" />
           </div>
-          <button
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+              {user?.full_name}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {user ? roleLabels[user.role] : ''}
+            </p>
+          </div>
+          <motion.button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-colors"
+            title="تسجيل الخروج"
+            whileHover={{ scale: 1.1, rotate: -8 }}
+            whileTap={{ scale: 0.9 }}
           >
-            <LogOut className="w-4 h-4" />
-            تسجيل الخروج
-          </button>
+            <LogOut className="w-5 h-5" />
+          </motion.button>
         </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex">
+      {/* Desktop sidebar */}
+      <aside className="hidden lg:flex sticky top-0 right-0 h-screen w-72 flex-col bg-white/90 dark:bg-gray-900/80 backdrop-blur-xl border-l border-gray-100 dark:border-gray-700/60 z-40">
+        {sidebarContent}
       </aside>
 
-      {/* Overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      {/* Mobile sidebar */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-navy-900/60 backdrop-blur-sm z-30 lg:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSidebarOpen(false)}
+            />
+            <motion.aside
+              className="fixed lg:hidden top-0 right-0 z-40 h-screen w-72 flex flex-col bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 320, damping: 34 }}
+            >
+              {sidebarContent}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col min-h-screen min-w-0">
         {/* Mobile header */}
-        <header className="lg:hidden sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 h-16 flex items-center justify-between">
-          <button
+        <header className="lg:hidden sticky top-0 z-20 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-100 dark:border-gray-700/60 px-4 h-16 flex items-center justify-between">
+          <motion.button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
+            whileTap={{ scale: 0.9 }}
           >
             <Menu className="w-6 h-6 text-gray-600 dark:text-gray-300" />
-          </button>
+          </motion.button>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-primary-600 to-medical-600 rounded-lg flex items-center justify-center">
+            <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-medical-600 rounded-xl flex items-center justify-center shadow-md shadow-primary-600/25">
               <Stethoscope className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-gray-900 dark:text-white">SecureMed</span>
+            <span className="font-black font-heading text-gray-900 dark:text-white">
+              Secure<span className="text-gradient">Med</span>
+            </span>
           </div>
-          {/* Notifications bell for mobile */}
           <NavLink to="/notifications" className="relative p-2">
-            <Bell className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-            {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-                {unreadCount}
-              </span>
-            )}
+            <motion.div whileTap={{ scale: 0.85 }}>
+              <Bell className={`w-5 h-5 text-gray-600 dark:text-gray-300 ${unreadCount > 0 ? 'animate-heartbeat' : ''}`} />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 bg-gradient-to-l from-red-500 to-rose-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                  {unreadCount}
+                </span>
+              )}
+            </motion.div>
           </NavLink>
         </header>
 
+        {/* Route transitions */}
         <main className="flex-1 p-4 lg:p-8 overflow-x-auto">
-          <Outlet />
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div key={location.pathname}>{outlet}</motion.div>
+          </AnimatePresence>
         </main>
       </div>
 
@@ -273,14 +368,20 @@ export default function Layout() {
       <AIAssistant open={aiOpen} onClose={() => setAiOpen(false)} />
 
       {/* Floating AI button (bottom-left corner) */}
-      <button
+      <motion.button
         onClick={() => setAiOpen(true)}
-        className="fixed bottom-6 left-6 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-primary-600 to-medical-600 text-white shadow-lg shadow-primary-600/30 hover:scale-105 transition-transform flex items-center justify-center"
+        className="fixed bottom-6 left-6 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-primary-500 via-primary-600 to-medical-600 text-white shadow-xl shadow-primary-600/40 flex items-center justify-center"
         title="المساعد الذكي"
         aria-label="فتح المساعد الذكي"
+        whileHover={{ scale: 1.1, rotate: -8 }}
+        whileTap={{ scale: 0.92 }}
+        initial={{ opacity: 0, scale: 0 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.6, type: 'spring', stiffness: 260, damping: 18 }}
       >
-        <Bot className="w-6 h-6" />
-      </button>
+        <span className="absolute inset-0 rounded-full bg-primary-500/40 animate-pulse-ring" />
+        <Bot className="w-6 h-6 relative" />
+      </motion.button>
     </div>
   );
 }

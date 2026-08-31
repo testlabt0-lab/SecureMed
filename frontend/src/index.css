@@ -15,26 +15,77 @@
 
   /* Dark mode */
   .dark body {
-    @apply bg-gray-900 text-gray-100;
+    @apply bg-gray-950 text-gray-100;
+  }
+
+  h1, h2, h3 {
+    @apply font-heading;
+  }
+
+  ::selection {
+    @apply bg-primary-600/20 text-primary-900 dark:text-primary-100;
   }
 }
 
 @layer components {
+  /* ============ Buttons ============ */
   .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply relative overflow-hidden bg-gradient-to-l from-primary-600 via-primary-600 to-medical-600 bg-[length:200%_auto] hover:bg-right text-white font-semibold py-2.5 px-5 rounded-xl shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/35 transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0;
   }
   .btn-secondary {
-    @apply bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg transition-colors duration-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700;
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2.5 px-5 rounded-xl border border-gray-200 shadow-sm hover:shadow transition-all duration-200 hover:-translate-y-0.5 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+    @apply bg-gradient-to-l from-red-600 to-rose-600 text-white font-semibold py-2.5 px-5 rounded-xl shadow-lg shadow-red-600/25 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl;
   }
+
+  /* ============ Inputs ============ */
   .input-field {
-    @apply w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all dark:bg-gray-800 dark:border-gray-700 dark:text-white;
+    @apply w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white/80 backdrop-blur-sm focus:ring-4 focus:ring-primary-500/15 focus:border-primary-500 focus:bg-white transition-all duration-200 outline-none dark:bg-gray-800/80 dark:border-gray-700 dark:text-white dark:focus:bg-gray-800;
   }
+  .input-icon {
+    @apply absolute right-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 transition-colors pointer-events-none;
+  }
+
+  /* ============ Cards ============ */
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-6 dark:bg-gray-800 dark:border-gray-700;
+    @apply bg-white rounded-2xl shadow-card border border-gray-100 p-6 dark:bg-gray-800/70 dark:border-gray-700/60 dark:shadow-none;
   }
+  .card-hover {
+    @apply transition-all duration-300 hover:-translate-y-1.5 hover:shadow-card-hover hover:border-primary-200/70 dark:hover:border-primary-500/40 cursor-pointer will-change-transform;
+  }
+  /* animated shine sweep on hover */
+  .card-shine {
+    @apply relative overflow-hidden;
+  }
+  .card-shine::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-l from-transparent via-white/25 to-transparent transition-transform duration-700 pointer-events-none;
+  }
+  .card-shine:hover::after {
+    @apply translate-x-full;
+  }
+
+  /* ============ Glassmorphism ============ */
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-card dark:bg-gray-900/60 dark:border-gray-700/50;
+  }
+  .glass-strong {
+    @apply bg-white/85 backdrop-blur-2xl border border-white/70 shadow-xl dark:bg-gray-900/80 dark:border-gray-700/60;
+  }
+  .glass-chip {
+    @apply bg-white/15 backdrop-blur-md border border-white/25 text-white;
+  }
+
+  /* ============ Gradient text ============ */
+  .text-gradient {
+    @apply bg-gradient-to-l from-primary-600 via-indigo-500 to-medical-500 bg-clip-text text-transparent;
+  }
+  .text-gradient-animated {
+    @apply bg-gradient-to-l from-primary-600 via-medical-500 to-primary-600 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-x;
+  }
+
+  /* ============ Badges ============ */
   .badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
@@ -42,9 +93,53 @@
   .badge-warning { @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400; }
   .badge-danger { @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400; }
   .badge-info { @apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400; }
+
+  /* ============ Icon tiles ============ */
+  .icon-tile {
+    @apply w-12 h-12 rounded-xl flex items-center justify-center shadow-inner-light;
+  }
+
+  /* ============ Backgrounds ============ */
+  .bg-grid {
+    background-image:
+      linear-gradient(rgba(100, 116, 139, 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(100, 116, 139, 0.07) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .bg-grid-dark {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .bg-dots {
+    background-image: radial-gradient(rgba(100, 116, 139, 0.14) 1.2px, transparent 1.2px);
+    background-size: 22px 22px;
+  }
 }
 
-/* Custom scrollbar */
+/* ================= ECG heartbeat line ================= */
+.ecg-path {
+  stroke-dasharray: 1000;
+  animation: ecgDash 3.2s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(13, 148, 136, 0.55));
+}
+@keyframes ecgDash {
+  0% { stroke-dashoffset: 1000; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* ================= Skeleton shimmer ================= */
+.skeleton {
+  @apply relative overflow-hidden bg-gray-200/70 dark:bg-gray-700/60 rounded-xl;
+}
+.skeleton::after {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-l from-transparent via-white/50 to-transparent animate-shimmer dark:via-white/10;
+  background-size: 200% 100%;
+}
+
+/* ================= Scrollbar ================= */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -53,15 +148,27 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: linear-gradient(180deg, #94a3b8, #64748b);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #64748b, #475569);
 }
 .dark ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: linear-gradient(180deg, #475569, #334155);
 }
 
-/* Smooth transitions for dark mode */
+/* ================= Smooth transitions for dark mode ================= */
 * {
   transition-property: background-color, border-color;
   transition-duration: 200ms;
+}
+
+/* ================= Reduced motion accessibility ================= */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -75,21 +75,54 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, attrs):
         email = attrs.get('email')
         password = attrs.get('password')
+        request = self.context.get('request')
 
         if email and password:
             try:
                 user = User.objects.get(email=email)
             except User.DoesNotExist:
+                # Log failed attempt with invalid email
+                if request:
+                    from apps.accounts.models import LoginAttempt
+                    LoginAttempt.log_attempt(
+                        request=request,
+                        success=False,
+                        email=email,
+                        failure_reason='INVALID_EMAIL',
+                        auth_method='PASSWORD',
+                    )
                 raise serializers.ValidationError(
                     {'detail': 'بيانات الاعتماد غير صحيحة'}
                 )
 
             if not user.is_active:
+                # Log failed attempt with disabled account
+                if request:
+                    from apps.accounts.models import LoginAttempt
+                    LoginAttempt.log_attempt(
+                        request=request,
+                        success=False,
+                        email=email,
+                        user=user,
+                        failure_reason='ACCOUNT_DISABLED',
+                        auth_method='PASSWORD',
+                    )
                 raise serializers.ValidationError(
                     {'detail': 'هذا الحساب معطل — اتصل بمدير النظام'}
                 )
 
             if user.is_locked:
+                # Log failed attempt with locked account
+                if request:
+                    from apps.accounts.models import LoginAttempt
+                    LoginAttempt.log_attempt(
+                        request=request,
+                        success=False,
+                        email=email,
+                        user=user,
+                        failure_reason='ACCOUNT_LOCKED',
+                        auth_method='PASSWORD',
+                    )
                 raise serializers.ValidationError(
                     {'detail': f'الحساب مقفل حتى {user.locked_until}'}
                 )
@@ -99,6 +132,21 @@ class LoginSerializer(serializers.Serializer):
                 if user.failed_login_attempts >= 5:
                     user.lock_account()
                 user.save()
+                
+                # Log failed login attempt
+                if request:
+                    from apps.accounts.models import LoginAttempt
+                    device_fp = getattr(request, 'device_fp', None)
+                    LoginAttempt.log_attempt(
+                        request=request,
+                        success=False,
+                        email=email,
+                        user=user,
+                        failure_reason='INVALID_PASSWORD',
+                        auth_method='PASSWORD',
+                        device_fp=device_fp,
+                    )
+                
                 raise serializers.ValidationError(
                     {'detail': 'بيانات الاعتماد غير صحيحة'}
                 )

@@ -16,6 +16,8 @@ SECRET_KEY = config(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
+# CRITICAL: DEBUG must be explicitly set to True in development
+# Default is False for security - never enable in production
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
@@ -43,7 +45,7 @@ INSTALLED_APPS = [
     'apps.basins',
     'apps.backups',
     'apps.accounts',
-    'apps.channels',
+    'apps.channels',  # SecureMed channels app (WebSocket rooms)
     'apps.patients',
     'apps.security',
     'apps.audit',
@@ -51,6 +53,7 @@ INSTALLED_APPS = [
     'apps.analytics',
     'apps.reports',
     'apps.ai',
+    'apps.websocket',  # WebSocket app for real-time communication
 ]
 
 MIDDLEWARE = [
@@ -60,6 +63,8 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     # Custom WAF middleware (DB Firewall - security requirement #5)
     'apps.security.middleware.WAFMiddleware',
+    # Device fingerprinting middleware for forensic evidence collection
+    'apps.security.middleware.DeviceFingerprintMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     # CSRF middleware (security requirement #1 - Cookie flags)
@@ -340,7 +345,23 @@ if _REDIS_URL:
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
             'LOCATION': _REDIS_URL,
+        },
+        # Dedicated cache for WebSocket channel layers
+        'channel_layer': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': _REDIS_URL,
         }
+    }
+    # Django Channels - WebSocket support (replaces polling with real-time connections)
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [_REDIS_URL],
+                'capacity': 1500,  # Max messages to queue before dropping
+                'expiry': 10,  # Message expiry time in seconds
+            },
+        },
     }
 else:
     _CACHE_DIR = BASE_DIR / 'cache'
@@ -351,6 +372,13 @@ else:
             'LOCATION': str(_CACHE_DIR),
             'OPTIONS': {'MAX_ENTRIES': 10000},
         }
+    }
+    # In-memory channel layer for development without Redis
+    # Note: Only works with single worker; use Redis in production
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
     }
 
 # Rate limiting

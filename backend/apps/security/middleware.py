@@ -262,3 +262,170 @@ class RateLimitMiddleware:
         if x_forwarded:
             return x_forwarded.split(',')[0].strip()
         return request.META.get('REMOTE_ADDR', '0.0.0.0')
+
+
+class DeviceFingerprintMiddleware:
+    """
+    Middleware to collect device fingerprint data for forensic analysis.
+    
+    This middleware captures detailed device information on every request,
+    including:
+    - MAC address (when available)
+    - User-Agent and browser details
+    - Screen resolution, timezone, language
+    - Network information (IP, X-Forwarded headers)
+    - Canvas fingerprint (if provided by frontend)
+    - TLS fingerprint
+    
+    All data is stored for forensic evidence and can be used to identify
+    and track malicious devices.
+    """
+    
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.logger = logging.getLogger('security.fingerprint')
+
+    def __call__(self, request):
+        # Skip fingerprinting for admin and health check endpoints
+        if request.path.startswith('/admin/') or request.path == '/health/':
+            return self.get_response(request)
+        
+        # Process fingerprint asynchronously to avoid blocking
+        # Store fingerprint data in request for later use
+        request.device_fp = None
+        
+        try:
+            # Extract fingerprint data from request
+            fingerprint_data = self._extract_fingerprint_data(request)
+            
+            # Get or create device fingerprint
+            from apps.security.models import DeviceFingerprint
+            fp, created = DeviceFingerprint.get_or_create_from_request(
+                request, fingerprint_data
+            )
+            request.device_fp = fp
+            
+            # Log new devices for security monitoring
+            if created:
+                self.logger.info(
+                    f"NEW_DEVICE | Hash={fp.fingerprint_hash[:16]}... | "
+                    f"IP={fp.ip_address} | UA={fp.user_agent[:100] if fp.user_agent else 'N/A'}"
+                )
+            
+            # Check if device is blacklisted
+            if fp.is_blacklisted:
+                self.logger.warning(
+                    f"BLACKLISTED_DEVICE | Hash={fp.fingerprint_hash[:16]}... | "
+                    f"IP={fp.ip_address} | Path={request.path}"
+                )
+                return JsonResponse({
+                    'error': 'تم حظر هذا الجهاز',
+                    'code': 'DEVICE_BLACKLISTED',
+                }, status=403)
+                
+        except Exception as e:
+            # Don't block requests if fingerprinting fails
+            self.logger.error(f"FINGERPRINT_ERROR: {e}", exc_info=True)
+        
+        response = self.get_response(request)
+        
+        # Add fingerprint ID to response headers for debugging
+        if hasattr(request, 'device_fp') and request.device_fp:
+            response['X-Device-FP'] = request.device_fp.fingerprint_hash[:16]
+        
+        return response
+
+    def _extract_fingerprint_data(self, request):
+        """Extract fingerprint data from request."""
+        import hashlib
+        from django.utils import timezone
+        
+        # Parse User-Agent for browser/platform info
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+        platform = 'Unknown'
+        browser = 'Unknown'
+        device_type = 'unknown'
+        
+        # Simple UA parsing (in production, use a library like ua-parser)
+        ua_lower = user_agent.lower()
+        if 'windows' in ua_lower:
+            platform = 'Windows'
+        elif 'mac os' in ua_lower or 'macos' in ua_lower:
+            platform = 'macOS'
+        elif 'linux' in ua_lower:
+            platform = 'Linux'
+        elif 'android' in ua_lower:
+            platform = 'Android'
+            device_type = 'mobile'
+        elif 'iphone' in ua_lower or 'ipad' in ua_lower:
+            platform = 'iOS'
+            device_type = 'mobile' if 'iphone' in ua_lower else 'tablet'
+        
+        if 'chrome' in ua_lower and 'edg' not in ua_lower:
+            browser = 'Chrome'
+        elif 'firefox' in ua_lower:
+            browser = 'Firefox'
+        elif 'safari' in ua_lower and 'chrome' not in ua_lower:
+            browser = 'Safari'
+        elif 'edg' in ua_lower:
+            browser = 'Edge'
+        elif 'msie' in ua_lower or 'trident' in ua_lower:
+            browser = 'Internet Explorer'
+        
+        # Check for bot patterns
+        bot_patterns = ['bot', 'crawler', 'spider', 'scraper', 'curl', 'wget', 'python']
+        if any(pattern in ua_lower for pattern in bot_patterns):
+            device_type = 'bot'
+        
+        # Get fingerprint data from headers (sent by frontend JS)
+        mac_address = request.META.get('HTTP_X_DEVICE_MAC', None)
+        canvas_fingerprint = request.META.get('HTTP_X_CANVAS_FP', None)
+        screen_resolution = request.META.get('HTTP_X_SCREEN_RES', None)
+        timezone_offset = request.META.get('HTTP_X_TIMEZONE', None)
+        language = request.META.get('HTTP_ACCEPT_LANGUAGE', '').split(',')[0]
+        webrtc_ip = request.META.get('HTTP_X_WEBRTC_IP', None)
+        tls_fingerprint = request.META.get('HTTP_X_TLS_FP', None)
+        
+        # Generate combined fingerprint hash
+        hash_components = [
+            user_agent,
+            request.META.get('REMOTE_ADDR', ''),
+            platform,
+            browser,
+            screen_resolution or '',
+            timezone_offset or '',
+            language,
+            canvas_fingerprint or '',
+        ]
+        hash_source = '|'.join(hash_components)
+        fingerprint_hash = hashlib.sha256(hash_source.encode()).hexdigest()
+        
+        # Build fingerprint data dict
+        fingerprint_data = {
+            'fingerprint_hash': fingerprint_hash,
+            'mac_address': mac_address,
+            'user_agent': user_agent[:500],  # Limit length
+            'platform': platform,
+            'browser': browser,
+            'device_type': device_type,
+            'screen_resolution': screen_resolution,
+            'browser_timezone': timezone_offset,
+            'language': language,
+            'canvas_fingerprint': canvas_fingerprint,
+            'webrtc_ip': webrtc_ip,
+            'tls_fingerprint': tls_fingerprint,
+            'metadata': {
+                'path': request.path,
+                'method': request.method,
+                'timestamp': timezone.now().isoformat(),
+            }
+        }
+        
+        return fingerprint_data
+
+    def _get_client_ip(self, request):
+        """Get client IP from request."""
+        x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded:
+            return x_forwarded.split(',')[0].strip()
+        return request.META.get('REMOTE_ADDR', '0.0.0.0')

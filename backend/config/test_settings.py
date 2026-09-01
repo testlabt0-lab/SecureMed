@@ -71,6 +71,13 @@ CACHES = {
     }
 }
 
+# Use in-memory channel layer for tests (no Redis required)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    }
+}
+
 # Remove django_ratelimit from INSTALLED_APPS to avoid cache check
 INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'django_ratelimit']
 # Remove ratelimit from MIDDLEWARE

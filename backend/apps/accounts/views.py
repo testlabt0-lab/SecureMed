@@ -19,7 +19,7 @@ from django.db import transaction
 from django.core.cache import cache
 from django.db.models import Q
 
-from apps.accounts.models import User, BiometricProfile
+from apps.accounts.models import User, BiometricProfile, LoginAttempt
 from apps.accounts.serializers import (
     UserSerializer, UserCreateSerializer, LoginSerializer,
     BiometricEnrollSerializer, BiometricChallengeSerializer,
@@ -28,6 +28,7 @@ from apps.accounts.serializers import (
 from apps.audit.utils import log_security_event
 from apps.security.throttling import BiometricRateThrottle
 from apps.security.crypto import encrypt_field, decrypt_field
+from apps.security.models import DeviceFingerprint
 
 
 def get_tokens_for_user(user):
@@ -56,14 +57,29 @@ class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        serializer = LoginSerializer(data=request.data)
+        serializer = LoginSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
+
+        # Get device fingerprint from middleware
+        device_fp = getattr(request, 'device_fp', None)
 
         # Two-factor authentication branch (TOTP)
         if user.mfa_enabled and user.mfa_secret:
             mfa_token = secrets.token_urlsafe(32)
             cache.set(f'mfa_pending:{mfa_token}', str(user.id), timeout=300)  # 5 min
+            
+            # Log login attempt with device fingerprint
+            LoginAttempt.log_attempt(
+                request=request,
+                success=True,
+                email=user.email,
+                user=user,
+                auth_method='MFA',
+                device_fp=device_fp,
+                extra_metadata={'mfa_pending': True}
+            )
+            
             log_security_event(
                 user=user,
                 event_type='LOGIN_SUCCESS',
@@ -82,6 +98,17 @@ class LoginView(APIView):
         user.save(update_fields=['last_login', 'last_login_ip'])
 
         tokens = get_tokens_for_user(user)
+        
+        # Log successful login with full device fingerprint
+        LoginAttempt.log_attempt(
+            request=request,
+            success=True,
+            email=user.email,
+            user=user,
+            auth_method='PASSWORD',
+            device_fp=device_fp,
+        )
+        
         log_security_event(
             user=user,
             event_type='LOGIN_SUCCESS',

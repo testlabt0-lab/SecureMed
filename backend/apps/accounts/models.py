@@ -135,6 +135,381 @@ class User(AbstractUser):
         self.save(update_fields=['failed_login_attempts', 'locked_until'])
 
 
+class LoginAttempt(models.Model):
+    """
+    Track all login attempts for forensic analysis and security monitoring.
+    
+    This model stores detailed information about every login attempt,
+    including device fingerprint data, to help identify and prove
+    malicious activity in case of a security incident.
+    """
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # User association (null for failed attempts with wrong email)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='login_attempts',
+        help_text="User account (if authentication reached this stage)"
+    )
+    
+    # Attempt result
+    success = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Whether the login attempt was successful"
+    )
+    
+    failure_reason = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        choices=[
+            ('INVALID_EMAIL', 'Email not found'),
+            ('INVALID_PASSWORD', 'Wrong password'),
+            ('ACCOUNT_LOCKED', 'Account locked'),
+            ('ACCOUNT_DISABLED', 'Account disabled'),
+            ('MFA_REQUIRED', 'MFA verification required'),
+            ('MFA_FAILED', 'MFA verification failed'),
+            ('BIOMETRIC_FAILED', 'Biometric verification failed'),
+            ('DEVICE_BLACKLISTED', 'Device blacklisted'),
+            ('SUSPICIOUS_ACTIVITY', 'Suspicious activity detected'),
+            ('RATE_LIMITED', 'Rate limit exceeded'),
+        ],
+        help_text="Reason for failure (if applicable)"
+    )
+    
+    # === Device Fingerprint Data ===
+    # These fields are populated from DeviceFingerprint middleware
+    device_fingerprint = models.ForeignKey(
+        'security.DeviceFingerprint',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='login_attempts',
+        help_text="Associated device fingerprint"
+    )
+    
+    mac_address = models.CharField(
+        max_length=17,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="MAC address (critical forensic evidence)"
+    )
+    
+    ip_address = models.GenericIPAddressField(
+        protocol='both',
+        db_index=True,
+        help_text="Client IP address"
+    )
+    
+    user_agent = models.TextField(
+        null=True,
+        blank=True,
+        help_text="User-Agent string"
+    )
+    
+    platform = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Operating system platform"
+    )
+    
+    browser = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Browser name"
+    )
+    
+    screen_resolution = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Screen resolution"
+    )
+    
+    browser_timezone = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Browser timezone"
+    )
+    
+    language = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Browser language"
+    )
+    
+    canvas_fingerprint = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="Canvas fingerprint hash"
+    )
+    
+    webrtc_ip = models.GenericIPAddressField(
+        protocol='both',
+        null=True,
+        blank=True,
+        help_text="WebRTC leaked IP"
+    )
+    
+    tls_fingerprint = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="TLS fingerprint (JA3)"
+    )
+    
+    # === Authentication Method ===
+    auth_method = models.CharField(
+        max_length=50,
+        choices=[
+            ('PASSWORD', 'Password'),
+            ('MFA', 'Multi-Factor Authentication'),
+            ('BIOMETRIC', 'Biometric'),
+            ('RECOVERY', 'Recovery Code'),
+        ],
+        help_text="Authentication method used"
+    )
+    
+    # === Email/Identity Attempted ===
+    email_attempted = models.EmailField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Email address used in login attempt"
+    )
+    
+    # === Timestamps ===
+    timestamp = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        help_text="When the attempt occurred"
+    )
+    
+    # === Risk Assessment ===
+    risk_score = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Risk score 0-100 (calculated based on various factors)"
+    )
+    
+    risk_factors = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of risk factors detected"
+    )
+    
+    # === Additional Evidence ===
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional metadata about the login attempt"
+    )
+    
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['success', '-timestamp']),
+            models.Index(fields=['ip_address', '-timestamp']),
+            models.Index(fields=['mac_address']),
+            models.Index(fields=['email_attempted', '-timestamp']),
+            models.Index(fields=['user', '-timestamp']),
+            models.Index(fields=['auth_method']),
+            models.Index(fields=['risk_score']),
+        ]
+        verbose_name = "Login Attempt"
+        verbose_name_plural = "Login Attempts"
+    
+    def __str__(self):
+        status = "SUCCESS" if self.success else f"FAILED ({self.failure_reason})"
+        return f"{self.email_attempted or 'Unknown'} - {status} at {self.timestamp}"
+    
+    def calculate_risk_score(self):
+        """
+        Calculate risk score based on various factors.
+        This helps identify suspicious login attempts.
+        """
+        score = 0
+        factors = []
+        
+        # Failed attempt
+        if not self.success:
+            score += 10
+            factors.append('failed_attempt')
+        
+        # Check if MAC address is associated with previous failures
+        if self.mac_address:
+            failed_count = LoginAttempt.objects.filter(
+                mac_address=self.mac_address,
+                success=False,
+                timestamp__gte=timezone.now() - timezone.timedelta(hours=24)
+            ).count()
+            if failed_count > 3:
+                score += 20
+                factors.append(f'multiple_failures_same_device ({failed_count})')
+        
+        # Check IP reputation (multiple failed attempts from same IP)
+        if self.ip_address:
+            ip_failures = LoginAttempt.objects.filter(
+                ip_address=self.ip_address,
+                success=False,
+                timestamp__gte=timezone.now() - timezone.timedelta(hours=1)
+            ).count()
+            if ip_failures > 5:
+                score += 25
+                factors.append(f'suspicious_ip ({ip_failures} failures)')
+        
+        # Bot detection
+        if self.user_agent:
+            ua_lower = self.user_agent.lower()
+            bot_patterns = ['bot', 'crawler', 'spider', 'scraper', 'curl', 'wget']
+            if any(pattern in ua_lower for pattern in bot_patterns):
+                score += 15
+                factors.append('bot_detected')
+        
+        # Unusual timezone (optional: compare with user's historical timezones)
+        if self.browser_timezone and self.user:
+            # Could add logic to check if timezone differs from user's norm
+            pass
+        
+        # Missing critical fingerprint data (evasion attempt)
+        missing_data = []
+        if not self.mac_address:
+            missing_data.append('mac_address')
+        if not self.canvas_fingerprint:
+            missing_data.append('canvas_fingerprint')
+        if not self.tls_fingerprint:
+            missing_data.append('tls_fingerprint')
+        
+        if len(missing_data) >= 2:
+            score += 10
+            factors.append(f'missing_fingerprint_data ({len(missing_data)} fields)')
+        
+        # Cap score at 100
+        self.risk_score = min(100, score)
+        self.risk_factors = factors
+        
+        return self.risk_score, self.risk_factors
+    
+    @classmethod
+    def log_attempt(cls, request, success, email=None, user=None, 
+                   failure_reason=None, auth_method='PASSWORD',
+                   device_fp=None, extra_metadata=None):
+        """
+        Log a login attempt with comprehensive device fingerprint data.
+        
+        Args:
+            request: Django request object
+            success: Boolean indicating success
+            email: Email attempted
+            user: User object (if authenticated)
+            failure_reason: Reason for failure
+            auth_method: Authentication method used
+            device_fp: DeviceFingerprint object from middleware
+            extra_metadata: Additional metadata dict
+        
+        Returns:
+            LoginAttempt instance
+        """
+        from apps.security.models import DeviceFingerprint
+        
+        # Extract device fingerprint data
+        mac_address = None
+        canvas_fp = None
+        webrtc_ip = None
+        tls_fp = None
+        screen_res = None
+        tz_offset = None
+        language = request.META.get('HTTP_ACCEPT_LANGUAGE', '').split(',')[0] if request else None
+        
+        # Try to get from headers (set by frontend JS)
+        if request:
+            mac_address = request.META.get('HTTP_X_DEVICE_MAC')
+            canvas_fp = request.META.get('HTTP_X_CANVAS_FP')
+            webrtc_ip = request.META.get('HTTP_X_WEBRTC_IP')
+            tls_fp = request.META.get('HTTP_X_TLS_FP')
+            screen_res = request.META.get('HTTP_X_SCREEN_RES')
+            tz_offset = request.META.get('HTTP_X_TIMEZONE')
+        
+        # If we have a device fingerprint object, use its data
+        if device_fp:
+            mac_address = mac_address or device_fp.mac_address
+            canvas_fp = canvas_fp or device_fp.canvas_fingerprint
+            webrtc_ip = webrtc_ip or device_fp.webrtc_ip
+            tls_fp = tls_fp or device_fp.tls_fingerprint
+            screen_res = screen_res or device_fp.screen_resolution
+            tz_offset = tz_offset or device_fp.browser_timezone
+        
+        # Get IP and User-Agent
+        ip_address = request.META.get('REMOTE_ADDR', '0.0.0.0') if request else '0.0.0.0'
+        user_agent = request.META.get('HTTP_USER_AGENT', '') if request else ''
+        
+        # Parse UA for platform/browser
+        platform = 'Unknown'
+        browser = 'Unknown'
+        if request and hasattr(request, 'device_fp') and request.device_fp:
+            platform = request.device_fp.platform
+            browser = request.device_fp.browser
+        else:
+            ua_lower = user_agent.lower()
+            if 'windows' in ua_lower:
+                platform = 'Windows'
+            elif 'mac os' in ua_lower or 'macos' in ua_lower:
+                platform = 'macOS'
+            elif 'linux' in ua_lower:
+                platform = 'Linux'
+            elif 'android' in ua_lower:
+                platform = 'Android'
+            elif 'iphone' in ua_lower or 'ipad' in ua_lower:
+                platform = 'iOS'
+            
+            if 'chrome' in ua_lower and 'edg' not in ua_lower:
+                browser = 'Chrome'
+            elif 'firefox' in ua_lower:
+                browser = 'Firefox'
+            elif 'safari' in ua_lower and 'chrome' not in ua_lower:
+                browser = 'Safari'
+            elif 'edg' in ua_lower:
+                browser = 'Edge'
+        
+        # Create login attempt record
+        attempt = cls.objects.create(
+            user=user,
+            success=success,
+            failure_reason=failure_reason,
+            device_fingerprint=device_fp,
+            mac_address=mac_address,
+            ip_address=ip_address,
+            user_agent=user_agent[:500] if user_agent else '',
+            platform=platform,
+            browser=browser,
+            screen_resolution=screen_res,
+            browser_timezone=tz_offset,
+            language=language,
+            canvas_fingerprint=canvas_fp,
+            webrtc_ip=webrtc_ip,
+            tls_fingerprint=tls_fp,
+            auth_method=auth_method,
+            email_attempted=email,
+            metadata=extra_metadata or {},
+        )
+        
+        # Calculate and update risk score
+        attempt.calculate_risk_score()
+        attempt.save(update_fields=['risk_score', 'risk_factors'])
+        
+        return attempt
+
+
 class BiometricProfile(models.Model):
     """
     Stores biometric authentication data.

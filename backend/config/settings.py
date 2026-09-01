@@ -56,6 +56,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     # Security middleware (must be at the top)
     'django.middleware.security.SecurityMiddleware',
+    # Compress JSON/HTML responses (medical lists are text-heavy —
+    # ~80% smaller payloads, a direct win on mobile/cellular links)
+    'django.middleware.gzip.GZipMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     # Custom WAF middleware (DB Firewall - security requirement #5)

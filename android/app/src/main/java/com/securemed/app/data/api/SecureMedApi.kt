@@ -5,9 +5,6 @@ import retrofit2.http.*
 
 /**
  * Retrofit API interface for SecureMed backend.
- *
- * NOTE: list endpoints return the DRF paginated envelope {count,...,results}
- * (SecureMedPagination) — raw List<T> decodes would fail at runtime.
  */
 interface SecureMedApi {
 
@@ -25,7 +22,7 @@ interface SecureMedApi {
     suspend fun getCurrentUser(): User
 
     @POST("auth/biometric/enroll/")
-    suspend fun enrollBiometric(@Body request: BiometricEnrollRequest): Map<String, String>
+    suspend fun enrollBiometric(@Body request: BiometricEnrollRequest): Unit
 
     @POST("auth/biometric/challenge/")
     suspend fun getBiometricChallenge(@Body request: BiometricChallengeRequest): BiometricChallengeResponse
@@ -35,63 +32,20 @@ interface SecureMedApi {
 
     // ===== CHANNELS =====
     @GET("channels/")
-    suspend fun getChannels(): Paginated<Channel>
+    suspend fun getChannels(): List<Channel>
 
     @GET("channels/{id}/")
     suspend fun getChannel(@Path("id") id: String): Channel
 
     @GET("channels/{id}/members/")
-    suspend fun getChannelMembers(@Path("id") id: String): Paginated<ChannelMembership>
-
-    // ===== CHAT =====
-    @GET("channels/{id}/messages/")
-    suspend fun getMessages(
-        @Path("id") id: String,
-        @Query("after") after: String? = null,
-        @Query("limit") limit: Int = 200
-    ): List<ChatMessage>
-
-    @POST("channels/{id}/messages/")
-    suspend fun sendMessage(
-        @Path("id") id: String,
-        @Body request: ChatMessageRequest
-    ): ChatMessage
+    suspend fun getChannelMembers(@Path("id") id: String): List<ChannelMembership>
 
     // ===== PATIENTS =====
     @GET("patients/")
-    suspend fun getPatients(): Paginated<Patient>
+    suspend fun getPatients(): List<Patient>
 
     @GET("patients/records/")
-    suspend fun getMedicalRecords(@Query("channel") channelId: String? = null): Paginated<MedicalRecord>
-
-    // ===== MEDICATIONS =====
-    @GET("patients/medications/")
-    suspend fun getMedications(@Query("patient") patientId: String? = null): Paginated<Medication>
-
-    @POST("patients/medications/")
-    suspend fun createMedication(@Body request: MedicationCreateRequest): Medication
-
-    @GET("patients/medications/today/")
-    suspend fun getTodayDoses(@Query("patient") patientId: String? = null): TodayDosesResponse
-
-    @POST("patients/medications/log_dose/")
-    suspend fun logDose(@Body request: LogDoseRequest): MedicationLogResponse
-
-    @GET("patients/medications/adherence/")
-    suspend fun getAdherence(@Query("patient") patientId: String? = null): AdherenceStats
-
-    // ===== USERS (admin) =====
-    @GET("auth/users/")
-    suspend fun getUsers(@Query("search") search: String? = null): PaginatedUsers
-
-    @POST("auth/users/{id}/deactivate/")
-    suspend fun deactivateUser(@Path("id") id: String): Map<String, String>
-
-    @POST("auth/users/{id}/activate/")
-    suspend fun activateUser(@Path("id") id: String): Map<String, String>
-
-    @POST("auth/users/change_password/")
-    suspend fun changePassword(@Body request: ChangePasswordRequest): Map<String, String>
+    suspend fun getMedicalRecords(@Query("channel") channelId: String? = null): List<MedicalRecord>
 
     // ===== SECURITY =====
     @GET("security/dashboard/")
@@ -99,7 +53,7 @@ interface SecureMedApi {
 
     // ===== NOTIFICATIONS =====
     @GET("notifications/")
-    suspend fun getNotifications(): Paginated<Notification>
+    suspend fun getNotifications(): List<Notification>
 
     @GET("notifications/unread_count/")
     suspend fun getUnreadCount(): Map<String, Int>

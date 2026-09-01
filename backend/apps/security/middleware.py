@@ -207,10 +207,9 @@ class WAFMiddleware:
         response['Content-Security-Policy'] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
-            "font-src 'self' data: https://fonts.gstatic.com; "
+            "font-src 'self' data:; "
             "connect-src 'self'; "
             "frame-ancestors 'none';"
         )

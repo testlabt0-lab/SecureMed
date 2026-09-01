@@ -15,7 +15,10 @@ from apps.audit.utils import log_security_event
 class PatientViewSet(viewsets.ModelViewSet):
     """Patient management."""
 
-    queryset = Patient.objects.all().order_by('-created_at')
+    # select_related('basin'): PatientSerializer exposes basin_name via
+    # basin.name — without the join each serialized row triggered an extra
+    # DB round-trip to Neon (~20 extra queries per page over the WAN).
+    queryset = Patient.objects.select_related('basin').order_by('-created_at')
     serializer_class = PatientSerializer
 
     def get_permissions(self):
@@ -255,7 +258,11 @@ class PatientViewSet(viewsets.ModelViewSet):
 class MedicalRecordViewSet(viewsets.ModelViewSet):
     """Medical records management."""
 
-    queryset = MedicalRecord.objects.all().order_by('-created_at')
+    # select_related: serializer reads channel.name + created_by.full_name
+    # per row — avoid 2 extra queries per record on list responses.
+    queryset = MedicalRecord.objects.select_related(
+        'channel', 'created_by'
+    ).order_by('-created_at')
     serializer_class = MedicalRecordSerializer
 
     def get_queryset(self):
@@ -263,7 +270,9 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
         from django.db.models import Q
         user = self.request.user
         if user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
-            return MedicalRecord.objects.all().order_by('-created_at')
+            return MedicalRecord.objects.select_related(
+                'channel', 'created_by'
+            ).order_by('-created_at')
 
         # Get channels the user can view
         from apps.channels.models import Channel
@@ -272,7 +281,7 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
         )
         return MedicalRecord.objects.filter(
             channel__in=accessible_channels
-        ).order_by('-created_at')
+        ).select_related('channel', 'created_by').order_by('-created_at')
 
     def perform_create(self, serializer):
         """Create record - check user has permission in channel."""
@@ -300,256 +309,3 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
 
 # Helper import
 from django.db.models import Q
-
-
-# ============================================================
-# Medications — plans, today's schedule, adherence logging
-# ============================================================
-
-from datetime import datetime as _dt, timedelta as _timedelta
-from django.utils import timezone as _tz
-from apps.patients.models import Medication, MedicationLog
-from apps.patients.serializers import MedicationSerializer, MedicationLogSerializer
-
-
-class MedicationViewSet(viewsets.ModelViewSet):
-    """
-    Medication plan management with adherence support.
-
-    Custom actions:
-      GET  medications/today/      → today's dose schedule for accessible patients
-      POST medications/log_dose/   → mark a dose TAKEN / SKIPPED / MISSED
-      GET  medications/adherence/  → adherence percentage for the last 7 days
-    """
-    serializer_class = MedicationSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        user = self.request.user
-        qs = Medication.objects.select_related(
-            'patient', 'channel', 'prescribed_by'
-        )
-        if user.role not in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
-            qs = qs.filter(
-                Q(patient__channels__owner=user)
-                | Q(patient__channels__memberships__user=user,
-                    patient__channels__memberships__is_active=True)
-            ).distinct()
-        patient_param = self.request.query_params.get('patient')
-        if patient_param:
-            qs = qs.filter(patient_id=patient_param)
-        return qs
-
-    def perform_create(self, serializer):
-        medication = serializer.save()
-        log_security_event(
-            user=self.request.user,
-            event_type='MEDICATION_CREATED',
-            request=self.request,
-            details={
-                'medication_id': str(medication.id),
-                'patient_id': str(medication.patient_id),
-            }
-        )
-        # Notify case members so everyone follows the same plan
-        channel = medication.channel
-        if channel is not None:
-            from apps.notifications.utils import send_notification
-            from apps.notifications.models import Notification
-            from apps.channels.models import ChannelMembership
-            recipients = {medication.prescribed_by}
-            recipients |= set(
-                User.objects.filter(
-                    channel_memberships__channel=channel,
-                    channel_memberships__is_active=True,
-                )
-            )
-            times_text = '، '.join(medication.times)
-            for recipient in recipients - {self.request.user}:
-                send_notification(
-                    recipient=recipient,
-                    notification_type=Notification.Type.MEDICATION_REMINDER,
-                    title='خطة دواء جديدة',
-                    message=(
-                        f'تم إضافة دواء «{medication.name}» ({medication.dosage}) '
-                        f'للمريض {medication.patient.full_name} — '
-                        f'الجرعات يومياً: {times_text}'
-                    ),
-                    sender=self.request.user,
-                    priority=Notification.Priority.HIGH,
-                    related_object_type='patient',
-                    related_object_id=str(medication.patient_id),
-                )
-
-    def _accessible_patients(self):
-        user = self.request.user
-        if user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
-            return Patient.objects.all()
-        return Patient.objects.filter(
-            Q(channels__owner=user)
-            | Q(channels__memberships__user=user,
-                channels__memberships__is_active=True)
-        ).distinct()
-
-    @action(detail=False, methods=['get'])
-    def today(self, request):
-        """
-        Today's dose schedule across active medications, merged with the
-        adherence logs. Powers the mobile "Today" screen and reminders.
-        """
-        patient_param = request.query_params.get('patient')
-        patients = self._accessible_patients()
-        if patient_param:
-            patients = patients.filter(id=patient_param)
-
-        medications = Medication.objects.filter(
-            patient__in=patients, is_active=True
-        ).select_related('patient', 'prescribed_by')
-
-        now = _tz.now()
-        today = _tz.localdate()
-        day_start = _tz.make_aware(_dt.combine(today, _dt.min.time()))
-        day_end = day_start + _timedelta(days=1)
-
-        doses = []
-        for med in medications:
-            if not med.is_scheduled_today():
-                continue
-            logs = {
-                _tz.localtime(log.scheduled_for).isoformat(): log
-                for log in MedicationLog.objects.filter(
-                    medication=med,
-                    scheduled_for__gte=day_start,
-                    scheduled_for__lt=day_end,
-                )
-            }
-            for hhmm in med.times:
-                hour, minute = (int(x) for x in hhmm.split(':'))
-                scheduled = day_start + _timedelta(hours=hour, minutes=minute)
-                log = logs.get(scheduled.isoformat())
-                if log is not None:
-                    dose_status = str(log.status)
-                elif scheduled < now:
-                    dose_status = MedicationLog.Status.MISSED
-                else:
-                    dose_status = 'PENDING'
-                doses.append({
-                    'medication_id': str(med.id),
-                    'patient_id': str(med.patient_id),
-                    'patient_name': med.patient.full_name,
-                    'medication_name': med.name,
-                    'dosage': med.dosage,
-                    'instructions': med.instructions,
-                    'time': hhmm,
-                    'scheduled_for': scheduled.isoformat(),
-                    'status': dose_status,
-                    'log_id': str(log.id) if log else None,
-                })
-        doses.sort(key=lambda d: d['scheduled_for'])
-        return Response({'date': str(today), 'doses': doses})
-
-    @action(detail=False, methods=['post'])
-    def log_dose(self, request):
-        """
-        Mark a dose as taken/skipped/missed.
-
-        Body: {medication_id, scheduled_for (ISO), status, notes?}
-        """
-        medication_id = request.data.get('medication_id')
-        scheduled_for = request.data.get('scheduled_for')
-        dose_status = request.data.get('status', 'TAKEN')
-
-        if not medication_id or not scheduled_for:
-            return Response(
-                {'detail': 'medication_id و scheduled_for مطلوبان'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if dose_status not in MedicationLog.Status.values:
-            return Response(
-                {'detail': 'الحالة يجب أن تكون TAKEN أو SKIPPED أو MISSED'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        medication = self.get_queryset().filter(id=medication_id).first()
-        if medication is None:
-            return Response(
-                {'detail': 'الدواء غير موجود أو غير مصرح لك به'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        parsed = parse_dt(scheduled_for)
-        if parsed is None:
-            return Response(
-                {'detail': 'صيغة التوقيت غير صالحة (ISO 8601 مطلوبة)'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        log, _created = MedicationLog.objects.update_or_create(
-            medication=medication,
-            scheduled_for=parsed,
-            defaults={
-                'status': dose_status,
-                'recorded_by': request.user,
-                'taken_at': _tz.now() if dose_status == MedicationLog.Status.TAKEN else None,
-                'notes': request.data.get('notes', ''),
-            }
-        )
-        return Response(
-            MedicationLogSerializer(log).data,
-            status=status.HTTP_201_CREATED
-        )
-
-    @action(detail=False, methods=['get'])
-    def adherence(self, request):
-        """Adherence over the last 7 days for accessible medications."""
-        patient_param = request.query_params.get('patient')
-        patients = self._accessible_patients()
-        if patient_param:
-            patients = patients.filter(id=patient_param)
-
-        medications = Medication.objects.filter(
-            patient__in=patients, is_active=True
-        )
-        now = _tz.now()
-        week_start = _tz.make_aware(
-            _dt.combine(_tz.localdate() - _timedelta(days=6), _dt.min.time())
-        )
-        total, taken = 0, 0
-        for med in medications:
-            for day_offset in range(7):
-                day = week_start + _timedelta(days=day_offset)
-                day_end = day + _timedelta(days=1)
-                if med.start_date > day.date():
-                    continue
-                if med.end_date and med.end_date < day.date():
-                    continue
-                for hhmm in med.times:
-                    hour, minute = (int(x) for x in hhmm.split(':'))
-                    scheduled = day + _timedelta(hours=hour, minutes=minute)
-                    if scheduled > now:
-                        continue
-                    total += 1
-                    exists = MedicationLog.objects.filter(
-                        medication=med,
-                        scheduled_for=scheduled,
-                        status=MedicationLog.Status.TAKEN,
-                    ).exists()
-                    if exists:
-                        taken += 1
-        percent = round((taken / total) * 100, 1) if total else 0.0
-        return Response({
-            'days': 7, 'total_doses': total, 'taken_doses': taken,
-            'adherence_percent': percent,
-        })
-
-
-def parse_dt(value):
-    """Parse an ISO datetime, coercing naive values to the active timezone."""
-    from django.utils.dateparse import parse_datetime
-    parsed = parse_datetime(value)
-    if parsed is None:
-        return None
-    if _tz.is_aware(parsed) is False:
-        parsed = _tz.make_aware(parsed)
-    return parsed
-
-
-from apps.accounts.models import User  # noqa: E402  (used in perform_create)

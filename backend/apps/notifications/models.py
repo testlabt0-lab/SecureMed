@@ -27,7 +27,6 @@ class Notification(models.Model):
         BIOMETRIC_ENROLLED = 'BIOMETRIC_ENROLLED', _('تسجيل بصمة')
         LOGIN_ALERT = 'LOGIN_ALERT', _('تنبيه دخول')
         SYSTEM_ANNOUNCEMENT = 'SYSTEM_ANNOUNCEMENT', _('إعلان نظامي')
-        MEDICATION_REMINDER = 'MEDICATION_REMINDER', _('تذكير دواء')
 
     class Priority(models.TextChoices):
         LOW = 'LOW', _('منخفضة')

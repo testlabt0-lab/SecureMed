@@ -10,12 +10,6 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 
-    <!-- Medication reminder notifications -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-
     <!-- Hardware requirements (optional) -->
     <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
 
@@ -41,17 +35,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Medication dose reminders -->
-        <receiver
-            android:name=".reminders.ReminderReceiver"
-            android:exported="false" />
-        <receiver
-            android:name=".reminders.BootReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

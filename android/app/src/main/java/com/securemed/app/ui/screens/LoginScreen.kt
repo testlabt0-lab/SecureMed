@@ -1,11 +1,10 @@
 package com.securemed.app.ui.screens
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Fingerprint
@@ -22,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import com.securemed.app.auth.BiometricManager
 import com.securemed.app.data.local.SecurePreferences
@@ -37,61 +37,19 @@ fun LoginScreen(
     val uiState by viewModel.uiState.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // Prefill the last account that used this device — biometric login
-    // becomes a single tap.
-    var email by remember { mutableStateOf(SecurePreferences.lastEmail ?: "") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var biometricMode by remember { mutableStateOf(false) }
-    var biometricHint by remember { mutableStateOf<String?>(null) }
-    var awaitingSignature by remember { mutableStateOf(false) }
+    var showBiometricPrompt by remember { mutableStateOf(false) }
 
     val biometricManager = remember { BiometricManager(context) }
     val isBiometricAvailable = remember { biometricManager.isBiometricAvailable() }
     val isBiometricEnabled = remember { SecurePreferences.biometricEnabled }
 
     LaunchedEffect(uiState) {
-        when (val state = uiState) {
-            is AuthUiState.Success -> {
-                onLoginSuccess()
-                viewModel.resetState()
-            }
-            is AuthUiState.ChallengeReady -> {
-                if (awaitingSignature) {
-                    // Sign the server challenge with the Keystore key
-                    // unlocked by the fingerprint prompt.
-                    val activity = context as? FragmentActivity
-                    if (activity == null) {
-                        biometricHint = "نافذة غير مدعومة للمصادقة البيومترية"
-                        awaitingSignature = false
-                        viewModel.resetState()
-                        return@LaunchedEffect
-                    }
-                    biometricManager.signChallenge(
-                        activity = activity,
-                        challenge = state.challenge.challenge,
-                        title = "المصادقة بالبصمة",
-                        subtitle = "استخدم بصمتك للدخول إلى SecureMed",
-                        description = "سيتم توقيع تحدٍ آمن بمفتاحك المحمي بالبصمة",
-                        onSuccess = { signature ->
-                            awaitingSignature = false
-                            viewModel.biometricLogin(
-                                state.challenge.challengeId,
-                                signature
-                            )
-                        },
-                        onError = { error ->
-                            awaitingSignature = false
-                            biometricHint = "❌ $error"
-                            viewModel.resetState()
-                        },
-                        onCancel = {
-                            awaitingSignature = false
-                            viewModel.resetState()
-                        }
-                    )
-                }
-            }
-            else -> Unit
+        if (uiState is AuthUiState.Success) {
+            onLoginSuccess()
+            viewModel.resetState()
         }
     }
 
@@ -108,7 +66,6 @@ fun LoginScreen(
                 )
             )
             .imePadding()
-            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -188,25 +145,13 @@ fun LoginScreen(
                     ) {
                         FilterChip(
                             selected = !biometricMode,
-                            onClick = {
-                                biometricMode = false
-                                biometricHint = null
-                            },
+                            onClick = { biometricMode = false },
                             label = { Text("كلمة المرور") },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
                             selected = biometricMode,
-                            onClick = {
-                                biometricMode = true
-                                biometricHint = when {
-                                    !isBiometricAvailable ->
-                                        "⚠️ " + biometricManager.availabilityMessage()
-                                    !isBiometricEnabled ->
-                                        "⚠️ البصمة غير مفعلة. سجل الدخول بكلمة المرور ثم فعّلها من الملف الشخصي"
-                                    else -> null
-                                }
-                            },
+                            onClick = { biometricMode = true },
                             label = { Text("البصمة") },
                             modifier = Modifier.weight(1f)
                         )
@@ -233,11 +178,15 @@ fun LoginScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth()
                         )
-                    }
-
-                    biometricHint?.let {
+                    } else if (!isBiometricAvailable) {
                         Text(
-                            text = it,
+                            text = "❌ البصمة غير متاحة على هذا الجهاز",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    } else if (!isBiometricEnabled) {
+                        Text(
+                            text = "⚠️ البصمة غير مفعلة. سجل الدخول بكلمة المرور أولاً ثم فعّل البصمة من الملف الشخصي",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -254,16 +203,12 @@ fun LoginScreen(
                     Button(
                         onClick = {
                             if (biometricMode) {
-                                biometricHint = null
-                                awaitingSignature = true
-                                viewModel.prepareBiometricLogin(email)
+                                showBiometricPrompt = true
                             } else {
                                 viewModel.login(email, password)
                             }
                         },
-                        enabled = email.isNotBlank() &&
-                            (!biometricMode || (isBiometricAvailable && isBiometricEnabled)) &&
-                            (uiState !is AuthUiState.Loading),
+                        enabled = !biometricMode || (isBiometricAvailable && isBiometricEnabled),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
@@ -297,6 +242,32 @@ fun LoginScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
+        }
+    }
+
+    // Biometric Prompt
+    if (showBiometricPrompt) {
+        LaunchedEffect(Unit) {
+            val activity = context as? FragmentActivity
+            activity?.let {
+                biometricManager.authenticate(
+                    activity = it,
+                    title = "المصادقة بالبصمة",
+                    subtitle = "استخدم بصمتك للدخول إلى SecureMed",
+                    description = "SecureMed يتطلب المصادقة البيومترية للوصول للبيانات الحساسة",
+                    onSuccess = { template ->
+                        viewModel.biometricLogin(email, template)
+                        showBiometricPrompt = false
+                    },
+                    onError = { error ->
+                        viewModel.resetState()
+                        showBiometricPrompt = false
+                    },
+                    onCancel = {
+                        showBiometricPrompt = false
+                    }
+                )
+            }
         }
     }
 }

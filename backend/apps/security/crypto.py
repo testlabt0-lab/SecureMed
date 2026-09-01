@@ -20,9 +20,16 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from django.conf import settings
 
 
-def _get_fernet_key():
-    """Derive a Fernet key from the encryption key."""
-    key = settings.ENCRYPTION_KEY.encode('utf-8')
+_FERNET_CACHE = {}  # ENCRYPTION_KEY value -> Fernet instance (per process)
+
+
+def _derive_fernet_key(encryption_key: str) -> bytes:
+    """Derive a Fernet key from an encryption key value.
+
+    ⚠️ Expensive: PBKDF2-HMAC-SHA256 with 100,000 iterations costs
+    ~50ms on a laptop CPU and ~150-200ms on Render's free-tier CPU.
+    Must never run per-field — get_fernet() caches the derived instance.
+    """
     salt = b'securemed_salt_v1'  # Static salt for key derivation
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -30,12 +37,32 @@ def _get_fernet_key():
         salt=salt,
         iterations=100000,
     )
-    return base64.urlsafe_b64encode(kdf.derive(key))
+    return base64.urlsafe_b64encode(kdf.derive(encryption_key.encode('utf-8')))
+
+
+def _get_fernet_key():
+    """Backward-compatible helper (uncached) for the active ENCRYPTION_KEY."""
+    return _derive_fernet_key(settings.ENCRYPTION_KEY)
 
 
 def get_fernet():
-    """Get Fernet instance for encryption/decryption."""
-    return Fernet(_get_fernet_key())
+    """Get Fernet instance for encryption/decryption.
+
+    The PBKDF2 derivation is deterministic (static salt + fixed key), so the
+    derived key is identical on every call — caching the Fernet instance per
+    key value changes nothing cryptographically (same key ⇒ same ciphertext,
+    fully compatible with all previously stored data), it only removes the
+    repeated 100k-iteration KDF cost.
+
+    Before this cache, every encrypted field paid ~150-200ms on Render:
+    a 20-patient page (5 encrypted fields each) = 100 KDF runs ≈ 17s.
+    """
+    key = settings.ENCRYPTION_KEY
+    instance = _FERNET_CACHE.get(key)
+    if instance is None:
+        instance = Fernet(_derive_fernet_key(key))
+        _FERNET_CACHE[key] = instance
+    return instance
 
 
 def encrypt_field(value):

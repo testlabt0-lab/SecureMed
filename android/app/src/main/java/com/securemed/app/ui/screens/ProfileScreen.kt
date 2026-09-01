@@ -3,32 +3,23 @@ package com.securemed.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.securemed.app.auth.BiometricManager
-import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.local.SecurePreferences
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +32,6 @@ fun ProfileScreen(
     val isBiometricAvailable = remember { biometricManager.isBiometricAvailable() }
     var showEnrollDialog by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    val repository = remember { SecureMedRepository() }
-    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -160,8 +149,8 @@ fun ProfileScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = if (!isBiometricAvailable) biometricManager.availabilityMessage()
-                                    else if (SecurePreferences.biometricEnabled) "✓ مفعلة — استخدمها في شاشة الدخول"
+                                    text = if (!isBiometricAvailable) "البصمة غير متاحة على هذا الجهاز"
+                                    else if (SecurePreferences.biometricEnabled) "✓ مفعلة"
                                     else "اضغط للتفعيل",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (SecurePreferences.biometricEnabled)
@@ -181,13 +170,12 @@ fun ProfileScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Change password (expandable)
-                    ChangePasswordSection(
-                        repository = repository,
-                        scope = scope,
-                        onStatus = { statusMessage = it }
+                    // Other security items
+                    ProfileInfoItem(
+                        icon = Icons.Default.Lock,
+                        title = "كلمة المرور",
+                        subtitle = "آخر تغيير: غير معروف"
                     )
-
                     Spacer(modifier = Modifier.height(8.dp))
                     ProfileInfoItem(
                         icon = Icons.Default.Shield,
@@ -259,9 +247,8 @@ fun ProfileScreen(
             text = {
                 Column {
                     Text(
-                        "سيتم إنشاء مفتاح توقيع آمن داخل محفظة الجهاز (Android Keystore) " +
-                        "محمي ببصمتك. لا تُغادر أي بيانات بيومترية الجهاز إطلاقاً — " +
-                        "يُرسل المفتاح العام فقط للخادم."
+                        "سيتم تسجيل بصمتك بشكل آمن. لن يتم تخزين البصمة الأصلية، " +
+                        "بل سيتم تخزين hash مشفر فقط (SHA-256 + salt)."
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -276,48 +263,23 @@ fun ProfileScreen(
                     onClick = {
                         showEnrollDialog = false
                         val activity = context as? FragmentActivity
-                        if (activity == null) {
-                            statusMessage = "❌ نافذة غير مدعومة للمصادقة البيومترية"
-                        } else if (!biometricManager.ensureSigningKey()) {
-                            statusMessage = "❌ تعذر إنشاء مفتاح التوقيع الآمن"
-                        } else {
-                            val publicKey = biometricManager.getPublicKeyBase64()
-                            if (publicKey == null) {
-                                statusMessage = "❌ تعذر قراءة المفتاح العام — أعد المحاولة"
-                            } else {
-                                // Prove the key is usable (and biometric-gated)
-                                // by signing a local enrollment challenge.
-                                val enrollChallenge =
-                                    "securemed-enroll-${SecurePreferences.deviceId}"
-                                biometricManager.signChallenge(
-                                    activity = activity,
-                                    challenge = enrollChallenge,
-                                    title = "تسجيل البصمة",
-                                    subtitle = "SecureMed",
-                                    description = "ضع إصبعك لتأمين مفتاح التسجيل",
-                                    onSuccess = { _ ->
-                                        scope.launch {
-                                            val deviceName =
-                                                "${android.os.Build.MODEL} (أندرويد)"
-                                            repository.enrollBiometric(deviceName, publicKey)
-                                                .onSuccess {
-                                                    statusMessage =
-                                                        "✓ تم تفعيل البصمة! استخدمها في شاشة الدخول"
-                                                }
-                                                .onFailure { error ->
-                                                    statusMessage = "❌ فشل التسجيل: ${error.message}"
-                                                    SecurePreferences.biometricEnabled = false
-                                                }
-                                        }
-                                    },
-                                    onError = { error ->
-                                        statusMessage = "❌ فشل: $error"
-                                    },
-                                    onCancel = {
-                                        statusMessage = "تم إلغاء التسجيل"
-                                    }
-                                )
-                            }
+                        activity?.let {
+                            biometricManager.authenticate(
+                                activity = it,
+                                title = "تسجيل البصمة",
+                                subtitle = "SecureMed",
+                                description = "ضع إصبعك على المستشعر لتسجيل بصمتك",
+                                onSuccess = { template ->
+                                    SecurePreferences.biometricEnabled = true
+                                    statusMessage = "✓ تم تسجيل البصمة بنجاح!"
+                                },
+                                onError = { error ->
+                                    statusMessage = "❌ فشل: $error"
+                                },
+                                onCancel = {
+                                    statusMessage = "تم إلغاء التسجيل"
+                                }
+                            )
                         }
                     }
                 ) { Text("متابعة") }
@@ -329,176 +291,6 @@ fun ProfileScreen(
             }
         )
     }
-}
-
-@Composable
-private fun ChangePasswordSection(
-    repository: SecureMedRepository,
-    scope: kotlinx.coroutines.CoroutineScope,
-    onStatus: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    var oldPassword by remember { mutableStateOf("") }
-    var newPassword by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var showPasswords by remember { mutableStateOf(false) }
-    var isSaving by remember { mutableStateOf(false) }
-    var localError by remember { mutableStateOf<String?>(null) }
-
-    Column {
-        Surface(
-            onClick = { expanded = !expanded },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Lock,
-                    null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "تغيير كلمة المرور",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        "يُنصح بتغييرها دورياً لحماية حسابك",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(if (expanded) "▲" else "▼")
-            }
-        }
-
-        if (expanded) {
-            Spacer(modifier = Modifier.height(10.dp))
-
-            PasswordField(
-                label = "كلمة المرور الحالية",
-                value = oldPassword,
-                onValueChange = { oldPassword = it; localError = null },
-                show = showPasswords,
-                onToggleShow = { showPasswords = !showPasswords }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            PasswordField(
-                label = "كلمة المرور الجديدة",
-                value = newPassword,
-                onValueChange = { newPassword = it; localError = null },
-                show = showPasswords,
-                onToggleShow = { showPasswords = !showPasswords }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            PasswordField(
-                label = "تأكيد كلمة المرور الجديدة",
-                value = confirmPassword,
-                onValueChange = { confirmPassword = it; localError = null },
-                show = showPasswords,
-                onToggleShow = { showPasswords = !showPasswords }
-            )
-
-            localError?.let {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Button(
-                onClick = {
-                    when {
-                        oldPassword.isBlank() || newPassword.isBlank() || confirmPassword.isBlank() ->
-                            localError = "يرجى إكمال جميع الحقول"
-                        newPassword.length < 8 ->
-                            localError = "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل"
-                        newPassword != confirmPassword ->
-                            localError = "كلمتا المرور غير متطابقتين"
-                        newPassword == oldPassword ->
-                            localError = "كلمة المرور الجديدة يجب أن تختلف عن الحالية"
-                        else -> {
-                            isSaving = true
-                            localError = null
-                            scope.launch {
-                                repository.changePassword(oldPassword, newPassword, confirmPassword)
-                                    .fold(
-                                        onSuccess = {
-                                            onStatus("✓ تم تغيير كلمة المرور بنجاح")
-                                            oldPassword = ""
-                                            newPassword = ""
-                                            confirmPassword = ""
-                                            expanded = false
-                                        },
-                                        onFailure = { error ->
-                                            val msg = error.message ?: ""
-                                            localError = when {
-                                                msg.contains("القديمة", ignoreCase = true) ->
-                                                    "كلمة المرور الحالية غير صحيحة"
-                                                else -> "تعذر التغيير — تحقق من الاتصال وحاول مجدداً"
-                                            }
-                                        }
-                                    )
-                                isSaving = false
-                            }
-                        }
-                    }
-                },
-                enabled = !isSaving,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Text("حفظ كلمة المرور الجديدة")
-            }
-        }
-    }
-}
-
-@Composable
-private fun PasswordField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    show: Boolean,
-    onToggleShow: () -> Unit
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text(label) },
-        singleLine = true,
-        visualTransformation = if (show) VisualTransformation.None
-        else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(onClick = onToggleShow) {
-                Icon(
-                    if (show) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    contentDescription = null
-                )
-            }
-        },
-        shape = RoundedCornerShape(12.dp)
-    )
 }
 
 @Composable

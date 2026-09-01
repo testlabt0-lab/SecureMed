@@ -4,18 +4,13 @@ URLs for patients app.
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from apps.patients.views import (
-    PatientViewSet, MedicalRecordViewSet, MedicationViewSet
-)
+from apps.patients.views import PatientViewSet, MedicalRecordViewSet
 from apps.patients.views_medical_file import MedicalFileViewSet
 
 router = DefaultRouter()
-# NOTE: specific prefixes MUST be registered before the catch-all '' prefix,
-# otherwise `^(?P<pk>[^/.]+)/$` (patient-detail) shadows them entirely.
-router.register(r'medications', MedicationViewSet, basename='medication')
+router.register(r'', PatientViewSet, basename='patient')
 router.register(r'records', MedicalRecordViewSet, basename='medical-record')
 router.register(r'files', MedicalFileViewSet, basename='medical-file')
-router.register(r'', PatientViewSet, basename='patient')
 
 urlpatterns = [
     path('', include(router.urls)),

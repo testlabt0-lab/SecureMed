@@ -28,11 +28,5 @@ if [ "${SEED_DEMO_DATA:-1}" = "1" ]; then
   python scripts/seed_data.py || echo "!! seed failed (continuing)"
 fi
 
-echo "==> Starting gunicorn on port ${PORT:-8000}"
-exec gunicorn config.wsgi:application \
-  --bind "0.0.0.0:${PORT:-8000}" \
-  --workers "${WEB_CONCURRENCY:-1}" \
-  --threads 8 \
-  --timeout 120 \
-  --access-logfile - \
-  --error-logfile -
+echo "==> Starting Daphne ASGI server on port ${PORT:-8000}"
+exec daphne -b 0.0.0.0 -p "${PORT:-8000}" config.asgi:application

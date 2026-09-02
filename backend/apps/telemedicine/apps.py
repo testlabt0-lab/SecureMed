@@ -1,0 +1,6 @@
+from django.apps import AppConfig
+
+class TelemedicineConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.telemedicine'
+    verbose_name = 'العيادة الافتراضية والتطبيب عن بعد'

@@ -239,16 +239,6 @@ export const labAPI = {
 
 // ============== Wards API ==============
 export const wardsAPI = {
-  // Wards
-  wards: () => api.get('/wards/wards/'),
-  createWard: (data: any) => api.post('/wards/wards/', data),
-  updateWard: (id: string, data: any) => api.patch(`/wards/wards/${id}/`, data),
-  
-  // Rooms
-  rooms: (wardId?: string) => api.get('/wards/rooms/', { params: { ward: wardId } }),
-  createRoom: (data: any) => api.post('/wards/rooms/', data),
-  
-  // Beds
   beds: (wardId?: string, status?: string) => api.get('/wards/beds/', { params: { ward: wardId, status } }),
   createBed: (data: any) => api.post('/wards/beds/', data),
   changeBedStatus: (id: string, status: string) => api.post(`/wards/beds/${id}/change_status/`, { status }),
@@ -262,3 +252,14 @@ export const wardsAPI = {
   stats: () => api.get('/wards/stats/'),
 };
 
+// ============== Telemedicine API ==============
+export const telemedicineAPI = {
+  consultations: (params?: any) => api.get('/telemedicine/consultations/', { params }),
+  getConsultation: (id: string) => api.get(`/telemedicine/consultations/${id}/`),
+  createConsultation: (data: any) => api.post('/telemedicine/consultations/', data),
+  joinConsultation: (id: string) => api.post(`/telemedicine/consultations/${id}/join/`),
+  completeConsultation: (id: string, data?: any) => api.post(`/telemedicine/consultations/${id}/complete/`, data || {}),
+  
+  messages: (consultationId: string) => api.get('/telemedicine/messages/', { params: { consultation: consultationId } }),
+  sendMessage: (data: any) => api.post('/telemedicine/messages/', data),
+};

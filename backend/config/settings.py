@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'apps.billing',
     'apps.lab',
     'apps.wards',
+    'apps.telemedicine',
     # Celery results backend (persists task results in DB)
     'django_celery_beat',
     'django_celery_results',

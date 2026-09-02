@@ -78,6 +78,7 @@ urlpatterns = [
     path('api/v1/billing/', include('apps.billing.urls')),
     path('api/v1/lab/', include('apps.lab.urls')),
     path('api/v1/wards/', include('apps.wards.urls')),
+    path('api/v1/telemedicine/', include('apps.telemedicine.urls')),
 
     # API documentation (Swagger / ReDoc)
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

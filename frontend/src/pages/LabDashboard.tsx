@@ -35,6 +35,7 @@ interface LabOrder {
   test_unit: string;
   test_normal_range_min: number | null;
   test_normal_range_max: number | null;
+  test_normal_range_text?: string;
   status: string;
   priority: string;
   clinical_notes: string;

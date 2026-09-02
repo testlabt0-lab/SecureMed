@@ -239,6 +239,16 @@ export const labAPI = {
 
 // ============== Wards API ==============
 export const wardsAPI = {
+  // Wards
+  wards: () => api.get('/wards/wards/'),
+  createWard: (data: any) => api.post('/wards/wards/', data),
+  updateWard: (id: string, data: any) => api.patch(`/wards/wards/${id}/`, data),
+  
+  // Rooms
+  rooms: (wardId?: string) => api.get('/wards/rooms/', { params: { ward: wardId } }),
+  createRoom: (data: any) => api.post('/wards/rooms/', data),
+  
+  // Beds
   beds: (wardId?: string, status?: string) => api.get('/wards/beds/', { params: { ward: wardId, status } }),
   createBed: (data: any) => api.post('/wards/beds/', data),
   changeBedStatus: (id: string, status: string) => api.post(`/wards/beds/${id}/change_status/`, { status }),

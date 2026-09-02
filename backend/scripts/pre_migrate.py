@@ -1,7 +1,7 @@
 """
 Pre-migration compatibility script.
-Fixes any legacy app name collisions in django_migrations table (e.g. channels -> app_channels)
-to guarantee zero InconsistentMigrationHistory errors across cloud PostgreSQL (Neon) and SQLite.
+Fixes legacy schema/migration state in django_migrations on PostgreSQL (Neon) and SQLite
+to guarantee clean, idempotent migrations on existing cloud databases.
 """
 import os
 import sys
@@ -27,25 +27,60 @@ def fix_migration_history():
                     conn.close()
                     return
 
-                # Update any legacy app name 'channels' to 'app_channels'
+                # 1. Update any legacy app name 'channels' to 'app_channels'
                 cursor.execute("UPDATE django_migrations SET app = 'app_channels' WHERE app = 'channels';")
 
-                # Check if patients.0001_initial exists while app_channels.0001_initial is missing
-                cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'patients' AND name = '0001_initial';")
-                patients_applied = cursor.fetchone()[0] > 0
+                # 2. Check if accounts_user table already has basin_id column
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'accounts_user' AND column_name = 'basin_id'
+                    );
+                """)
+                if cursor.fetchone()[0]:
+                    for mig_name in ['0001_initial', '0002_initial']:
+                        cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'accounts' AND name = %s;", [mig_name])
+                        if cursor.fetchone()[0] == 0:
+                            cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('accounts', %s, NOW());", [mig_name])
+                            print(f"pre_migrate: Registered accounts.{mig_name} (schema already present).")
 
-                if patients_applied:
-                    cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'app_channels' AND name = '0001_initial';")
-                    channels_applied = cursor.fetchone()[0] > 0
-                    if not channels_applied:
-                        cursor.execute("""
-                            INSERT INTO django_migrations (app, name, applied)
-                            VALUES ('app_channels', '0001_initial', NOW());
-                        """)
-                        print("pre_migrate: Registered app_channels.0001_initial in django_migrations.")
+                # 3. Check if app_channels tables exist
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_name IN ('app_channels_channel', 'channels_channel')
+                    );
+                """)
+                if cursor.fetchone()[0]:
+                    for mig_name in ['0001_initial', '0002_initial']:
+                        cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'app_channels' AND name = %s;", [mig_name])
+                        if cursor.fetchone()[0] == 0:
+                            cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('app_channels', %s, NOW());", [mig_name])
+                            print(f"pre_migrate: Registered app_channels.{mig_name}.")
+
+                # 4. Check if patients tables exist
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_name = 'patients_patient'
+                    );
+                """)
+                if cursor.fetchone()[0]:
+                    cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'patients' AND name = '0001_initial';")
+                    if cursor.fetchone()[0] == 0:
+                        cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('patients', '0001_initial', NOW());")
+                        print("pre_migrate: Registered patients.0001_initial.")
+
+                # 5. Clean up any obsolete migration rows that no longer exist in the repo
+                cursor.execute("""
+                    DELETE FROM django_migrations 
+                    WHERE (app = 'accounts' AND name NOT IN ('0001_initial', '0002_initial'))
+                       OR (app = 'app_channels' AND name NOT IN ('0001_initial', '0002_initial'))
+                       OR (app = 'patients' AND name NOT IN ('0001_initial'));
+                """)
 
             conn.close()
-            print("pre_migrate: Postgres migration history synchronized successfully.")
+            print("pre_migrate: Postgres migration history successfully aligned with current codebase.")
         except Exception as e:
             print(f"pre_migrate Postgres note: {e}")
 
@@ -61,17 +96,8 @@ def fix_migration_history():
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='django_migrations';")
                     if cursor.fetchone():
                         cursor.execute("UPDATE django_migrations SET app = 'app_channels' WHERE app = 'channels';")
-                        cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'patients' AND name = '0001_initial';")
-                        if cursor.fetchone()[0] > 0:
-                            cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'app_channels' AND name = '0001_initial';")
-                            if cursor.fetchone()[0] == 0:
-                                cursor.execute(
-                                    "INSERT INTO django_migrations (app, name, applied) VALUES ('app_channels', '0001_initial', ?);",
-                                    [datetime.utcnow().isoformat()]
-                                )
-                                print("pre_migrate: Registered app_channels.0001_initial in SQLite.")
                 conn.close()
-                print("pre_migrate: SQLite migration history checked.")
+                print("pre_migrate: SQLite checked.")
         except Exception as e:
             print(f"pre_migrate SQLite note: {e}")
 

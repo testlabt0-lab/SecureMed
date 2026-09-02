@@ -24,7 +24,7 @@ echo "==> Verifying migration history compatibility"
 python scripts/pre_migrate.py || true
 
 echo "==> Applying migrations"
-python manage.py migrate --noinput
+python manage.py migrate --fake-initial --noinput
 
 if [ "${SEED_DEMO_DATA:-1}" = "1" ]; then
   echo "==> Seeding demo data (idempotent — set SEED_DEMO_DATA=0 to disable)"

@@ -45,7 +45,27 @@ def fix_migration_history():
                 # 2. Update legacy app name 'channels' to 'app_channels' in django_migrations
                 cursor.execute("UPDATE django_migrations SET app = 'app_channels' WHERE app = 'channels';")
 
-                # 3. If app_channels_channel table does NOT exist, remove app_channels from django_migrations so Django creates it
+                # 3. Add any missing forensic columns to audit_auditlog table
+                cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'audit_auditlog');")
+                if cursor.fetchone()[0]:
+                    audit_columns = [
+                        ("mac_address", "VARCHAR(100) DEFAULT ''"),
+                        ("device_fingerprint", "VARCHAR(255) DEFAULT ''"),
+                        ("hostname", "VARCHAR(255) DEFAULT ''"),
+                        ("os_info", "VARCHAR(255) DEFAULT ''"),
+                        ("browser_info", "VARCHAR(255) DEFAULT ''"),
+                        ("screen_resolution", "VARCHAR(50) DEFAULT ''"),
+                        ("timezone_offset", "VARCHAR(50) DEFAULT ''"),
+                        ("language", "VARCHAR(50) DEFAULT ''"),
+                        ("session_id", "VARCHAR(255) DEFAULT ''"),
+                        ("geo_location", "VARCHAR(255) DEFAULT ''"),
+                        ("risk_score", "DOUBLE PRECISION DEFAULT 0.0"),
+                    ]
+                    for col_name, col_type in audit_columns:
+                        cursor.execute(f"ALTER TABLE audit_auditlog ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                    print("pre_migrate: Ensured all forensic columns exist in audit_auditlog.")
+
+                # 4. If app_channels_channel table does NOT exist, remove app_channels from django_migrations so Django creates it
                 cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_channels_channel');")
                 if not cursor.fetchone()[0]:
                     cursor.execute("DELETE FROM django_migrations WHERE app = 'app_channels';")
@@ -56,7 +76,7 @@ def fix_migration_history():
                         if cursor.fetchone()[0] == 0:
                             cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('app_channels', %s, NOW());", [mig])
 
-                # 4. Check if accounts_user already has basin_id
+                # 5. Check if accounts_user already has basin_id
                 cursor.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns 
@@ -70,7 +90,7 @@ def fix_migration_history():
                             cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('accounts', %s, NOW());", [mig])
                             print(f"pre_migrate: Registered accounts.{mig} (column basin_id exists).")
 
-                # 5. Check if patients_patient exists
+                # 6. Check if patients_patient exists
                 cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'patients_patient');")
                 if cursor.fetchone()[0]:
                     cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'patients' AND name = '0001_initial';")
@@ -79,12 +99,12 @@ def fix_migration_history():
                 else:
                     cursor.execute("DELETE FROM django_migrations WHERE app = 'patients';")
 
-                # 6. Check if appointments_appointment exists
+                # 7. Check if appointments_appointment exists
                 cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'appointments_appointment');")
                 if not cursor.fetchone()[0]:
                     cursor.execute("DELETE FROM django_migrations WHERE app = 'appointments';")
 
-                # 7. Clean up any obsolete migration rows that no longer exist in the codebase
+                # 8. Clean up any obsolete migration rows that no longer exist in the codebase
                 cursor.execute("""
                     DELETE FROM django_migrations 
                     WHERE (app = 'accounts' AND name NOT IN ('0001_initial', '0002_initial'))

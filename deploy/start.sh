@@ -20,6 +20,9 @@ if [ -z "${FRONTEND_URL:-}" ] && [ -n "${RENDER_EXTERNAL_URL:-}" ]; then
 fi
 echo "==> Frontend URL: ${FRONTEND_URL:-<not set — reset links will use localhost>}"
 
+echo "==> Verifying migration history compatibility"
+python scripts/pre_migrate.py || true
+
 echo "==> Applying migrations"
 python manage.py migrate --noinput
 

@@ -23,11 +23,11 @@ class DeviceTracker:
             device_info: Dictionary containing mac_address, device_fingerprint, os_info, etc.
         """
         if not user or not user.is_authenticated:
-            return
+            return None, False
 
         fingerprint = device_info.get('device_fingerprint')
         if not fingerprint:
-            return
+            return None, False
 
         # Check if device is already registered for this user
         device, created = DeviceRegistry.objects.update_or_create(

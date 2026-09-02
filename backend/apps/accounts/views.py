@@ -70,16 +70,17 @@ class LoginView(APIView):
             'os_info': request.META.get('HTTP_X_OS_INFO', ''),
             'browser_info': request.META.get('HTTP_X_BROWSER_INFO', '')
         }
-        device, is_new_device = DeviceTracker.track_device(user, request, device_info)
+        tracked = DeviceTracker.track_device(user, request, device_info)
+        device, is_new_device = tracked if tracked else (None, False)
         
-        # Determine if we need MFA (TOTP enabled OR Adaptive Auth for untrusted/new device)
+        # Determine if we need MFA (TOTP enabled OR Adaptive Auth for untrusted/new device if enabled)
         needs_mfa = False
         mfa_method = 'none'
         
         if user.mfa_enabled and user.mfa_secret:
             needs_mfa = True
             mfa_method = 'totp'
-        elif is_new_device or (device and not device.is_trusted):
+        elif getattr(settings, 'ADAPTIVE_MFA_ENABLED', False) and (is_new_device or (device and not device.is_trusted)):
             # Adaptive Authentication: Untrusted device needs email OTP
             needs_mfa = True
             mfa_method = 'email'

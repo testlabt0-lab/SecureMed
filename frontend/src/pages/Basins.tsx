@@ -75,7 +75,7 @@ export default function Basins() {
       toast.error(err.response?.data?.detail || 'فشل الحذف'),
   });
 
-  const basins = data?.data?.results || data?.data || [];
+  const basins = Array.isArray(data?.data?.results) ? data.data.results : (Array.isArray(data?.data) ? data.data : []);
   const overview = overviewData?.data;
 
   return (

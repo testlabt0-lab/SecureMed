@@ -43,11 +43,11 @@ export default function Channels() {
     },
   });
 
-  const channels = channelsData?.data?.results || channelsData?.data || [];
+  const channels = Array.isArray(channelsData?.data?.results) ? channelsData.data.results : (Array.isArray(channelsData?.data) ? channelsData.data : []);
   const totalCount = channelsData?.data?.count || 0;
   const totalPages = channelsData?.data?.total_pages || 1;
   const currentPage = channelsData?.data?.page || 1;
-  const patients = patientsData?.data?.results || patientsData?.data || [];
+  const patients = Array.isArray(patientsData?.data?.results) ? patientsData.data.results : (Array.isArray(patientsData?.data) ? patientsData.data : []);
 
   const handleSort = (field: string) => {
     if (sortBy === field) {

@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { securityAPI } from '../api/client';
+import { Shield, ShieldAlert, ShieldCheck, RefreshCw, Smartphone, Laptop, Calendar, Globe } from 'lucide-react';
+import PageHeader from '../components/common/PageHeader';
+import Card from '../components/common/Card';
 
 export const LoginHistory = () => {
   const [history, setHistory] = useState<any[]>([]);
@@ -10,69 +13,146 @@ export const LoginHistory = () => {
   }, []);
 
   const fetchHistory = async () => {
+    setLoading(true);
     try {
       const response = await securityAPI.loginHistory.list();
-      setHistory(response.data);
+      const data = response?.data;
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+      setHistory(list);
     } catch (error) {
       console.error('Error fetching login history:', error);
+      setHistory([]);
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) return <div className="p-4 text-center">جاري التحميل...</div>;
+  const historyList = Array.isArray(history) ? history : [];
+  const successCount = historyList.filter((r) => r.is_success).length;
+  const failedCount = historyList.filter((r) => !r.is_success).length;
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">سجل الدخول المفصل</h1>
-      
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الوقت</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">IP</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">المتصفح/نظام التشغيل</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الحالة</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">السبب (إذا فشل)</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {history.map((record) => (
-              <tr key={record.id}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {new Date(record.timestamp).toLocaleString('ar-EG')}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{record.ip_address}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {record.browser_info} / {record.os_info}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {record.is_success ? (
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      ناجح
-                    </span>
-                  ) : (
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                      فشل
-                    </span>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {record.failure_reason || '-'}
-                </td>
-              </tr>
-            ))}
-            {history.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
-                  لا توجد سجلات دخول
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-300">
+      <PageHeader
+        title="سجل محاولات الدخول المفصل"
+        description="تتبع كافة محاولات تسجيل الدخول الناجحة والفاشلة وعناوين IP وبصمات الأجهزة"
+        icon={<Shield className="w-8 h-8 text-primary-500" />}
+      >
+        <button
+          onClick={fetchHistory}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200 transition-colors shadow-sm"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-primary-500' : ''}`} />
+          تحديث
+        </button>
+      </PageHeader>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="p-4 text-center">
+          <div className="text-3xl font-extrabold text-primary-600 dark:text-primary-400">{historyList.length}</div>
+          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">إجمالي المحاولات</div>
+        </Card>
+        <Card className="p-4 text-center">
+          <div className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">{successCount}</div>
+          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">محاولات ناجحة</div>
+        </Card>
+        <Card className="p-4 text-center">
+          <div className="text-3xl font-extrabold text-red-600 dark:text-red-400">{failedCount}</div>
+          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">محاولات فاشلة / محظورة</div>
+        </Card>
       </div>
+
+      {/* Table */}
+      <Card className="overflow-hidden p-0">
+        <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700/60 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 dark:text-white">تفاصيل المحاولات الأخيرة</h3>
+          <span className="text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold px-2.5 py-1 rounded-full">
+            {historyList.length} سجل
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700/60">
+            <thead className="bg-gray-50/50 dark:bg-gray-900/30">
+              <tr>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الوقت</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">المستخدم / IP</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">المتصفح ونظام التشغيل</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الحالة</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ملاحظات / السبب</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700/40">
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-500" />
+                    جاري تحميل سجلات الدخول...
+                  </td>
+                </tr>
+              ) : historyList.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                    <Shield className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    لا توجد محاولات دخول مسجلة حالياً
+                  </td>
+                </tr>
+              ) : (
+                historyList.map((record: any) => (
+                  <tr key={record.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                      <div className="flex items-center gap-1.5 font-mono text-xs">
+                        <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                        {record.timestamp ? new Date(record.timestamp).toLocaleString('ar-EG') : 'الآن'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {record.user_email || record.email || 'مستخدم غير معروف'}
+                        </div>
+                        <div className="text-xs font-mono text-gray-400 flex items-center gap-1 mt-0.5">
+                          <Globe className="w-3 h-3" />
+                          {record.ip_address || '127.0.0.1'}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                      <div className="flex items-center gap-2">
+                        {record.os_info?.toLowerCase().includes('android') || record.os_info?.toLowerCase().includes('ios') ? (
+                          <Smartphone className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <Laptop className="w-4 h-4 text-gray-400" />
+                        )}
+                        <span>{record.browser_info || 'متصفح غير محدد'}</span>
+                        <span className="text-xs text-gray-400">({record.os_info || 'نظام غير محدد'})</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {record.is_success ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          دخول ناجح
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          محاولة فاشلة
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {record.failure_reason || (record.is_success ? 'تم تسجيل الدخول بنجاح' : '-')}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 };

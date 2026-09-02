@@ -176,7 +176,7 @@ export default function AuditLogs() {
     queryFn: () => auditAPI.list({ search, event_type: eventType, severity }),
   });
 
-  const logs = logsData?.data?.results || logsData?.data || [];
+  const logs = Array.isArray(logsData?.data?.results) ? logsData.data.results : (Array.isArray(logsData?.data) ? logsData.data : []);
 
   return (
     <div className="space-y-6">

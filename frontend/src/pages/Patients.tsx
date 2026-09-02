@@ -26,7 +26,7 @@ export default function Patients() {
     onError: (err: any) => toast.error(err.response?.data?.detail || 'فشل'),
   });
 
-  const patients = patientsData?.data?.results || patientsData?.data || [];
+  const patients = Array.isArray(patientsData?.data?.results) ? patientsData.data.results : (Array.isArray(patientsData?.data) ? patientsData.data : []);
 
   return (
     <div className="space-y-6">

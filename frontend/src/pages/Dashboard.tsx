@@ -80,8 +80,12 @@ export default function Dashboard() {
   });
 
   const stats = statsData?.data;
-  const activities = activityData?.data?.activities || [];
-  const channels = channelsData?.data?.results || channelsData?.data || [];
+  const activities = Array.isArray(activityData?.data?.activities)
+    ? activityData.data.activities
+    : (Array.isArray(activityData?.data) ? activityData.data : (Array.isArray(activityData?.data?.results) ? activityData.data.results : []));
+  const channels = Array.isArray(channelsData?.data?.results)
+    ? channelsData.data.results
+    : (Array.isArray(channelsData?.data) ? channelsData.data : []);
 
   const statCards = [
     {

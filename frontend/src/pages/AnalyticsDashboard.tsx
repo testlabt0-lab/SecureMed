@@ -74,7 +74,9 @@ export default function AnalyticsDashboard() {
   }
 
   const data = overview?.data;
-  const activities = activityFeed?.data?.activities || [];
+  const activities = Array.isArray(activityFeed?.data?.activities)
+    ? activityFeed.data.activities
+    : (Array.isArray(activityFeed?.data) ? activityFeed.data : (Array.isArray(activityFeed?.data?.results) ? activityFeed.data.results : []));
 
   // Calculate trend indicators
   const todayActivity = data?.activity_trend?.[data.activity_trend.length - 1]?.count || 0;

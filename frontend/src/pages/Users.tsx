@@ -28,7 +28,7 @@ export default function Users() {
     queryKey: ['basins'],
     queryFn: () => basinsAPI.list(),
   });
-  const basins = basinsData?.data?.results || basinsData?.data || [];
+  const basins = Array.isArray(basinsData?.data?.results) ? basinsData.data.results : (Array.isArray(basinsData?.data) ? basinsData.data : []);
 
   const { data: usersData, isLoading } = useQuery({
     queryKey: ['users', { search, role: roleFilter }],
@@ -71,7 +71,7 @@ export default function Users() {
     },
   });
 
-  const users = usersData?.data?.results || usersData?.data || [];
+  const users = Array.isArray(usersData?.data?.results) ? usersData.data.results : (Array.isArray(usersData?.data) ? usersData.data : []);
 
   return (
     <div className="space-y-6">
@@ -226,7 +226,7 @@ function BasinSelect({ basins, value, onChange }: any) {
   return (
     <select className="input-field" value={value || ''} onChange={onChange}>
       <option value="">— بدون حوض (عام) —</option>
-      {basins.map((b: any) => (
+      {(Array.isArray(basins) ? basins : []).map((b: any) => (
         <option key={b.id} value={b.id}>
           {b.name} ({b.basin_type_display || b.basin_type})
         </option>

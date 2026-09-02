@@ -190,7 +190,7 @@ export default function ChannelDetail() {
             </button>
             {channel?.patient && (
               <button
-                onClick={() => navigate(`/patients/${channel.patient.id}`)}
+                onClick={() => navigate(`/patients/${typeof channel.patient === 'string' ? channel.patient : channel.patient?.id || channel.patient}`)}
                 className="btn-secondary text-sm flex items-center gap-2"
               >
                 <Activity className="w-4 h-4" />

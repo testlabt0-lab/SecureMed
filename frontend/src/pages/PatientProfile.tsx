@@ -80,7 +80,7 @@ export default function PatientProfile() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['patient-profile', id],
     queryFn: () => patientsExtendedApi.profile(id!),
-    enabled: !!id,
+    enabled: !!id && id !== 'undefined',
   });
 
   const summaryMutation = useMutation({

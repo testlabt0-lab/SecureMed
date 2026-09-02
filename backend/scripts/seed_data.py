@@ -401,6 +401,64 @@ def seed_medical_records(channels):
     return created
 
 
+def seed_appointments(users, patients):
+    """Create sample appointments for demo."""
+    from apps.appointments.models import Appointment, AppointmentSlot
+    print("\n📅 Creating sample appointments...")
+    if not users or not patients:
+        return
+
+    doctors = [u for u in users if u.role == User.Role.DOCTOR]
+    if not doctors:
+        doctors = list(User.objects.filter(role=User.Role.DOCTOR))
+    if not doctors:
+        return
+
+    now = timezone.now()
+    demo_appts = [
+        ('كشف واستشارة قلبية', doctors[0], patients[0], now + timedelta(hours=2), 30, 'INITIAL', 'HIGH', 'عيادة القلب', '201'),
+        ('متابعة سكري وفحوصات', doctors[min(1, len(doctors)-1)], patients[min(1, len(patients)-1)], now + timedelta(days=1, hours=4), 45, 'FOLLOW_UP', 'MEDIUM', 'عيادة الباطنية', '105'),
+        ('استشارة عصبية عاجلة', doctors[min(1, len(doctors)-1)], patients[min(2, len(patients)-1)], now + timedelta(days=2, hours=1), 30, 'CONSULTATION', 'URGENT', '', '', True, 'https://meet.securemed.app/room-neuro-101'),
+        ('فحص دوري للأطفال', doctors[min(2, len(doctors)-1)], patients[min(3, len(patients)-1)], now + timedelta(days=3, hours=3), 30, 'ROUTINE', 'LOW', 'عيادة الأطفال', '302'),
+    ]
+
+    created = 0
+    for title, doc, pat, sched, dur, atype, prio, loc, rm, *extra in demo_appts:
+        is_virt = extra[0] if extra else False
+        vlink = extra[1] if len(extra) > 1 else ''
+        appt, was_created = Appointment.objects.get_or_create(
+            title=title,
+            doctor=doc,
+            patient=pat,
+            defaults={
+                'scheduled_at': sched,
+                'duration_minutes': dur,
+                'appointment_type': atype,
+                'priority': prio,
+                'location': loc,
+                'room_number': rm,
+                'is_virtual': is_virt,
+                'virtual_link': vlink,
+                'status': 'CONFIRMED' if prio == 'HIGH' else 'SCHEDULED',
+            }
+        )
+        if was_created:
+            created += 1
+            print(f"  ✓ {title} ({doc.full_name} ➔ {pat.full_name})")
+
+    # Also seed doctor slots
+    for doc in doctors:
+        for day in [0, 1, 2, 3, 4]:  # Sun-Thu
+            AppointmentSlot.objects.get_or_create(
+                doctor=doc,
+                day_of_week=day,
+                start_time='09:00:00',
+                end_time='16:00:00',
+                defaults={'slot_duration_minutes': 30, 'is_active': True}
+            )
+    print(f"  Total appointments created: {created}")
+
+
 def main():
     print("=" * 60)
     print("  SecureMed Database Seed Script")
@@ -412,6 +470,7 @@ def main():
     channels = seed_channels(users, patients)
     seed_medical_records(channels)
     link_demo_data_to_basins(basins)
+    seed_appointments(users, patients)
 
     # Log the seed event
     admin = User.objects.filter(role=User.Role.SUPER_ADMIN).first()
@@ -426,15 +485,17 @@ def main():
     print("✅ Database seeded successfully!")
     print("=" * 60)
     print("\n📊 Summary:")
-    print(f"  Users:    {User.objects.count()}")
-    print(f"  Patients: {Patient.objects.count()}")
-    print(f"  Channels: {Channel.objects.count()}")
-    print(f"  Members:  {ChannelMembership.objects.count()}")
-    print(f"  Records:  {MedicalRecord.objects.count()}")
+    print(f"  Users:        {User.objects.count()}")
+    print(f"  Patients:     {Patient.objects.count()}")
+    print(f"  Channels:     {Channel.objects.count()}")
+    print(f"  Appointments: {Appointment.objects.count() if 'Appointment' in locals() else 0}")
+    print(f"  Members:      {ChannelMembership.objects.count()}")
+    print(f"  Records:      {MedicalRecord.objects.count()}")
     print(f"\n🔑 Login credentials:")
     print("  Admin:    admin@securemed.app / Admin@2026!")
     print("  Doctor:   doctor.ahmed@securemed.app / Doctor@2026!")
     print("  Nurse:    nurse.sara@securemed.app / Nurse@2026!")
+
 
 
 if __name__ == '__main__':

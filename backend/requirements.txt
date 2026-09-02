@@ -1,27 +1,44 @@
-# Requirements for SecureMed Backend
+# Requirements for SecureMed Backend — v2.0.0
+# ─── Core Framework ────────────────────────────────────────────────────────────
 Django==5.0.6
 djangorestframework==3.15.1
 djangorestframework-simplejwt==5.3.1
-psycopg2-binary==2.9.9
 django-cors-headers==4.3.1
 django-environ==0.11.2
 django-extensions==3.2.3
-django-ratelimit==4.1.0  # unused, kept for API compatibility; throttling via DRF
+django-ratelimit==4.1.0
+django-filter==24.2
+drf-spectacular==0.27.2
+whitenoise==6.6.0
+gunicorn==22.0.0
+
+# ─── Database ──────────────────────────────────────────────────────────────────
+psycopg2-binary==2.9.9
+dj-database-url==2.2.0
+
+# ─── Cache & Celery ────────────────────────────────────────────────────────────
 django-redis==5.4.0
+redis==8.1.0
+async-timeout>=4.0.3
+celery==5.3.6
+django-celery-beat==2.6.0
+django-celery-results==2.5.1
+
+# ─── Security ──────────────────────────────────────────────────────────────────
 cryptography==42.0.7
 PyJWT==2.8.0
 pyOpenSSL==24.1.0
-python-nmap==0.7.1
-requests==2.32.3
-gunicorn==22.0.0
-whitenoise==6.6.0
-django-waffle==4.1.0
 bleach==6.1.0
 python-decouple==3.8
-drf-spectacular==0.27.2
-django-filter==24.2
+django-waffle==4.1.0
+python-nmap==0.7.1
+user-agents==2.2.0
+geoip2==4.7.0
 
-# Phase 4: 2FA + reports
+# ─── HTTP ──────────────────────────────────────────────────────────────────────
+requests==2.32.3
+
+# ─── 2FA + Reports ─────────────────────────────────────────────────────────────
 pyotp==2.9.0
 qrcode==7.4.2
 reportlab==4.2.5
@@ -29,4 +46,5 @@ arabic-reshaper==3.0.0
 python-bidi==0.6.6
 openpyxl==3.1.5
 matplotlib==3.9.2
-dj-database-url==2.2.0
+
+google-generativeai

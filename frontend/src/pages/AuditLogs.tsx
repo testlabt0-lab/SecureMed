@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ScrollText, Filter, Search, FileSpreadsheet } from 'lucide-react';
+import { ScrollText, Filter, Search, FileSpreadsheet, Download, ShieldAlert, ChevronDown, ChevronUp } from 'lucide-react';
 import { auditAPI } from '../api/client';
+import api from '../api/client';
 import { reportsApi, downloadBlobResponse } from '../api/extendedApis';
 import toast from 'react-hot-toast';
 
@@ -29,6 +30,7 @@ const eventTypeLabels: Record<string, string> = {
   INVITATION_ACCEPTED: 'قبول دعوة',
   INVITATION_REJECTED: 'رفض دعوة',
   USER_DEACTIVATED: 'إلغاء تفعيل مستخدم',
+  DATA_EXPORT: 'تصدير بيانات (SIEM)',
 };
 
 const severityColors: Record<string, string> = {
@@ -36,6 +38,98 @@ const severityColors: Record<string, string> = {
   WARNING: 'badge-warning',
   CRITICAL: 'badge-danger',
 };
+
+function AuditRow({ log }: { log: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+
+  const handleBlockDevice = async () => {
+    if (!log.device_fingerprint && !log.mac_address) {
+      toast.error('لا يوجد معلومات كافية عن الجهاز لحظره');
+      return;
+    }
+    setBlocking(true);
+    const toastId = toast.loading('جاري حظر الجهاز...');
+    try {
+      await api.security.blockedDevices.create({
+        device_fingerprint: log.device_fingerprint || '',
+        mac_address: log.mac_address || '',
+        reason: `محظور من سجلات التدقيق (نشاط مشبوه)`
+      });
+      toast.success('تم حظر الجهاز وإضافته للقائمة السوداء بنجاح', { id: toastId });
+    } catch (err) {
+      toast.error('فشل حظر الجهاز، قد يكون محظوراً بالفعل', { id: toastId });
+    } finally {
+      setBlocking(false);
+    }
+  };
+
+  return (
+    <>
+      <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${expanded ? 'bg-gray-50' : ''}`}>
+        <td className="py-3 pr-4 text-sm text-gray-600">
+          <button onClick={() => setExpanded(!expanded)} className="p-1 rounded hover:bg-gray-200 mr-1 text-gray-500 transition-colors">
+            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          {new Date(log.timestamp).toLocaleString('ar-SA')}
+        </td>
+        <td className="text-sm">
+          {log.user_name || '—'}
+          {log.user_email && <p className="text-xs text-gray-400">{log.user_email}</p>}
+        </td>
+        <td className="text-sm">
+          <span className="font-medium">{log.event_type_display || eventTypeLabels[log.event_type] || log.event_type}</span>
+        </td>
+        <td>
+          <span className={`badge ${severityColors[log.severity] || 'badge-gray'}`}>
+            {log.severity_display || log.severity}
+          </span>
+        </td>
+        <td className="text-sm font-mono">{log.ip_address || '—'}</td>
+        <td className="text-sm">
+          <span className="font-mono text-xs">{log.method} {log.path}</span>
+        </td>
+      </tr>
+      
+      {expanded && (
+        <tr className="bg-gray-50/50 border-b border-gray-200">
+          <td colSpan={6} className="py-4 px-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-2 border-b pb-1">معلومات الجهاز (DevSecOps)</h4>
+                <ul className="text-sm space-y-2 text-gray-600">
+                  <li><span className="font-medium">MAC Address:</span> <span className="font-mono text-xs bg-gray-100 px-1 rounded">{log.mac_address || 'غير متوفر'}</span></li>
+                  <li><span className="font-medium">بصمة الجهاز (Fingerprint):</span> <span className="font-mono text-xs truncate max-w-[200px] inline-block align-bottom">{log.device_fingerprint || 'غير متوفر'}</span></li>
+                  <li><span className="font-medium">نظام التشغيل:</span> {log.os_info || 'غير متوفر'}</li>
+                  <li><span className="font-medium">المتصفح:</span> {log.browser_info || 'غير متوفر'}</li>
+                  <li><span className="font-medium">معرف الجلسة:</span> <span className="font-mono text-xs">{log.session_id || '—'}</span></li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-2 border-b pb-1">تحليل المخاطر</h4>
+                <ul className="text-sm space-y-2 text-gray-600">
+                  <li><span className="font-medium">درجة الخطورة:</span> <span className={`font-bold ${log.risk_score > 50 ? 'text-red-500' : 'text-green-500'}`}>{log.risk_score || 0}%</span></li>
+                  <li><span className="font-medium">الموقع الجغرافي:</span> {log.geo_location || 'غير معروف'}</li>
+                  <li><span className="font-medium">User Agent:</span> <span className="text-xs text-gray-400 line-clamp-1" title={log.user_agent}>{log.user_agent || '—'}</span></li>
+                </ul>
+                <div className="mt-4 pt-3 border-t">
+                  <button 
+                    onClick={handleBlockDevice}
+                    disabled={blocking || (!log.device_fingerprint && !log.mac_address)}
+                    className="btn-danger w-full sm:w-auto text-sm py-1.5 px-3 flex items-center justify-center gap-1.5"
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    {blocking ? 'جاري الحظر...' : 'حظر هذا الجهاز (Blocklist)'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
 
 export default function AuditLogs() {
   const [search, setSearch] = useState('');
@@ -54,18 +148,30 @@ export default function AuditLogs() {
       downloadBlobResponse(response, 'SecureMed_Audit.xlsx');
       toast.success('تم تنزيل ملف Excel', { id: toastId });
     } catch (err: any) {
-      toast.error(
-        err.response?.status === 403
-          ? 'التصدير متاح للمدير والمراجع الأمني فقط'
-          : 'فشل التصدير',
-        { id: toastId },
-      );
+      toast.error('فشل التصدير', { id: toastId });
     } finally {
       setExporting(false);
     }
   };
 
-  const { data: logsData, isLoading } = useQuery({
+  const handleExportSIEM = async () => {
+    setExporting(true);
+    const toastId = toast.loading('جاري التصدير بصيغة JSON لبيئات SIEM...');
+    try {
+      const response = await reportsApi.auditJson({
+        event_type: eventType || undefined,
+        severity: severity || undefined,
+      });
+      downloadBlobResponse(response, 'SIEM_Audit_Export.json');
+      toast.success('تم تصدير السجلات لـ SIEM بنجاح', { id: toastId });
+    } catch (err: any) {
+      toast.error('فشل تصدير SIEM', { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const { data: logsData, isLoading, refetch } = useQuery({
     queryKey: ['audit-logs', { search, eventType, severity }],
     queryFn: () => auditAPI.list({ search, event_type: eventType, severity }),
   });
@@ -74,25 +180,34 @@ export default function AuditLogs() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <ScrollText className="w-6 h-6 text-primary-600" />
-          سجلات التدقيق الأمني
-        </h1>
-        <p className="text-gray-600 text-sm mt-1">
-          تتبع جميع الأحداث الأمنية في النظام (متطلب HIPAA)
-        </p>
-      </div>
-
-      <div className="flex justify-end">
-        <button
-          onClick={handleExportExcel}
-          disabled={exporting}
-          className="btn-secondary text-sm flex items-center gap-2"
-        >
-          <FileSpreadsheet className="w-4 h-4 text-green-600" />
-          {exporting ? 'جاري التصدير...' : 'تصدير Excel'}
-        </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <ScrollText className="w-6 h-6 text-primary-600" />
+            سجلات التدقيق الأمني (SIEM)
+          </h1>
+          <p className="text-gray-600 text-sm mt-1">
+            مراقبة شاملة للنشاطات وتتبع الأجهزة (MAC/Fingerprint)
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="btn-secondary text-sm flex items-center gap-2"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-green-600" />
+            تصدير Excel
+          </button>
+          <button
+            onClick={handleExportSIEM}
+            disabled={exporting}
+            className="btn-primary text-sm flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            تصدير SIEM (JSON)
+          </button>
+        </div>
       </div>
 
       <div className="card">
@@ -103,7 +218,7 @@ export default function AuditLogs() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="بحث في السجلات..."
+              placeholder="بحث بـ IP أو MAC أو مسار..."
               className="input-field pr-10"
             />
           </div>
@@ -137,43 +252,21 @@ export default function AuditLogs() {
             <p className="text-gray-500">لا توجد سجلات بعد</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-xl border border-gray-100">
             <table className="w-full">
-              <thead>
+              <thead className="bg-gray-50">
                 <tr className="border-b border-gray-200 text-right text-sm text-gray-500">
-                  <th className="pb-3 pr-4 font-medium">الوقت</th>
-                  <th className="pb-3 font-medium">المستخدم</th>
-                  <th className="pb-3 font-medium">الحدث</th>
-                  <th className="pb-3 font-medium">المستوى</th>
-                  <th className="pb-3 font-medium">IP</th>
-                  <th className="pb-3 font-medium">المسار</th>
+                  <th className="py-3 pr-4 font-medium">الوقت</th>
+                  <th className="py-3 font-medium">المستخدم</th>
+                  <th className="py-3 font-medium">الحدث</th>
+                  <th className="py-3 font-medium">المستوى</th>
+                  <th className="py-3 font-medium">IP Address</th>
+                  <th className="py-3 font-medium">المسار</th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((log: any) => (
-                  <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 pr-4 text-sm text-gray-600">
-                      {new Date(log.timestamp).toLocaleString('ar-SA')}
-                    </td>
-                    <td className="text-sm">
-                      {log.user_name || '—'}
-                      {log.user_email && (
-                        <p className="text-xs text-gray-400">{log.user_email}</p>
-                      )}
-                    </td>
-                    <td className="text-sm">
-                      <span className="font-medium">{log.event_type_display}</span>
-                    </td>
-                    <td>
-                      <span className={`badge ${severityColors[log.severity]}`}>
-                        {log.severity_display}
-                      </span>
-                    </td>
-                    <td className="text-sm font-mono">{log.ip_address || '—'}</td>
-                    <td className="text-sm">
-                      <span className="font-mono text-xs">{log.method} {log.path}</span>
-                    </td>
-                  </tr>
+                  <AuditRow key={log.id} log={log} />
                 ))}
               </tbody>
             </table>

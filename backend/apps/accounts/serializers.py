@@ -85,13 +85,25 @@ class LoginSerializer(serializers.Serializer):
                 )
 
             if user.is_locked:
-                raise serializers.ValidationError(
-                    {'detail': f'الحساب مقفل حتى {user.locked_until}'}
-                )
+                # Provide user-friendly localized time format or time remaining
+                import humanize
+                import datetime
+                from django.utils import timezone
+                
+                now = timezone.now()
+                if user.locked_until > now:
+                    delta = user.locked_until - now
+                    minutes = int(delta.total_seconds() / 60)
+                    raise serializers.ValidationError(
+                        {'detail': f'تم قفل الحساب مؤقتًا لدواع أمنية. يرجى المحاولة بعد {minutes} دقيقة.'}
+                    )
+                else:
+                    # Lock has expired, reset it
+                    user.reset_failed_attempts()
 
             if not user.check_password(password):
                 user.failed_login_attempts += 1
-                if user.failed_login_attempts >= 5:
+                if user.failed_login_attempts >= 3:
                     user.lock_account()
                 user.save()
                 raise serializers.ValidationError(

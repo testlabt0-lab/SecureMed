@@ -7,6 +7,8 @@ import {
   LayoutDashboard, FolderKanban, Users, Shield, ScrollText,
   User as UserIcon, LogOut, Stethoscope, Menu, X,
   Sun, Moon, Bell, BarChart3, Bot, Building2, DatabaseBackup,
+  Calendar, FileText, Settings, MonitorSmartphone, History, KeyRound,
+  Pill, CreditCard,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
@@ -121,14 +123,23 @@ export default function Layout() {
     { path: '/dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
     { path: '/channels', label: 'القنوات والحالات', icon: FolderKanban },
     { path: '/patients', label: 'المرضى', icon: Users },
-    { path: '/analytics', label: 'التحليلات', icon: BarChart3, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
+    { path: '/appointments', label: 'المواعيد', icon: Calendar },
+    { path: '/telemedicine', label: 'العيادة الافتراضية', icon: MonitorSmartphone, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR'] },
+    { path: '/analytics', label: 'التحليلات', icon: BarChart3, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR', 'DOCTOR'] },
+    { path: '/reports', label: 'التقارير', icon: FileText, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR', 'DOCTOR'] },
     { path: '/security', label: 'لوحة الأمان', icon: Shield, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
+    { path: '/security/devices', label: 'إدارة الأجهزة والحظر', icon: MonitorSmartphone, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
+    { path: '/security/login-history', label: 'سجل محاولات الدخول', icon: History, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
+    { path: '/security/settings', label: 'إعدادات الأمان', icon: KeyRound },
     { path: '/audit', label: 'سجلات التدقيق', icon: ScrollText, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
     { path: '/users', label: 'المستخدمون', icon: Users, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN'] },
+    { path: '/pharmacy', label: 'الصيدلية', icon: Pill, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'PHARMACIST', 'DOCTOR'] },
+    { path: '/billing', label: 'الفواتير والتأمين', icon: CreditCard, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
     { path: '/basins', label: 'الأحواز الصحية', icon: Building2 },
     { path: '/backups', label: 'النسخ الاحتياطي', icon: DatabaseBackup, roles: ['SUPER_ADMIN'] },
     { path: '/notifications', label: 'الإشعارات', icon: Bell, badge: unreadCount },
     { path: '/profile', label: 'الملف الشخصي', icon: UserIcon },
+    { path: '/settings', label: 'الإعدادات', icon: Settings },
   ].filter(item => !item.roles || (user && item.roles.includes(user.role)));
 
   const sidebarContent = (

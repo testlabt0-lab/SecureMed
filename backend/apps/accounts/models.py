@@ -123,8 +123,16 @@ class User(AbstractUser):
             return True
         return False
 
-    def lock_account(self, minutes=30):
-        """Lock the account for failed login attempts."""
+    def lock_account(self):
+        """Lock the account using exponential backoff based on failed attempts."""
+        # Base lock time is 5 minutes, doubling each time after the 3rd attempt
+        # 3 attempts -> 5 mins, 4 attempts -> 10 mins, 5 attempts -> 20 mins, etc.
+        power = max(0, self.failed_login_attempts - 3)
+        minutes = 5 * (2 ** power)
+        
+        # Max lock out time of 24 hours
+        minutes = min(minutes, 1440)
+        
         self.locked_until = timezone.now() + timezone.timedelta(minutes=minutes)
         self.save(update_fields=['locked_until'])
 

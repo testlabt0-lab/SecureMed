@@ -12,6 +12,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.http import FileResponse, JsonResponse, Http404
 from pathlib import Path
+from apps.core.health import liveness, readiness
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -20,11 +21,11 @@ from drf_spectacular.views import (
 
 
 def health_check(request):
-    """Health check endpoint (used by Render health probes)."""
+    """Legacy health check endpoint — kept for backward compatibility."""
     return JsonResponse({
         'status': 'healthy',
         'service': 'SecureMed API',
-        'version': '1.0.0',
+        'version': '2.0.0',
     })
 
 
@@ -52,7 +53,11 @@ def spa_view(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('health/', health_check, name='health-check'),
+
+    # Health probes
+    path('health/', health_check, name='health-check'),         # legacy
+    path('health/live/', liveness, name='health-liveness'),     # Kubernetes livenessProbe
+    path('health/ready/', readiness, name='health-readiness'),  # Kubernetes readinessProbe
 
     # AI assistant proxy (frontend calls /ai/* — same paths in dev & prod)
     path('ai/', include('apps.ai.urls')),
@@ -68,6 +73,7 @@ urlpatterns = [
     path('api/v1/notifications/', include('apps.notifications.urls')),
     path('api/v1/analytics/', include('apps.analytics.urls')),
     path('api/v1/reports/', include('apps.reports.urls')),
+    path('api/v1/appointments/', include('apps.appointments.urls')),
 
     # API documentation (Swagger / ReDoc)
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

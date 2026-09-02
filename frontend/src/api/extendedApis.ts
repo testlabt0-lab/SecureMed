@@ -72,16 +72,28 @@ export const biometricDevicesApi = {
   remove: (id: string) => api.delete(`/auth/biometric-profiles/${id}/remove/`),
 };
 
-// ============== Reports API (binary downloads) ==============
+// ============== Reports API (binary downloads — legacy) ==============
 export const reportsApi = {
   channelPdf: (channelId: string) =>
     api.get(`/reports/channel/${channelId}/pdf/`, { responseType: 'blob' }),
   auditExcel: (params?: any) =>
     api.get('/reports/audit/excel/', { responseType: 'blob', params }),
+  auditJson: (params?: any) =>
+    api.get('/audit/export/', { responseType: 'blob', params }),
   monthlyPdf: (month?: string) =>
     api.get('/reports/monthly/pdf/', { responseType: 'blob', params: month ? { month } : {} }),
   emailMonthly: (month?: string) =>
     api.post('/reports/monthly/email/', month ? { month } : {}),
+};
+
+// ============== Extended Reports API (unified) ==============
+export const reportsAPI = {
+  download: (reportId: string, format: 'pdf' | 'excel', startDate: string, endDate: string) =>
+    api.get(`/reports/${reportId}/`, {
+      responseType: 'blob',
+      params: { format, start_date: startDate, end_date: endDate },
+    }),
+  list: () => api.get('/reports/list/'),
 };
 
 /** Trigger a browser download from an axios blob response. */
@@ -102,17 +114,52 @@ export function downloadBlobResponse(
   URL.revokeObjectURL(url);
 }
 
-// ============== AI Smart Assistant API ==============
-// Dedicated axios instance: the AI microservice runs on :8100 and is
-// exposed through the Vite dev-server proxy at /ai (same-origin).
-const aiClient = axios.create({ baseURL: '/ai', timeout: 90000 });
-
+// ============== AI API ==============
 export const aiApi = {
   ask: (
     question: string,
     context?: any,
     history?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  ) => aiClient.post('/ask', { question, context, history }),
-  health: () => aiClient.get('/health'),
+  ) => api.post('/appointments/ai/ask/', { question, context, history }),
+  health: () => api.get('/appointments/ai/health/'),
 };
 
+// ============== Appointments API ==============
+export const appointmentsAPI = {
+  list: (params?: any) => api.get('/appointments/', { params }),
+  get: (id: string) => api.get(`/appointments/${id}/`),
+  create: (data: any) => api.post('/appointments/', data),
+  update: (id: string, data: any) => api.patch(`/appointments/${id}/`, data),
+  delete: (id: string) => api.delete(`/appointments/${id}/`),
+  calendar: (start: string, end: string) =>
+    api.get('/appointments/calendar/', { params: { start, end } }),
+  today: () => api.get('/appointments/today/'),
+  upcoming: () => api.get('/appointments/upcoming/'),
+  stats: () => api.get('/appointments/stats/'),
+  confirm: (id: string) => api.post(`/appointments/${id}/confirm/`),
+  start: (id: string) => api.post(`/appointments/${id}/start/`),
+  complete: (id: string, data: { summary?: string; follow_up_needed?: boolean; follow_up_date?: string }) =>
+    api.post(`/appointments/${id}/complete/`, data),
+  cancel: (id: string, data: { reason?: string }) =>
+    api.post(`/appointments/${id}/cancel/`, data),
+  noShow: (id: string) => api.post(`/appointments/${id}/no-show/`),
+  doctorAvailability: (doctorId: string, date: string) =>
+    api.get('/appointments/doctor-availability/', { params: { doctor_id: doctorId, date } }),
+  slots: (params?: any) => api.get('/appointments/slots/', { params }),
+  createSlot: (data: any) => api.post('/appointments/slots/', data),
+  updateSlot: (id: string, data: any) => api.patch(`/appointments/slots/${id}/`, data),
+  deleteSlot: (id: string) => api.delete(`/appointments/slots/${id}/`),
+};
+
+// ============== Settings API ==============
+export const settingsAPI = {
+  totpStatus: () => api.get('/auth/2fa/status/'),
+  totpSetup: () => api.post('/auth/2fa/setup/'),
+  totpVerify: (code: string) => api.post('/auth/2fa/verify/', { code }),
+  totpDisable: (code: string) => api.post('/auth/2fa/disable/', { code }),
+  sessions: () => api.get('/auth/sessions/'),
+  revokeSession: (sessionId: string) => api.post(`/auth/sessions/${sessionId}/revoke/`),
+  revokeAllSessions: () => api.post('/auth/sessions/revoke_all/'),
+  notificationPrefs: () => api.get('/notifications/preferences/'),
+  updateNotificationPrefs: (data: any) => api.patch('/notifications/preferences/', data),
+};

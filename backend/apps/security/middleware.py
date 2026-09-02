@@ -6,6 +6,7 @@ Detects and blocks malicious requests: SQL injection, XSS, path traversal, etc.
 """
 import re
 import logging
+import json
 from collections import defaultdict
 from datetime import timedelta
 from django.http import JsonResponse
@@ -89,6 +90,29 @@ class WAFMiddleware:
         if request.path.startswith('/admin/') or request.path == '/health/':
             return self.get_response(request)
 
+        client_ip = self._get_client_ip(request)
+        device_fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+        
+        # 1. Check IP Blacklist (cache first, then DB)
+        blacklist_key = f'waf_blacklist:{client_ip}'
+        if cache.get(blacklist_key):
+            return JsonResponse({'error': 'تم حظر هذا العنوان نهائيا'}, status=403)
+            
+        try:
+            from apps.security.models import BlockedIP, BlockedDevice
+            if BlockedIP.objects.filter(ip_address=client_ip, is_active=True).exists():
+                cache.set(blacklist_key, True, timeout=86400)
+                return JsonResponse({'error': 'تم حظر هذا العنوان نهائيا'}, status=403)
+                
+            if device_fingerprint:
+                dev_blacklist_key = f'waf_device_blacklist:{device_fingerprint}'
+                if cache.get(dev_blacklist_key) or BlockedDevice.objects.filter(device_fingerprint=device_fingerprint, is_active=True).exists():
+                    cache.set(dev_blacklist_key, True, timeout=86400)
+                    return JsonResponse({'error': 'تم حظر هذا الجهاز'}, status=403)
+        except Exception as e:
+            # DB might not be ready during migrations
+            pass
+
         # Check request for attacks
         attack_detected = self._detect_attacks(request)
         if attack_detected:
@@ -118,12 +142,12 @@ class WAFMiddleware:
             inputs_to_check.append(value)
 
         # Check body for non-form requests
-        if request.body and 'application/json' in request.content_type:
-            try:
+        try:
+            if 'application/json' in (request.content_type or '') and request.body:
                 body_str = request.body.decode('utf-8', errors='ignore')
                 inputs_to_check.append(body_str)
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         # Check path (URL-decoded)
         inputs_to_check.append(unquote_plus(request.path))
@@ -228,6 +252,24 @@ class WAFMiddleware:
             return x_forwarded.split(',')[0].strip()
         return request.META.get('REMOTE_ADDR', '0.0.0.0')
 
+    def _detect_device_type(self, device_fingerprint: str) -> str:
+        """Detect device type from fingerprint prefix."""
+        if not device_fingerprint:
+            return 'unknown'
+        prefixes = {
+            'PC': 'personal_computer',
+            'MOB': 'mobile',
+            'TABLET': 'tablet',
+            'IOS': 'ios',
+            'AND': 'android',
+            'WEB': 'web_client',
+        }
+        upper_fp = device_fingerprint.upper()
+        for prefix, device_type in prefixes.items():
+            if upper_fp.startswith(prefix):
+                return device_type
+        return 'other'
+
 
 class RateLimitMiddleware:
     """Additional rate limiting middleware for API endpoints."""
@@ -261,3 +303,48 @@ class RateLimitMiddleware:
         if x_forwarded:
             return x_forwarded.split(',')[0].strip()
         return request.META.get('REMOTE_ADDR', '0.0.0.0')
+
+
+class SessionSecurityMiddleware:
+    """
+    Validates that the current request's device fingerprint matches 
+    the active session fingerprint for the authenticated user to prevent token theft.
+    """
+    
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # We only check this if the user is authenticated
+        if request.user and request.user.is_authenticated:
+            current_fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+            if current_fingerprint:
+                # Get the user's registered fingerprint from cache
+                cache_key = f'active_sessions:{request.user.id}'
+                sessions = cache.get(cache_key, [])
+                
+                # Check if current fingerprint is in the list of active sessions
+                valid = False
+                for session in sessions:
+                    if session.get('device_fingerprint') == current_fingerprint:
+                        valid = True
+                        break
+                        
+                if sessions and not valid:
+                    # Token is being used from a different device than it was issued for
+                    logger.warning(
+                        f"SESSION_HIJACK_ATTEMPT | User={request.user.id} | "
+                        f"Expected={sessions[-1].get('device_fingerprint')} | "
+                        f"Actual={current_fingerprint}"
+                    )
+                    
+                    # Force logout
+                    from apps.security.session_security import SessionManager
+                    SessionManager.force_logout_user(request.user.id)
+                    
+                    return JsonResponse({
+                        'error': 'تم رصد نشاط مريب. يرجى تسجيل الدخول مرة أخرى.',
+                        'code': 'SESSION_INVALIDATED'
+                    }, status=401)
+                    
+        return self.get_response(request)

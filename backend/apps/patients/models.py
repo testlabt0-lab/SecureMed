@@ -153,6 +153,41 @@ class Patient(models.Model):
             (today.month, today.day) < (born.month, born.day)
         )
 
+    def to_fhir(self):
+        """
+        Exports the patient data to HL7 FHIR R4 format.
+        """
+        return {
+            "resourceType": "Patient",
+            "id": str(self.id),
+            "identifier": [
+                {
+                    "system": "http://securemed.local/national-id",
+                    "value": self.national_id
+                }
+            ],
+            "name": [
+                {
+                    "use": "official",
+                    "text": self.full_name
+                }
+            ],
+            "telecom": [
+                {
+                    "system": "phone",
+                    "value": self.phone,
+                    "use": "mobile"
+                }
+            ],
+            "gender": "male" if self.gender == 'M' else "female" if self.gender == 'F' else "other",
+            "birthDate": self.date_of_birth.isoformat() if self.date_of_birth else None,
+            "address": [
+                {
+                    "text": self.address
+                }
+            ]
+        }
+
 
 class MedicalRecord(models.Model):
     """
@@ -171,9 +206,8 @@ class MedicalRecord(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     channel = models.ForeignKey(
-        'channels.Channel', on_delete=models.CASCADE,
-        related_name='records',
-        verbose_name=_('القناة')
+        'app_channels.Channel', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='records', verbose_name="القناة المرتبطة"
     )
     record_type = models.CharField(
         _('نوع السجل'), max_length=20,
@@ -242,8 +276,8 @@ class MedicalFile(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     channel = models.ForeignKey(
-        'channels.Channel', on_delete=models.CASCADE,
-        related_name='medical_files', verbose_name=_('القناة')
+        'app_channels.Channel', on_delete=models.CASCADE, related_name='medical_files',
+        verbose_name="قناة الحالة"
     )
     patient = models.ForeignKey(
         'Patient', on_delete=models.CASCADE,

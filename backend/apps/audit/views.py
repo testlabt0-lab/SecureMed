@@ -8,6 +8,11 @@ from apps.audit.models import AuditLog
 from apps.security.permissions import IsAdmin, IsAuditor
 
 
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.http import HttpResponse
+import json
+
 class AuditLogSerializer(serializers.ModelSerializer):
     """Serializer for AuditLog."""
 
@@ -27,6 +32,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
             'event_type', 'event_type_display',
             'severity', 'severity_display',
             'ip_address', 'user_agent', 'path', 'method',
+            'mac_address', 'device_fingerprint', 'hostname',
+            'os_info', 'browser_info', 'session_id', 'geo_location', 'risk_score',
             'details', 'timestamp',
         ]
         read_only_fields = fields
@@ -51,5 +58,26 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
     permission_classes = [IsAdmin | IsAuditor]
     filterset_class = AuditLogFilter
-    search_fields = ['user__email', 'user__full_name', 'path']
-    ordering_fields = ['timestamp', 'severity', 'event_type']
+    search_fields = ['user__email', 'user__full_name', 'path', 'ip_address', 'mac_address']
+    ordering_fields = ['timestamp', 'severity', 'event_type', 'risk_score']
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """Export audit logs as JSON for SIEM integration."""
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        response = HttpResponse(
+            json.dumps(serializer.data, ensure_ascii=False, indent=2),
+            content_type='application/json'
+        )
+        response['Content-Disposition'] = 'attachment; filename="audit_logs_export.json"'
+        
+        # Log the export action
+        AuditLog.objects.create(
+            user=request.user,
+            event_type=AuditLog.EventType.DATA_EXPORT,
+            severity=AuditLog.Severity.INFO,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            details={'exported_count': queryset.count(), 'format': 'json'}
+        )
+        return response

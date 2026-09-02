@@ -25,6 +25,7 @@ ALLOWED_HOSTS = config(
 
 # Application definition
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -50,7 +51,16 @@ INSTALLED_APPS = [
     'apps.notifications',
     'apps.analytics',
     'apps.reports',
+    'apps.appointments',
     'apps.ai',
+    'apps.pharmacy',
+    'apps.billing',
+    # Celery results backend (persists task results in DB)
+    'django_celery_beat',
+    'django_celery_results',
+    
+    # WebSockets / Real-time
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -74,6 +84,8 @@ MIDDLEWARE = [
     'apps.audit.middleware.AuditLogMiddleware',
     # Custom rate limiting middleware
     'apps.security.middleware.RateLimitMiddleware',
+    # Session Fingerprint security
+    'apps.security.middleware.SessionSecurityMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -95,12 +107,22 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [(config('REDIS_HOST', default='127.0.0.1'), config('REDIS_PORT', default=6379, cast=int))],
+        },
+    },
+}
 
 # ============================================
 # Database — Security requirement #6: encrypted DV <-> DB connection
 # Priority: DATABASE_URL (cloud: Neon/Render) > explicit DB_* vars (self-managed PG)
 # ============================================
-_DB_SSL_OPTIONS = {'sslmode': config('DB_SSLMODE', default='require')}
+_DB_SSL_OPTIONS = {'sslmode': config('DB_SSLMODE', default='prefer')}
 if config('DB_SSL_CLIENT_CERTS', default=False, cast=bool):
     # Mutual TLS with client certificates (self-managed PostgreSQL)
     _DB_SSL_OPTIONS.update({
@@ -337,24 +359,7 @@ BACKUP_KEEP_COUNT = config('BACKUP_KEEP_COUNT', default=14, cast=int)
 # otherwise a file-based shared cache: correct for gunicorn's multiple
 # workers (rate limits & throttles stay coherent across processes) and
 # accepted by django-ratelimit (locmem is rejected as non-shared).
-_REDIS_URL = config('REDIS_URL', default='')
-if _REDIS_URL:
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': _REDIS_URL,
-        }
-    }
-else:
-    _CACHE_DIR = BASE_DIR / 'cache'
-    os.makedirs(_CACHE_DIR, exist_ok=True)
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
-            'LOCATION': str(_CACHE_DIR),
-            'OPTIONS': {'MAX_ENTRIES': 10000},
-        }
-    }
+# Cache logic is configured at the bottom of the file with Celery settings
 
 # Rate limiting
 # DRF throttling (DEFAULT_THROTTLE_RATES above) + the custom security
@@ -432,12 +437,13 @@ LOGGING = {
 # Ensure runtime-writable dirs exist (cloud containers start with a clean FS)
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 os.makedirs(BASE_DIR / 'media', exist_ok=True)
+os.makedirs(BASE_DIR / 'logs' / 'emails', exist_ok=True)
 
 # SPECTACULAR (API Documentation)
 SPECTACULAR_SETTINGS = {
     'TITLE': 'SecureMed API',
     'DESCRIPTION': 'Secure Healthcare Records Management Platform with DevSecOps',
-    'VERSION': '1.0.0',
+    'VERSION': '2.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
 }
@@ -446,3 +452,39 @@ SPECTACULAR_SETTINGS = {
 INITIAL_ADMIN_USERNAME = config('INITIAL_ADMIN_USERNAME', default='admin')
 INITIAL_ADMIN_PASSWORD = config('INITIAL_ADMIN_PASSWORD', default='ChangeMe@2026!')
 INITIAL_ADMIN_EMAIL = config('INITIAL_ADMIN_EMAIL', default='admin@securemed.app')
+
+# ==========================================================================
+# Celery Configuration
+# ==========================================================================
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://127.0.0.1:6379/0')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://127.0.0.1:6379/0')
+
+# AI Settings
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Riyadh'
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 300   # 5 minutes max per task
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Fair task distribution
+
+# Cache (Redis for sessions, rate-limiting, Celery-adjacent caching)
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'IGNORE_EXCEPTIONS': True,   # Degrade gracefully if Redis is down
+        },
+        'KEY_PREFIX': 'securemed',
+        'TIMEOUT': 300,  # 5 minutes default
+    }
+}

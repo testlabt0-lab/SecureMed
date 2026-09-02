@@ -26,6 +26,8 @@ from apps.accounts.serializers import (
     BiometricLoginSerializer, ChangePasswordSerializer,
 )
 from apps.audit.utils import log_security_event
+from apps.audit.device_tracker import DeviceTracker
+from apps.security.session_security import SessionManager
 from apps.security.throttling import BiometricRateThrottle
 from apps.security.crypto import encrypt_field, decrypt_field
 
@@ -60,19 +62,57 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
 
-        # Two-factor authentication branch (TOTP)
+        # Device Tracking (early evaluation for Adaptive Auth)
+        device_info = {
+            'ip_address': request.META.get('REMOTE_ADDR'),
+            'mac_address': request.META.get('HTTP_X_MAC_ADDRESS', ''),
+            'device_fingerprint': request.META.get('HTTP_X_DEVICE_FINGERPRINT', ''),
+            'os_info': request.META.get('HTTP_X_OS_INFO', ''),
+            'browser_info': request.META.get('HTTP_X_BROWSER_INFO', '')
+        }
+        device, is_new_device = DeviceTracker.track_device(user, request, device_info)
+        
+        # Determine if we need MFA (TOTP enabled OR Adaptive Auth for untrusted/new device)
+        needs_mfa = False
+        mfa_method = 'none'
+        
         if user.mfa_enabled and user.mfa_secret:
+            needs_mfa = True
+            mfa_method = 'totp'
+        elif is_new_device or (device and not device.is_trusted):
+            # Adaptive Authentication: Untrusted device needs email OTP
+            needs_mfa = True
+            mfa_method = 'email'
+
+        if needs_mfa:
             mfa_token = secrets.token_urlsafe(32)
             cache.set(f'mfa_pending:{mfa_token}', str(user.id), timeout=300)  # 5 min
+            
+            if mfa_method == 'email':
+                import random
+                otp_code = f"{random.randint(100000, 999999)}"
+                cache.set(f'mfa_code:{mfa_token}', otp_code, timeout=300)
+                
+                # Send OTP via email
+                from utils.email_service import send_securemed_email
+                send_securemed_email(
+                    to_email=user.email,
+                    subject='رمز التحقق بخطوتين — SecureMed',
+                    title='محاولة دخول من جهاز جديد',
+                    body_html=f"<p>لقد رصدنا محاولة تسجيل دخول من جهاز جديد أو غير موثوق. رمز التحقق الخاص بك هو: <b>{otp_code}</b></p>",
+                    footer_note='صالح لمدة 5 دقائق'
+                )
+
             log_security_event(
                 user=user,
-                event_type='LOGIN_SUCCESS',
+                event_type='LOGIN_CHALLENGE',
                 request=request,
-                details={'method': 'password', 'mfa_pending': True},
+                details={'method': mfa_method, 'mfa_pending': True, 'is_new_device': is_new_device},
             )
             return Response({
                 'requires_2fa': True,
                 'mfa_token': mfa_token,
+                'method': mfa_method,
                 'detail': 'يجب إدخال رمز التحقق بخطوتين',
             })
 
@@ -80,6 +120,8 @@ class LoginView(APIView):
         user.last_login = timezone.now()
         user.last_login_ip = request.META.get('REMOTE_ADDR')
         user.save(update_fields=['last_login', 'last_login_ip'])
+
+        SessionManager.register_session(user, request)
 
         tokens = get_tokens_for_user(user)
         log_security_event(
@@ -105,6 +147,10 @@ class LogoutView(APIView):
             if refresh_token:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
+                
+            if request.user.is_authenticated:
+                SessionManager.force_logout_user(request.user.id)
+                
             log_security_event(
                 user=request.user,
                 event_type='LOGOUT',
@@ -200,6 +246,15 @@ class BiometricLoginView(APIView):
         user.last_login = timezone.now()
         user.last_login_ip = request.META.get('REMOTE_ADDR')
         user.save(update_fields=['last_login', 'last_login_ip'])
+
+        # Device Tracking
+        device_info = {
+            'ip_address': user.last_login_ip,
+            'mac_address': request.META.get('HTTP_X_MAC_ADDRESS', ''),
+            'device_fingerprint': request.META.get('HTTP_X_DEVICE_FINGERPRINT', ''),
+        }
+        DeviceTracker.track_device(user, request, device_info)
+        SessionManager.register_session(user, request)
 
         tokens = get_tokens_for_user(user)
         log_security_event(
@@ -459,8 +514,22 @@ class MFALoginView(APIView):
                 {'detail': 'المستخدم غير موجود'},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        secret = decrypt_field(user.mfa_secret)
-        if not pyotp.TOTP(secret).verify(code, valid_window=1):
+            
+        # Check if it's an email OTP
+        cached_code = cache.get(f'mfa_code:{mfa_token}')
+        is_valid = False
+        
+        if cached_code:
+            # Verify Email OTP
+            is_valid = (code == cached_code)
+        else:
+            # Verify TOTP
+            if not user.mfa_secret:
+                return Response({'detail': 'إعدادات التحقق غير صالحة'}, status=400)
+            secret = decrypt_field(user.mfa_secret)
+            is_valid = pyotp.TOTP(secret).verify(code, valid_window=1)
+
+        if not is_valid:
             log_security_event(
                 user=user, event_type='MFA_LOGIN_FAILED', request=request,
                 severity='WARNING',
@@ -469,7 +538,21 @@ class MFALoginView(APIView):
                 {'detail': 'رمز التحقق غير صحيح'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+            
+        # Trust this device if requested
+        trust_device = request.data.get('trust_device', False)
+        if trust_device:
+            fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
+            if fingerprint:
+                from apps.security.models import DeviceRegistry
+                DeviceRegistry.objects.filter(
+                    user=user, device_fingerprint=fingerprint
+                ).update(is_trusted=True)
+
         cache.delete(f'mfa_pending:{mfa_token}')
+        if cached_code:
+            cache.delete(f'mfa_code:{mfa_token}')
+            
         user.last_login = timezone.now()
         user.last_login_ip = request.META.get('REMOTE_ADDR')
         user.save(update_fields=['last_login', 'last_login_ip'])

@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Shield, Scan, AlertTriangle, CheckCircle, XCircle,
-  Fingerprint, Lock, Cookie, Network, Bug, Activity
+  Fingerprint, Lock, Cookie, Network, Bug, Activity, MonitorSmartphone, ScrollText, Settings
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { securityAPI } from '../api/client';
 import toast from 'react-hot-toast';
 
@@ -89,6 +90,37 @@ export default function SecurityDashboard() {
         <p className="text-gray-600 text-sm mt-1">
           المراقبة الأمنية الشاملة - متطلبات الأمان الستة
         </p>
+      </div>
+
+      {/* Security Quick Links */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Link to="/security/devices" className="card hover:shadow-lg transition-shadow flex items-center gap-4 cursor-pointer">
+          <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center">
+            <MonitorSmartphone className="w-6 h-6 text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900">إدارة الأجهزة</h3>
+            <p className="text-sm text-gray-500">مراقبة الأجهزة المتصلة</p>
+          </div>
+        </Link>
+        <Link to="/security/login-history" className="card hover:shadow-lg transition-shadow flex items-center gap-4 cursor-pointer">
+          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+            <ScrollText className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900">سجل الدخول</h3>
+            <p className="text-sm text-gray-500">تتبع عمليات الدخول</p>
+          </div>
+        </Link>
+        <Link to="/security/settings" className="card hover:shadow-lg transition-shadow flex items-center gap-4 cursor-pointer">
+          <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+            <Settings className="w-6 h-6 text-purple-600" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900">إعدادات الأمان</h3>
+            <p className="text-sm text-gray-500">تغيير كلمة المرور والمصادقة</p>
+          </div>
+        </Link>
       </div>
 
       {/* Security Features Grid */}

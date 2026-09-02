@@ -63,6 +63,23 @@ class AuditLog(models.Model):
         PASSWORD_RESET_REQUESTED = 'PASSWORD_RESET_REQUESTED', _('طلب استعادة كلمة المرور')
         PASSWORD_RESET_COMPLETED = 'PASSWORD_RESET_COMPLETED', _('إتمام استعادة كلمة المرور')
 
+        # Enhanced Audit Events
+        DEVICE_BLOCKED = 'DEVICE_BLOCKED', _('حظر جهاز')
+        SUSPICIOUS_ACTIVITY = 'SUSPICIOUS_ACTIVITY', _('نشاط مشبوه')
+        SESSION_HIJACK_DETECTED = 'SESSION_HIJACK_DETECTED', _('اكتشاف سرقة جلسة')
+        DATA_EXPORT = 'DATA_EXPORT', _('تصدير بيانات')
+        BULK_DELETE = 'BULK_DELETE', _('حذف جماعي')
+        CONFIG_CHANGED = 'CONFIG_CHANGED', _('تغيير إعدادات')
+        BACKUP_CREATED = 'BACKUP_CREATED', _('إنشاء نسخة احتياطية')
+        BACKUP_RESTORED = 'BACKUP_RESTORED', _('استعادة نسخة احتياطية')
+        FILE_UPLOADED = 'FILE_UPLOADED', _('رفع ملف')
+        FILE_DOWNLOADED = 'FILE_DOWNLOADED', _('تحميل ملف')
+        
+        # Generic Data Mutations
+        DATA_CREATED = 'DATA_CREATED', _('إنشاء بيانات')
+        DATA_MODIFIED = 'DATA_MODIFIED', _('تعديل بيانات')
+        DATA_DELETED = 'DATA_DELETED', _('حذف بيانات')
+
     class Severity(models.TextChoices):
         INFO = 'INFO', _('معلومة')
         WARNING = 'WARNING', _('تحذير')
@@ -87,6 +104,20 @@ class AuditLog(models.Model):
     user_agent = models.TextField(_('User Agent'), blank=True)
     path = models.CharField(_('المسار'), max_length=255, blank=True)
     method = models.CharField(_('الطريقة'), max_length=10, blank=True)
+    
+    # Enhanced Device Fingerprint Fields
+    mac_address = models.CharField(_('عنوان MAC'), max_length=100, blank=True)
+    device_fingerprint = models.CharField(_('بصمة الجهاز'), max_length=255, blank=True, db_index=True)
+    hostname = models.CharField(_('اسم الجهاز'), max_length=255, blank=True)
+    os_info = models.CharField(_('نظام التشغيل'), max_length=255, blank=True)
+    browser_info = models.CharField(_('المتصفح'), max_length=255, blank=True)
+    screen_resolution = models.CharField(_('دقة الشاشة'), max_length=50, blank=True)
+    timezone_offset = models.CharField(_('فرق التوقيت'), max_length=50, blank=True)
+    language = models.CharField(_('اللغة'), max_length=50, blank=True)
+    session_id = models.CharField(_('معرف الجلسة'), max_length=255, blank=True, db_index=True)
+    geo_location = models.CharField(_('الموقع الجغرافي'), max_length=255, blank=True)
+    risk_score = models.FloatField(_('درجة المخاطرة'), default=0.0)
+
     details = models.JSONField(_('التفاصيل'), default=dict)
     timestamp = models.DateTimeField(_('الوقت'), auto_now_add=True, db_index=True)
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/authStore';
@@ -7,6 +7,7 @@ import { mfaApi } from '../api/extendedApis';
 import {
   Stethoscope, Fingerprint, Mail, Lock, ShieldCheck, AlertCircle,
   Smartphone, HeartPulse, Activity, Eye, EyeOff, ArrowLeft, ScanFace,
+  Cpu, Monitor, ShieldAlert, RefreshCw, CheckCircle2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AnimatedBackground from '../components/fx/AnimatedBackground';
@@ -16,6 +17,7 @@ import {
   enrollBiometric, loginWithBiometric,
   getCredentialByEmail,
 } from '../utils/webauthn';
+import { getDeviceFingerprint, DeviceInfo } from '../utils/deviceFingerprint';
 
 const easing = [0.22, 1, 0.36, 1] as const;
 
@@ -34,6 +36,24 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [webauthnSupported] = useState(isWebAuthnAvailable());
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+  const [rememberDevice, setRememberDevice] = useState(true);
+  const [failedCount, setFailedCount] = useState(0);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const [captchaChallenge, setCaptchaChallenge] = useState({ a: 3, b: 5 });
+  const [blockedAlert, setBlockedAlert] = useState<string | null>(null);
+
+  useEffect(() => {
+    getDeviceFingerprint().then((info) => setDeviceInfo(info)).catch(console.error);
+    generateCaptcha();
+  }, []);
+
+  const generateCaptcha = () => {
+    const a = Math.floor(Math.random() * 8) + 1;
+    const b = Math.floor(Math.random() * 9) + 1;
+    setCaptchaChallenge({ a, b });
+    setCaptchaAnswer('');
+  };
 
   // 2FA step state
   const [pendingMfaToken, setPendingMfaToken] = useState<string | null>(null);
@@ -56,6 +76,17 @@ export default function Login() {
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setBlockedAlert(null);
+
+    // Verify captcha if enabled after multiple attempts
+    if (failedCount >= 2) {
+      if (parseInt(captchaAnswer, 10) !== captchaChallenge.a + captchaChallenge.b) {
+        toast.error('إجابة التحقق الأمني (CAPTCHA) غير صحيحة');
+        generateCaptcha();
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const { data } = await authAPI.login(email, password);
@@ -69,7 +100,13 @@ export default function Login() {
       toast.success(`مرحباً ${data.user.full_name}`);
       navigate('/dashboard');
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'فشل تسجيل الدخول');
+      const detail = err.response?.data?.detail || err.response?.data?.message || 'فشل تسجيل الدخول';
+      if (err.response?.status === 403 || detail.includes('حظر') || detail.includes('blocked')) {
+        setBlockedAlert(detail || 'تم حظر هذا الجهاز أو عنوان IP لأسباب أمنية');
+      }
+      setFailedCount((c) => c + 1);
+      generateCaptcha();
+      toast.error(detail);
     } finally {
       setLoading(false);
     }
@@ -307,6 +344,22 @@ export default function Login() {
                         exit={{ opacity: 0, y: -16 }}
                         transition={{ duration: 0.3, ease: easing }}
                       >
+                        {/* Blocked Alert Banner */}
+                        {blockedAlert && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="p-3.5 bg-red-500/15 border border-red-500/40 rounded-2xl flex items-start gap-3 text-red-200"
+                          >
+                            <ShieldAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                            <div className="text-xs space-y-1">
+                              <p className="font-bold text-red-300">وصول محظور من هذا الجهاز أو العنوان</p>
+                              <p>{blockedAlert}</p>
+                              <p className="text-[11px] text-red-300/80">تم تقييد الوصول وتسجيل الحدث الجنائي في سجلات التدقيق الأمني WAF.</p>
+                            </div>
+                          </motion.div>
+                        )}
+
                         <motion.div
                           initial={{ opacity: 0, y: 14 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -356,6 +409,63 @@ export default function Login() {
                             </button>
                           </div>
                         </motion.div>
+
+                        {/* Security CAPTCHA (active after multiple attempts) */}
+                        {failedCount >= 2 && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2"
+                          >
+                            <div className="flex items-center justify-between text-xs text-amber-300">
+                              <span className="font-semibold flex items-center gap-1.5">
+                                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                                فحص التحقق البشري (مكافحة الهجمات الآلية)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={generateCaptcha}
+                                className="hover:text-amber-200 flex items-center gap-1"
+                                title="تحديث التحدي"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="bg-gray-900/80 px-3 py-2 rounded-xl text-white font-mono font-bold tracking-wider text-sm border border-white/10">
+                                {captchaChallenge.a} + {captchaChallenge.b} = ؟
+                              </div>
+                              <input
+                                type="number"
+                                required
+                                value={captchaAnswer}
+                                onChange={(e) => setCaptchaAnswer(e.target.value)}
+                                placeholder="الناتج"
+                                className="input-field py-2 text-center text-sm font-bold w-28 bg-white/95 dark:bg-gray-800/95"
+                              />
+                            </div>
+                          </motion.div>
+                        )}
+
+                        {/* Remember / Trust this device */}
+                        <div className="flex items-center justify-between pt-1">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-300 hover:text-white transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={rememberDevice}
+                              onChange={(e) => setRememberDevice(e.target.checked)}
+                              className="rounded border-gray-600 text-primary-600 focus:ring-primary-500 bg-gray-800 w-4 h-4"
+                            />
+                            <span>توثيق هذا الجهاز كجهاز موثوق</span>
+                          </label>
+                          <Link
+                            to="/forgot-password"
+                            className="text-xs text-primary-300 hover:text-primary-200 transition-colors"
+                          >
+                            نسيت كلمة المرور؟
+                          </Link>
+                        </div>
+
                         <motion.div
                           initial={{ opacity: 0, y: 14 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -364,25 +474,46 @@ export default function Login() {
                           <button
                             type="submit"
                             disabled={loading}
-                            className="btn-primary w-full flex items-center justify-center gap-2 py-3"
+                            className="btn-primary w-full flex items-center justify-center gap-2 py-3 shadow-lg shadow-primary-600/30"
                           >
                             {loading && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-                            {loading ? 'جاري التحقق...' : 'تسجيل الدخول'}
+                            {loading ? 'جاري التحقق...' : 'تسجيل الدخول الآمن'}
                             {!loading && <ArrowLeft className="w-4 h-4" />}
                           </button>
                         </motion.div>
-                        <motion.div
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: 0.32 }}
-                        >
-                          <Link
-                            to="/forgot-password"
-                            className="block text-center text-sm text-primary-600 hover:text-primary-700 dark:text-primary-300 dark:hover:text-primary-200 transition-colors"
+
+                        {/* Device Footprint & Hardware Identity Indicator */}
+                        {deviceInfo && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: 0.4 }}
+                            className="pt-2 border-t border-white/10"
                           >
-                            نسيت كلمة المرور؟
-                          </Link>
-                        </motion.div>
+                            <div className="p-2.5 rounded-xl bg-gray-900/40 border border-white/5 space-y-1.5 text-[11px] text-gray-400">
+                              <div className="flex items-center justify-between text-gray-300">
+                                <span className="flex items-center gap-1 font-semibold">
+                                  <Monitor className="w-3.5 h-3.5 text-medical-400" />
+                                  بصمة الجهاز والتحقق الجنائي
+                                </span>
+                                <span className="inline-flex items-center gap-1 text-emerald-400 text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  نشط ومراقب
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                                <div>نظام: <span className="text-gray-300">{deviceInfo.os_info}</span></div>
+                                <div>متصفح: <span className="text-gray-300">{deviceInfo.browser_info}</span></div>
+                                <div className="truncate" title={deviceInfo.mac_address}>
+                                  MAC: <span className="text-gray-300">{deviceInfo.mac_address || 'محمي'}</span>
+                                </div>
+                                <div className="truncate" title={deviceInfo.device_fingerprint}>
+                                  ID: <span className="text-gray-300">{deviceInfo.device_fingerprint.slice(0, 10)}...</span>
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
                       </motion.form>
                     ) : (
                       <motion.div

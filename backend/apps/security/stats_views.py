@@ -89,6 +89,21 @@ class DashboardStatsView(APIView):
             item['record_type']: item['count'] for item in records_by_type
         }
 
+        # Device stats
+        from apps.security.models import DeviceRegistry
+        device_queryset = DeviceRegistry.objects.filter(user=user)
+        device_type_counts = {}
+        for device in device_queryset:
+            from apps.security.middleware import WAFMiddleware
+            middleware = WAFMiddleware(lambda r: None)
+            dtype = middleware._detect_device_type(device.device_fingerprint)
+            device_type_counts[dtype] = device_type_counts.get(dtype, 0) + 1
+        device_stats = {
+            'total_devices': device_queryset.count(),
+            'by_type': device_type_counts,
+            'trusted': device_queryset.filter(is_trusted=True).count(),
+        }
+
         return Response({
             'channels': {
                 'total': total_channels,
@@ -108,6 +123,7 @@ class DashboardStatsView(APIView):
             'users': user_stats,
             'audit': audit_stats,
             'trends': self._get_trends(accessible_channel_ids),
+            'devices': device_stats,
         })
 
     def _get_trends(self, channel_ids):

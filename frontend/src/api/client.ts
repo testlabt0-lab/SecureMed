@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { getDeviceFingerprint } from '../utils/deviceFingerprint';
 
 const API_BASE_URL = '/api/v1';
 
@@ -12,11 +13,25 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
     const tokens = useAuthStore.getState().tokens;
     if (tokens?.access) {
       config.headers.Authorization = `Bearer ${tokens.access}`;
     }
+
+    // Attach device fingerprint to every request
+    try {
+      const deviceInfo = await getDeviceFingerprint();
+      config.headers['X-Device-Fingerprint'] = deviceInfo.device_fingerprint;
+      config.headers['X-Mac-Address'] = deviceInfo.mac_address || '';
+      config.headers['X-OS-Info'] = deviceInfo.os_info;
+      config.headers['X-Browser-Info'] = deviceInfo.browser_info;
+      config.headers['X-Screen-Resolution'] = deviceInfo.screen_resolution;
+      config.headers['X-Timezone-Offset'] = deviceInfo.timezone_offset;
+    } catch (e) {
+      console.warn("Failed to get device fingerprint", e);
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -178,6 +193,27 @@ export const securityAPI = {
   dashboard: () => api.get('/security/dashboard/'),
   stats: () => api.get('/security/stats/'),
   activity: () => api.get('/security/activity/'),
+  // Enhanced Security features
+  devices: {
+    list: () => api.get('/security/devices/'),
+    trust: (id: string) => api.post(`/security/devices/${id}/trust/`),
+  },
+  deviceTypes: {
+    list: () => api.get('/security/device-types/'),
+  },
+  blockedDevices: {
+    list: () => api.get('/security/blocked-devices/'),
+    create: (data: any) => api.post('/security/blocked-devices/', data),
+    unblock: (id: string) => api.post(`/security/blocked-devices/${id}/unblock/`),
+  },
+  blockedIps: {
+    list: () => api.get('/security/blocked-ips/'),
+    create: (data: any) => api.post('/security/blocked-ips/', data),
+    unblock: (id: string) => api.post(`/security/blocked-ips/${id}/unblock/`),
+  },
+  loginHistory: {
+    list: () => api.get('/security/login-history/'),
+  },
 };
 
 export const auditAPI = {

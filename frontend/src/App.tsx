@@ -15,6 +15,15 @@ import Backups from './pages/Backups';
 import Profile from './pages/Profile';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import NotificationsCenter from './pages/NotificationsCenter';
+import Appointments from './pages/Appointments';
+import Reports from './pages/Reports';
+import SettingsPage from './pages/SettingsPage';
+import { DeviceManagement } from './pages/DeviceManagement';
+import { LoginHistory } from './pages/LoginHistory';
+import { SecuritySettings } from './pages/SecuritySettings';
+import PharmacyDashboard from './pages/PharmacyDashboard';
+import BillingDashboard from './pages/BillingDashboard';
+import Telemedicine from './pages/Telemedicine';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -38,6 +47,9 @@ function App() {
         <Route path="/patients" element={<Patients />} />
         <Route path="/patients/:id" element={<PatientProfile />} />
         <Route path="/security" element={<SecurityDashboard />} />
+        <Route path="/security/devices" element={<DeviceManagement />} />
+        <Route path="/security/login-history" element={<LoginHistory />} />
+        <Route path="/security/settings" element={<SecuritySettings />} />
         <Route path="/audit" element={<AuditLogs />} />
         <Route path="/users" element={<Users />} />
         <Route path="/basins" element={<Basins />} />
@@ -45,6 +57,12 @@ function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/analytics" element={<AnalyticsDashboard />} />
         <Route path="/notifications" element={<NotificationsCenter />} />
+        <Route path="/appointments" element={<Appointments />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/telemedicine" element={<Telemedicine />} />
+        <Route path="/pharmacy" element={<PharmacyDashboard />} />
+        <Route path="/billing" element={<BillingDashboard />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

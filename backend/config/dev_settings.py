@@ -62,6 +62,40 @@ CACHES = {
     }
 }
 
+# Activate mock services for development (simulates AI, Redis, etc.)
+MOCK_SERVICES = os.environ.get('MOCK_SERVICES', 'true').lower() == 'true'
+if MOCK_SERVICES:
+    from mock_services.config import MOCK_SERVICES as _MS  # noqa: F401
+    # Patch AI service to use mock
+    import mock_services
+    mock_service = mock_services.patch_ai_service()
+    
+    # Mock cache with predefined responses for common operations
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'dev-mock',
+        }
+    }
+    
+    # Mock Redis connection for celery/broker
+    try:
+        import redis as _redis
+        _redis_client = _redis.from_url(os.environ.get('REDIS_URL', 'redis://localhost:6379/0'), decode_responses=True)
+        _redis_client.ping()
+    except Exception:
+        import mock_services as _ms
+        from unittest.mock import MagicMock
+        _redis_client = MagicMock()
+        _redis_client.get.return_value = None
+        _redis_client.set.return_value = True
+        _redis_client.exists.return_value = False
+        _redis_client.flushdb.return_value = None
+        _redis_client.ping.return_value = True
+    
+    # Mock email backend - just record emails without sending
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
 # Dev email backend: write real .eml files to backend/logs/emails/
 # (demonstrates the full email flow — templating, attachments — without
 # SMTP credentials; set EMAIL_HOST env to switch to real SMTP)

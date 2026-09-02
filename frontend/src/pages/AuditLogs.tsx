@@ -51,7 +51,7 @@ function AuditRow({ log }: { log: any }) {
     setBlocking(true);
     const toastId = toast.loading('جاري حظر الجهاز...');
     try {
-      await api.security.blockedDevices.create({
+      await api.post('/security/blocked-devices/', {
         device_fingerprint: log.device_fingerprint || '',
         mac_address: log.mac_address || '',
         reason: `محظور من سجلات التدقيق (نشاط مشبوه)`

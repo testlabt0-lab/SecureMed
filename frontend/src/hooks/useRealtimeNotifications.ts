@@ -17,8 +17,7 @@ export function useRealtimeNotifications() {
     // Determine WS protocol
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Use window.location.host, but fallback to localhost:8000 for local dev if needed
-    // Usually Vite proxy isn't setup for WS in default setup, but let's assume standard URL or hardcode for dev:
-    const host = process.env.NODE_ENV === 'development' ? 'localhost:8000' : window.location.host;
+    const host = window.location.host;
     
     // Check if token exists to pass (if using token-based WS auth, but channels might use session)
     const token = localStorage.getItem('access_token');

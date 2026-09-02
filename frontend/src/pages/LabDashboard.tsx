@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import { labAPI } from '../api/extendedApis';
+import CreateLabOrderModal from '../components/lab/CreateLabOrderModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface LabTest {
@@ -88,6 +89,7 @@ export default function LabDashboard() {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'orders' | 'catalog' | 'alerts'>('orders');
   const [statusFilter, setStatusFilter] = useState('');
+  const [showOrderModal, setShowOrderModal] = useState(false);
   const [showResultModal, setShowResultModal] = useState<LabOrder | null>(null);
 
   // Queries
@@ -209,6 +211,13 @@ export default function LabDashboard() {
               <option value="COMPLETED">مكتمل (للمصادقة)</option>
               <option value="VALIDATED">مصادق عليه</option>
             </select>
+            <button 
+              onClick={() => setShowOrderModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              طلب تحليل جديد
+            </button>
           </div>
 
           {isLoading ? (
@@ -411,6 +420,7 @@ export default function LabDashboard() {
           }}
         />
       )}
+      <CreateLabOrderModal isOpen={showOrderModal} onClose={() => setShowOrderModal(false)} />
     </div>
   );
 }

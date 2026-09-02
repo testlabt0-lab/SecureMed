@@ -8,6 +8,7 @@ import {
 import toast from 'react-hot-toast';
 import { telemedicineAPI } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
+import CreateSessionModal from '../components/telemedicine/CreateSessionModal';
 
 export default function Telemedicine() {
   const { user } = useAuthStore();
@@ -15,6 +16,7 @@ export default function Telemedicine() {
   const [consultations, setConsultations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<any | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Video state mock
   const [isMuted, setIsMuted] = useState(false);
@@ -251,7 +253,10 @@ export default function Telemedicine() {
         </div>
         
         {user?.role === 'DOCTOR' && (
-          <button className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 hover:bg-primary-500 transition-all shadow-lg shadow-primary-500/25">
+          <button 
+            onClick={() => setShowCreateModal(true)}
+            className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 hover:bg-primary-500 transition-all shadow-lg shadow-primary-500/25"
+          >
             <Plus className="w-5 h-5" />
             جلسة جديدة
           </button>
@@ -279,7 +284,7 @@ export default function Telemedicine() {
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400">قيد الانتظار</p>
               <h3 className="text-3xl font-black text-gray-900 dark:text-white mt-1">3</h3>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-500/10 flex items-center justify-center text-amber-600 dark:text-amber-400 transition-transform group-hover:scale-110">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-500/10 flex items-center justify-center text-amber-600 dark:bg-amber-400 transition-transform group-hover:scale-110">
               <Clock className="w-6 h-6" />
             </div>
           </div>
@@ -414,6 +419,8 @@ export default function Telemedicine() {
           )}
         </div>
       </div>
+
+      <CreateSessionModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} />
     </div>
   );
 }

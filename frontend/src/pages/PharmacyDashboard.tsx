@@ -9,6 +9,8 @@ import toast from 'react-hot-toast';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import { pharmacyAPI } from '../api/extendedApis';
+import AddMedicationModal from '../components/pharmacy/AddMedicationModal';
+import DispensePrescriptionModal from '../components/pharmacy/DispensePrescriptionModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface Medication {
@@ -79,6 +81,7 @@ export default function PharmacyManagement() {
   const [search, setSearch] = useState('');
   const [stockFilter, setStockFilter] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDispenseModal, setShowDispenseModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState<Medication | null>(null);
   const [editMed, setEditMed] = useState<Medication | null>(null);
 
@@ -335,6 +338,15 @@ export default function PharmacyManagement() {
       {/* ─── TAB: Prescriptions ──────────────────────────────────── */}
       {activeTab === 'prescriptions' && (
         <div className="space-y-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">الوصفات الإلكترونية</h3>
+            <button 
+              onClick={() => setShowDispenseModal(true)}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+            >
+              صرف وصفة جديدة (يدوي)
+            </button>
+          </div>
           {prescriptions.length === 0 ? (
             <Card className="p-12 text-center">
               <FileText className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4" />

@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import { billingAPI } from '../api/extendedApis';
+import CreateInvoiceModal from '../components/billing/CreateInvoiceModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface Invoice {
@@ -78,6 +79,7 @@ export default function BillingManagement() {
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPayModal, setShowPayModal] = useState<Invoice | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Queries
   const { data: statsData } = useQuery({
@@ -192,6 +194,13 @@ export default function BillingManagement() {
               <option value="CANCELLED">ملغاة</option>
               <option value="PENDING_INSURANCE">بانتظار التأمين</option>
             </select>
+            <button 
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              إصدار فاتورة
+            </button>
           </div>
 
           {isLoading ? (
@@ -401,6 +410,8 @@ export default function BillingManagement() {
           isPending={payMutation.isPending}
         />
       )}
+
+      <CreateInvoiceModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} />
     </div>
   );
 }

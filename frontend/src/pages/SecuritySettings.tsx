@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { authAPI } from '../api/client';
+import { registerWebAuthnCredential } from '../utils/webauthn';
+import toast from 'react-hot-toast';
 
 export const SecuritySettings = () => {
   const { user } = useAuthStore();
@@ -30,6 +32,26 @@ export const SecuritySettings = () => {
       setPasswords({ old_password: '', new_password: '', confirm_password: '' });
     } catch (error: any) {
       setErrorMsg(error.response?.data?.detail || 'فشل تغيير كلمة المرور');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBiometricEnroll = async () => {
+    if (!user) return;
+    try {
+      setLoading(true);
+      const credential = await registerWebAuthnCredential(user.id, user.email, user.full_name || user.email);
+      await authAPI.enrollBiometric({
+        device_id: credential.id,
+        device_name: navigator.userAgent,
+        platform: 'web',
+        biometric_template: JSON.stringify(credential)
+      });
+      toast.success('تم تفعيل البصمة البيومترية بنجاح');
+      // In a real app we might update the authStore here to set is_biometric_enabled=true
+    } catch (error: any) {
+      toast.error(error.message || 'فشل تسجيل البصمة');
     } finally {
       setLoading(false);
     }
@@ -95,17 +117,20 @@ export const SecuritySettings = () => {
               <p className="font-medium">المصادقة الثنائية (2FA)</p>
               <p className="text-sm text-gray-500">حماية حسابك برمز إضافي</p>
             </div>
-            <button className="text-indigo-600 hover:text-indigo-900 font-medium">إعداد</button>
+            <button className="text-indigo-600 hover:text-indigo-900 font-medium" onClick={() => toast('سيتم دعمها قريباً!', { icon: '🚧' })}>إعداد</button>
           </div>
           <div className="flex items-center justify-between py-2 border-b">
             <div>
               <p className="font-medium">البصمة البيومترية</p>
               <p className="text-sm text-gray-500">{user?.is_biometric_enabled ? 'مفعلة' : 'غير مفعلة'}</p>
             </div>
-            <button className="text-indigo-600 hover:text-indigo-900 font-medium">إدارة</button>
+            <button onClick={handleBiometricEnroll} disabled={loading} className="text-indigo-600 hover:text-indigo-900 font-medium">
+              {loading ? 'جاري...' : 'إدارة'}
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
 };
+

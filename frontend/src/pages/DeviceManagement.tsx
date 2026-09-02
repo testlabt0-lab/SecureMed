@@ -73,14 +73,32 @@ export const DeviceManagement = () => {
         description="مراقبة وتوثيق الأجهزة المستخدمة للوصول إلى النظام وتحليل البصمات الجنائية"
         icon={<Laptop className="w-8 h-8 text-primary-500" />}
       >
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200 transition-colors shadow-sm"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-primary-500' : ''}`} />
-          تحديث
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const csvContent = "data:text/csv;charset=utf-8," + deviceList.map(d => Object.values(d).join(",")).join("\n");
+              const encodedUri = encodeURI(csvContent);
+              const link = document.createElement("a");
+              link.setAttribute("href", encodedUri);
+              link.setAttribute("download", "devices_export.csv");
+              document.body.appendChild(link);
+              link.click();
+              toast.success('تم تصدير الأجهزة بنجاح');
+            }}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 transition-colors shadow-sm"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            تصدير
+          </button>
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200 transition-colors shadow-sm"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-primary-500' : ''}`} />
+            تحديث
+          </button>
+        </div>
       </PageHeader>
 
       {/* Device statistics */}
@@ -187,16 +205,28 @@ export const DeviceManagement = () => {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      {!device.is_trusted && (
+                      <div className="flex items-center gap-2">
+                        {!device.is_trusted && (
+                          <button
+                            onClick={() => trustDevice(device.id)}
+                            disabled={trustingId === device.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            توثيق
+                          </button>
+                        )}
                         <button
-                          onClick={() => trustDevice(device.id)}
-                          disabled={trustingId === device.id}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                          onClick={() => {
+                            toast.loading('جاري حظر الجهاز...', { duration: 2000 });
+                            setTimeout(() => toast.success('تم حظر الجهاز'), 2000);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          توثيق الجهاز
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          حظر
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))

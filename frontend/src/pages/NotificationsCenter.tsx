@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Bell, CheckCheck, Trash2, AlertCircle, Info, AlertTriangle,
@@ -277,6 +278,3 @@ export default function NotificationsCenter() {
     </div>
   );
 }
-
-// Import useState
-import { useState } from 'react';

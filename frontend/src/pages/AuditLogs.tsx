@@ -158,11 +158,11 @@ export default function AuditLogs() {
     setExporting(true);
     const toastId = toast.loading('جاري التصدير بصيغة JSON لبيئات SIEM...');
     try {
-      const response = await reportsApi.auditJson({
+      const response = await auditAPI.export({
         event_type: eventType || undefined,
         severity: severity || undefined,
       });
-      downloadBlobResponse(response, 'SIEM_Audit_Export.json');
+      downloadBlobResponse(response as any, 'SIEM_Audit_Export.json');
       toast.success('تم تصدير السجلات لـ SIEM بنجاح', { id: toastId });
     } catch (err: any) {
       toast.error('فشل تصدير SIEM', { id: toastId });

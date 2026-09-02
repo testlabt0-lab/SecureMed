@@ -218,4 +218,5 @@ export const securityAPI = {
 
 export const auditAPI = {
   list: (params?: any) => api.get('/audit/logs/', { params }),
+  export: (params?: any) => api.get('/audit/logs/export/', { params, responseType: 'blob' }),
 };

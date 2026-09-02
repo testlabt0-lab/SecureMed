@@ -23,6 +23,8 @@ import { LoginHistory } from './pages/LoginHistory';
 import { SecuritySettings } from './pages/SecuritySettings';
 import PharmacyDashboard from './pages/PharmacyDashboard';
 import BillingDashboard from './pages/BillingDashboard';
+import LabDashboard from './pages/LabDashboard';
+import WardManagement from './pages/WardManagement';
 import Telemedicine from './pages/Telemedicine';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -62,6 +64,8 @@ function App() {
         <Route path="/telemedicine" element={<Telemedicine />} />
         <Route path="/pharmacy" element={<PharmacyDashboard />} />
         <Route path="/billing" element={<BillingDashboard />} />
+        <Route path="/lab" element={<LabDashboard />} />
+        <Route path="/wards" element={<WardManagement />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

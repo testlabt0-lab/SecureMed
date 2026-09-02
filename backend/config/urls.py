@@ -74,6 +74,10 @@ urlpatterns = [
     path('api/v1/analytics/', include('apps.analytics.urls')),
     path('api/v1/reports/', include('apps.reports.urls')),
     path('api/v1/appointments/', include('apps.appointments.urls')),
+    path('api/v1/pharmacy/', include('apps.pharmacy.urls')),
+    path('api/v1/billing/', include('apps.billing.urls')),
+    path('api/v1/lab/', include('apps.lab.urls')),
+    path('api/v1/wards/', include('apps.wards.urls')),
 
     # API documentation (Swagger / ReDoc)
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

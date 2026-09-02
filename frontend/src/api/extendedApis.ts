@@ -163,3 +163,102 @@ export const settingsAPI = {
   notificationPrefs: () => api.get('/notifications/preferences/'),
   updateNotificationPrefs: (data: any) => api.patch('/notifications/preferences/', data),
 };
+
+// ============== Pharmacy API ==============
+export const pharmacyAPI = {
+  // Medications
+  medications: (params?: any) => api.get('/pharmacy/medications/', { params }),
+  getMedication: (id: string) => api.get(`/pharmacy/medications/${id}/`),
+  createMedication: (data: any) => api.post('/pharmacy/medications/', data),
+  updateMedication: (id: string, data: any) => api.patch(`/pharmacy/medications/${id}/`, data),
+  deleteMedication: (id: string) => api.delete(`/pharmacy/medications/${id}/`),
+  lowStock: () => api.get('/pharmacy/medications/low_stock/'),
+  expired: () => api.get('/pharmacy/medications/expired/'),
+  expiringSoon: () => api.get('/pharmacy/medications/expiring_soon/'),
+  adjustStock: (id: string, data: any) => api.post(`/pharmacy/medications/${id}/adjust_stock/`, data),
+
+  // Prescriptions
+  prescriptions: (params?: any) => api.get('/pharmacy/prescriptions/', { params }),
+  getPrescription: (id: string) => api.get(`/pharmacy/prescriptions/${id}/`),
+  createPrescription: (data: any) => api.post('/pharmacy/prescriptions/', data),
+  dispensePrescription: (id: string, data?: any) => api.post(`/pharmacy/prescriptions/${id}/dispense/`, data || {}),
+  cancelPrescription: (id: string) => api.post(`/pharmacy/prescriptions/${id}/cancel/`),
+
+  // Drug Interactions
+  interactions: () => api.get('/pharmacy/interactions/'),
+  checkInteractions: (medicationIds: string[]) => api.post('/pharmacy/interactions/check/', { medication_ids: medicationIds }),
+
+  // Stats
+  stats: () => api.get('/pharmacy/stats/'),
+};
+
+// ============== Billing API ==============
+export const billingAPI = {
+  // Invoices
+  invoices: (params?: any) => api.get('/billing/invoices/', { params }),
+  getInvoice: (id: string) => api.get(`/billing/invoices/${id}/`),
+  createInvoice: (data: any) => api.post('/billing/invoices/', data),
+  payInvoice: (id: string, data: any) => api.post(`/billing/invoices/${id}/pay/`, data),
+  cancelInvoice: (id: string) => api.post(`/billing/invoices/${id}/cancel/`),
+
+  // Insurance
+  insuranceProviders: () => api.get('/billing/insurance-providers/'),
+  createInsuranceProvider: (data: any) => api.post('/billing/insurance-providers/', data),
+  patientInsurance: (params?: any) => api.get('/billing/patient-insurance/', { params }),
+  createPatientInsurance: (data: any) => api.post('/billing/patient-insurance/', data),
+
+  // Stats
+  stats: () => api.get('/billing/stats/'),
+};
+
+// ============== Lab API ==============
+export const labAPI = {
+  // Tests
+  tests: (params?: any) => api.get('/lab/tests/', { params }),
+  getTest: (id: string) => api.get(`/lab/tests/${id}/`),
+  createTest: (data: any) => api.post('/lab/tests/', data),
+  
+  // Orders
+  orders: (params?: any) => api.get('/lab/orders/', { params }),
+  getOrder: (id: string) => api.get(`/lab/orders/${id}/`),
+  createOrder: (data: any) => api.post('/lab/orders/', data),
+  collectSample: (id: string) => api.post(`/lab/orders/${id}/collect_sample/`),
+  startProcessing: (id: string) => api.post(`/lab/orders/${id}/start_processing/`),
+  cancelOrder: (id: string) => api.post(`/lab/orders/${id}/cancel/`),
+  
+  // Results
+  results: (params?: any) => api.get('/lab/results/', { params }),
+  createResult: (data: any) => api.post('/lab/results/', data),
+  validateResult: (id: string) => api.post(`/lab/results/${id}/validate/`),
+  criticalResults: () => api.get('/lab/results/critical/'),
+  abnormalResults: () => api.get('/lab/results/abnormal/'),
+  
+  // Stats
+  stats: () => api.get('/lab/stats/'),
+};
+
+// ============== Wards API ==============
+export const wardsAPI = {
+  // Wards
+  wards: () => api.get('/wards/wards/'),
+  createWard: (data: any) => api.post('/wards/wards/', data),
+  updateWard: (id: string, data: any) => api.patch(`/wards/wards/${id}/`, data),
+  
+  // Rooms
+  rooms: (wardId?: string) => api.get('/wards/rooms/', { params: { ward: wardId } }),
+  createRoom: (data: any) => api.post('/wards/rooms/', data),
+  
+  // Beds
+  beds: (wardId?: string, status?: string) => api.get('/wards/beds/', { params: { ward: wardId, status } }),
+  createBed: (data: any) => api.post('/wards/beds/', data),
+  changeBedStatus: (id: string, status: string) => api.post(`/wards/beds/${id}/change_status/`, { status }),
+  
+  // Assignments (Admissions)
+  assignments: (activeOnly: boolean = true) => api.get('/wards/assignments/', { params: { active: activeOnly } }),
+  createAssignment: (data: any) => api.post('/wards/assignments/', data),
+  discharge: (id: string) => api.post(`/wards/assignments/${id}/discharge/`),
+  
+  // Stats
+  stats: () => api.get('/wards/stats/'),
+};
+

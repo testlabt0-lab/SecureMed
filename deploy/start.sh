@@ -23,6 +23,9 @@ echo "==> Frontend URL: ${FRONTEND_URL:-<not set — reset links will use localh
 echo "==> Verifying migration history compatibility"
 python scripts/pre_migrate.py || true
 
+echo "==> Creating migrations"
+python manage.py makemigrations
+
 echo "==> Applying migrations"
 python manage.py migrate --fake-initial --noinput
 

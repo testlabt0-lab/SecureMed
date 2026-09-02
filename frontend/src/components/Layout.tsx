@@ -135,6 +135,8 @@ export default function Layout() {
     { path: '/users', label: 'المستخدمون', icon: Users, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN'] },
     { path: '/pharmacy', label: 'الصيدلية', icon: Pill, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'PHARMACIST', 'DOCTOR'] },
     { path: '/billing', label: 'الفواتير والتأمين', icon: CreditCard, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'] },
+    { path: '/lab', label: 'المختبر والتحاليل', icon: FileText, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'LAB_TECH', 'DOCTOR'] },
+    { path: '/wards', label: 'إدارة الأسرّة', icon: Building2, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'NURSE', 'DOCTOR'] },
     { path: '/basins', label: 'الأحواز الصحية', icon: Building2 },
     { path: '/backups', label: 'النسخ الاحتياطي', icon: DatabaseBackup, roles: ['SUPER_ADMIN'] },
     { path: '/notifications', label: 'الإشعارات', icon: Bell, badge: unreadCount },

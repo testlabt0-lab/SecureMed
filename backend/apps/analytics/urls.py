@@ -21,5 +21,6 @@ urlpatterns = [
     path('dashboard/overview/', analytics_view_overview, name='dashboard-overview'),
     path('dashboard/security/', analytics_view_security, name='dashboard-security'),
     path('dashboard/activity-feed/', analytics_view_activity_feed, name='dashboard-activity-feed'),
+    path('dashboard/activity_feed/', analytics_view_activity_feed, name='dashboard-activity-feed-underscore'),
     path('', include(router.urls)),
 ]

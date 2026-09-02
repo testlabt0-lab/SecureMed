@@ -1,115 +1,210 @@
 import React, { useEffect, useState } from 'react';
 import { securityAPI } from '../api/client';
+import { Laptop, Smartphone, ShieldCheck, ShieldAlert, RefreshCw, CheckCircle2, Clock } from 'lucide-react';
+import PageHeader from '../components/common/PageHeader';
+import Card from '../components/common/Card';
+import toast from 'react-hot-toast';
 
 export const DeviceManagement = () => {
   const [devices, setDevices] = useState<any[]>([]);
   const [deviceTypes, setDeviceTypes] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [trustingId, setTrustingId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchDevices();
-    fetchDeviceTypes();
+    fetchData();
   }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([fetchDevices(), fetchDeviceTypes()]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchDevices = async () => {
     try {
       const response = await securityAPI.devices.list();
-      setDevices(response.data);
+      const data = response?.data;
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+      setDevices(list);
     } catch (error) {
       console.error('Error fetching devices:', error);
-    } finally {
-      setLoading(false);
+      setDevices([]);
     }
   };
 
   const fetchDeviceTypes = async () => {
     try {
       const response = await securityAPI.deviceTypes.list();
-      setDeviceTypes(response.data);
+      const data = response?.data;
+      const types = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+      setDeviceTypes(types);
     } catch (error) {
       console.error('Error fetching device types:', error);
+      setDeviceTypes({});
     }
   };
 
   const trustDevice = async (id: string) => {
+    setTrustingId(id);
+    const toastId = toast.loading('جاري توثيق الجهاز...');
     try {
       await securityAPI.devices.trust(id);
-      fetchDevices();
+      toast.success('تم تعيين الجهاز كموثوق بنجاح', { id: toastId });
+      await fetchDevices();
     } catch (error) {
+      toast.error('فشل توثيق الجهاز', { id: toastId });
       console.error('Error trusting device:', error);
+    } finally {
+      setTrustingId(null);
     }
   };
 
-  if (loading) return <div className="p-4 text-center">جاري التحميل...</div>;
+  const deviceList = Array.isArray(devices) ? devices : [];
+  const typeEntries = Object.entries(deviceTypes || {});
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">إدارة الأجهزة</h1>
-      
-      <div className="bg-white shadow rounded-lg overflow-hidden mb-6">
-        <h2 className="text-xl font-medium text-gray-700 px-6 py-3">إحصائيات الأجهزة</h2>
-        <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Object.entries(deviceTypes).map(([type, count]) => (
-            <div key={type} className="bg-gray-50 rounded-lg p-4 text-center">
-              <div className="text-3xl font-bold text-primary-600">{count}</div>
-              <div className="text-sm text-gray-500 mt-1">{type}</div>
-            </div>
-          ))}
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-300">
+      <PageHeader
+        title="إدارة الأجهزة المصرحة"
+        description="مراقبة وتوثيق الأجهزة المستخدمة للوصول إلى النظام وتحليل البصمات الجنائية"
+        icon={<Laptop className="w-8 h-8 text-primary-500" />}
+      >
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200 transition-colors shadow-sm"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-primary-500' : ''}`} />
+          تحديث
+        </button>
+      </PageHeader>
+
+      {/* Device statistics */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {typeEntries.length > 0 ? (
+          typeEntries.map(([type, count]) => (
+            <Card key={type} className="p-4 text-center">
+              <div className="text-3xl font-extrabold text-primary-600 dark:text-primary-400">{count}</div>
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">{type}</div>
+            </Card>
+          ))
+        ) : (
+          <>
+            <Card className="p-4 text-center">
+              <div className="text-3xl font-extrabold text-primary-600 dark:text-primary-400">{deviceList.length}</div>
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">إجمالي الأجهزة</div>
+            </Card>
+            <Card className="p-4 text-center">
+              <div className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">
+                {deviceList.filter((d) => d.is_trusted).length}
+              </div>
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">أجهزة موثوقة</div>
+            </Card>
+          </>
+        )}
+      </div>
+
+      {/* Devices table */}
+      <Card className="overflow-hidden p-0">
+        <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700/60 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 dark:text-white">قائمة الأجهزة المسجلة</h3>
+          <span className="text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold px-2.5 py-1 rounded-full">
+            {deviceList.length} جهاز
+          </span>
         </div>
-      </div>
-      
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الجهاز</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">نظام التشغيل</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">المتصفح</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">IP الأخير</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الحالة</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">إجراءات</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {devices.map((device) => (
-              <tr key={device.id}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{device.mac_address || 'غير متوفر'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{device.os_info}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{device.browser_info}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{device.last_ip_address}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {device.is_trusted ? (
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                      موثوق
-                    </span>
-                  ) : (
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                      غير موثوق
-                    </span>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-left">
-                  {!device.is_trusted && (
-                    <button
-                      onClick={() => trustDevice(device.id)}
-                      className="text-indigo-600 hover:text-indigo-900 ml-4"
-                    >
-                      تعيين كموثوق
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {devices.length === 0 && (
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700/60">
+            <thead className="bg-gray-50/50 dark:bg-gray-900/30">
               <tr>
-                <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
-                  لا توجد أجهزة مسجلة
-                </td>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الجهاز</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">نظام التشغيل</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">المتصفح</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">آخر IP</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الحالة</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الإجراءات</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700/40">
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-500" />
+                    جاري تحميل الأجهزة...
+                  </td>
+                </tr>
+              ) : deviceList.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                    <Laptop className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    لا توجد أجهزة مسجلة في الوقت الحالي
+                  </td>
+                </tr>
+              ) : (
+                deviceList.map((device: any) => (
+                  <tr key={device.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-xl text-gray-600 dark:text-gray-300">
+                          {device.os_info?.toLowerCase().includes('android') || device.os_info?.toLowerCase().includes('ios') ? (
+                            <Smartphone className="w-4 h-4" />
+                          ) : (
+                            <Laptop className="w-4 h-4" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-white font-mono">
+                            {device.mac_address || device.device_fingerprint?.substring(0, 16) || 'غير متوفر'}
+                          </div>
+                          <div className="text-xs text-gray-400">{device.hostname || 'جهاز غير مسمى'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                      {device.os_info || 'غير معروف'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                      {device.browser_info || 'غير معروف'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500 dark:text-gray-400">
+                      {device.last_ip_address || '127.0.0.1'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {device.is_trusted ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          موثوق
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          غير موثوق
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      {!device.is_trusted && (
+                        <button
+                          onClick={() => trustDevice(device.id)}
+                          disabled={trustingId === device.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          توثيق الجهاز
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 };

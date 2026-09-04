@@ -68,7 +68,7 @@ if MOCK_SERVICES :
     from mock_services .config import MOCK_SERVICES as _MS # Comment_446
     # Comment_447
     import mock_services 
-    mock_service =mock_services .patch_ai_service ()
+    # mock_service =mock_services .patch_ai_service ()
 
     # Comment_448
     CACHES ={

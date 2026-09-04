@@ -10,6 +10,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunSQL(
+            sql="DROP INDEX IF EXISTS accounts_user_full_name_f0cb7590;",
+            reverse_sql=""
+        ),
         migrations.AlterField(
             model_name='user',
             name='full_name',

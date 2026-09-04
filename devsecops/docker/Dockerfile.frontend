@@ -21,6 +21,14 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Add security headers
 RUN sed -i 's/^http {/http {\n    server_tokens off;\n    add_header X-Frame-Options "DENY" always;\n    add_header X-Content-Type-Options "nosniff" always;\n    add_header X-XSS-Protection "1; mode=block" always;\n    add_header Referrer-Policy "same-origin" always;\n    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;\n    add_header Content-Security-Policy "default-src '"'"'self'"'"'; script-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'; style-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'; img-src '"'"'self'"'"' data: https:; font-src '"'"'self'"'"' data:;" always;/' /etc/nginx/nginx.conf
 
+# Setup non-root user permissions
+RUN chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx/conf.d && \
+    touch /var/run/nginx.pid && \
+    chown -R nginx:nginx /var/run/nginx.pid
+
+# Switch to non-root user
+USER nginx
+
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]

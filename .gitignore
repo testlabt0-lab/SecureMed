@@ -18,7 +18,10 @@ backend/venv/
 # ---------- Environment & secrets (NEVER commit) ----------
 .env
 **/.env
+*.env
+.env.production
 !.env.example
+!.env.production.example
 .z-ai-config
 **/.z-ai-config
 certs/*.pem

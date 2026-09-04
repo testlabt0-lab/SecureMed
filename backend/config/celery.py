@@ -47,6 +47,10 @@ app .conf .beat_schedule ={
 'task':'apps.reports.tasks.generate_monthly_report',
 'schedule':crontab (minute =0 ,hour =6 ,day_of_month =1 ),
 },
+'daily-summary-report':{
+'task':'apps.reports.tasks.generate_daily_summary',
+'schedule':crontab (minute =50 ,hour =23 ),
+},
 # Comment_435
 'flush-notification-emails':{
 'task':'apps.notifications.tasks.flush_pending_emails',

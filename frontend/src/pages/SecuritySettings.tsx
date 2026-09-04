@@ -8,7 +8,7 @@ import { X, ShieldCheck, Copy, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const SecuritySettings = () => {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');

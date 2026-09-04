@@ -3,6 +3,33 @@
 from django.db import migrations, models
 
 
+def drop_existing_indexes(apps, schema_editor):
+    if schema_editor.connection.vendor == 'postgresql':
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute("""
+            DO $$
+            DECLARE
+                r RECORD;
+            BEGIN
+                FOR r IN (
+                    SELECT i.relname AS index_name
+                    FROM pg_class t,
+                         pg_class i,
+                         pg_index ix,
+                         pg_attribute a
+                    WHERE t.oid = ix.indrelid
+                      AND i.oid = ix.indexrelid
+                      AND a.attrelid = t.oid
+                      AND a.attnum = ANY(ix.indkey)
+                      AND t.relkind = 'r'
+                      AND t.relname = 'accounts_user'
+                      AND a.attname IN ('full_name', 'role')
+                ) LOOP
+                    EXECUTE 'DROP INDEX IF EXISTS ' || r.index_name || ' CASCADE;';
+                END LOOP;
+            END $$;
+            """)
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,10 +37,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            sql="DROP INDEX IF EXISTS accounts_user_full_name_f0cb7590;",
-            reverse_sql=""
-        ),
+        migrations.RunPython(drop_existing_indexes, reverse_code=migrations.RunPython.noop),
         migrations.AlterField(
             model_name='user',
             name='full_name',

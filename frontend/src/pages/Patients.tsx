@@ -11,7 +11,7 @@ export default function Patients() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const queryClient = useQueryClient();
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
 
   const { data: patientsData, isLoading } = useQuery({
     queryKey: ['patients', { search }],

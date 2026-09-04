@@ -300,7 +300,7 @@ function StatsBar({ stats }: { stats: any }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Appointments() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const qc = useQueryClient();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);

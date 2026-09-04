@@ -210,7 +210,7 @@ function ReportCard({
 // ─── Main Reports Page ────────────────────────────────────────────────────────
 
 export default function Reports() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const now = new Date();
   const [startDate, setStartDate] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`);
   const [endDate, setEndDate] = useState(now.toISOString().slice(0,10));

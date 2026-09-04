@@ -8,7 +8,7 @@ import { useAuthStore } from '../../store/authStore';
 
 export default function CreateAppointmentModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const qc = useQueryClient();
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const [formData, setFormData] = useState({
     title: '',
     patient: '',

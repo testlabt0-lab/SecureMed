@@ -35,7 +35,7 @@ const channelTypeLabels: Record<string, string> = {
 };
 
 export default function AnalyticsDashboard() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
   const [downloadingMonthly, setDownloadingMonthly] = useState(false);

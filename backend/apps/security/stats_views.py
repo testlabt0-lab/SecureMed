@@ -47,16 +47,17 @@ class DashboardStatsView (APIView ):
         critical_records =records .filter (is_critical =True ).count ()
 
         # Comment_379
-        user_stats ={}
-        if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
-            user_stats ={
-            'total_users':User .objects .count (),
-            'active_users':User .objects .filter (is_active =True ).count (),
-            'biometric_enabled':User .objects .filter (is_biometric_enabled =True ).count (),
-            'by_role':{
-            role :User .objects .filter (role =role ).count ()
-            for role ,_ in User .Role .choices 
-            },
+        user_stats = {}
+        if user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
+            role_counts = dict(User.objects.values('role').annotate(count=Count('id')).values_list('role', 'count'))
+            user_stats = {
+                'total_users': User.objects.count(),
+                'active_users': User.objects.filter(is_active=True).count(),
+                'biometric_enabled': User.objects.filter(is_biometric_enabled=True).count(),
+                'by_role': {
+                    role: role_counts.get(role, 0)
+                    for role, _ in User.Role.choices
+                },
             }
 
             # Comment_380

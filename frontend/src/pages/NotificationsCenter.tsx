@@ -33,7 +33,7 @@ const priorityColors: Record<string, string> = {
 export default function NotificationsCenter() {
   const queryClient = useQueryClient();
   const { theme } = useThemeStore();
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const isDark = theme === 'dark';
 
   const [filter, setFilter] = useState<'all' | 'unread' | 'critical'>('all');

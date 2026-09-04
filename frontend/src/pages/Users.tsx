@@ -21,7 +21,7 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function Users() {
-  const { user: currentUser } = useAuthStore();
+  const currentUser = useAuthStore(state => state.user);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);

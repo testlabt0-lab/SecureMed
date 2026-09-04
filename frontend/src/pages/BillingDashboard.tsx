@@ -81,7 +81,7 @@ export default function BillingManagement() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPayModal, setShowPayModal] = useState<Invoice | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
 
   // Queries
   const { data: statsData } = useQuery({

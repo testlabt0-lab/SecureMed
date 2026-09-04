@@ -42,7 +42,7 @@ function renderContent(text: string) {
 }
 
 export default function AIAssistant({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');

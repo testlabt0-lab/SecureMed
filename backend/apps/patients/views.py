@@ -7,12 +7,13 @@ from rest_framework .decorators import action
 from django .core .exceptions import PermissionDenied 
 from django .conf import settings 
 
-from apps .patients .models import Patient ,MedicalRecord 
-from apps .patients .serializers import PatientSerializer ,MedicalRecordSerializer 
-from apps .audit .utils import log_security_event 
+from apps.patients.models import Patient, MedicalRecord
+from apps.patients.serializers import PatientSerializer, MedicalRecordSerializer
+from apps.audit.utils import log_security_event
+from apps.core.mixins import PatientAccessMixin
 
 
-class PatientViewSet (viewsets .ModelViewSet ):
+class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
     """Patient management."""
 
     # Comment_241
@@ -43,23 +44,10 @@ class PatientViewSet (viewsets .ModelViewSet ):
         ensure_module_enabled (request .user ,'patients')
         return super ().create (request ,*args ,**kwargs )
 
-    def check_object_access (self ,request ,patient ,action_name ='access'):
-        """Check if user can access this patient's data."""
-        from django .db .models import Q 
-        user =request .user 
-        if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
-            return True 
-            # Comment_247
-        if patient .channels .filter (
-        Q (owner =user )|Q (memberships__user =user ,memberships__is_active =True )
-        ).exists ():
-            return True 
-        raise PermissionDenied (f'غير مصرح لك بالوصول إلى بيانات هذا المريض')
-
-    def retrieve (self ,request ,*args ,**kwargs ):
-        patient =self .get_object ()
-        self .check_object_access (request ,patient ,'view')
-        log_security_event (
+    def retrieve(self, request, *args, **kwargs):
+        patient = self.get_object()
+        self.check_patient_access(request.user, patient, 'view')
+        log_security_event(
         user =request .user ,
         event_type ='PATIENT_DATA_ACCESSED',
         request =request ,
@@ -68,43 +56,37 @@ class PatientViewSet (viewsets .ModelViewSet ):
         return super ().retrieve (request ,*args ,**kwargs )
 
     @action (detail =True ,methods =['get'])
-    def channels (self ,request ,pk =None ):
+    def channels(self, request, pk=None):
         """Get all channels for a patient."""
-        patient =self .get_object ()
-        self .check_object_access (request ,patient ,'view channels')
+        patient = self.get_object()
+        self.check_patient_access(request.user, patient, 'view channels')
 
         from apps .channels .models import Channel 
         from apps .channels .serializers import ChannelSerializer 
 
-        channels =patient .channels .all ()
+        channels = patient.channels.all()
         # Comment_248
-        viewable_channels =[c for c in channels if c .can_view (request .user )]
-        serializer =ChannelSerializer (
+        viewable_channels = self.get_viewable_channels(request.user, patient)
+        serializer = ChannelSerializer(
         viewable_channels ,many =True ,context ={'request':request }
         )
         return Response (serializer .data )
 
     @action (detail =True ,methods =['get'])
-    def profile (self ,request ,pk =None ):
+    def profile(self, request, pk=None):
         """
         Full patient profile: patient + medical records timeline +
         viewable channels + medical files (single aggregated response).
         """
-        from django .db .models import Q 
-        from apps .channels .serializers import ChannelSerializer 
-        from apps .patients .serializers import MedicalRecordSerializer 
+        from django.db.models import Q
+        from apps.channels.serializers import ChannelSerializer
+        from apps.patients.serializers import MedicalRecordSerializer
 
-        patient =self .get_object ()
-        self .check_object_access (request ,patient ,'view profile')
-
-        user =request .user 
+        patient = self.get_object()
+        user = request.user
+        self.check_patient_access(user, patient, 'view profile')
         # Comment_249
-        if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
-            viewable_channels =list (patient .channels .all ())
-        else :
-            viewable_channels =[
-            c for c in patient .channels .all ()if c .can_view (user )
-            ]
+        viewable_channels = self.get_viewable_channels(user, patient)
 
             # Comment_250
         records =MedicalRecord .objects .filter (
@@ -151,7 +133,7 @@ class PatientViewSet (viewsets .ModelViewSet ):
         })
 
     @action (detail =True ,methods =['post'],url_path ='ai-summary')
-    def ai_summary (self ,request ,pk =None ):
+    def ai_summary(self, request, pk=None):
         """
         Generate an AI clinical case summary for this patient.
         Aggregates the same permission-scoped data as `profile`, then calls
@@ -159,20 +141,14 @@ class PatientViewSet (viewsets .ModelViewSet ):
         The summary is generated from real record data only — the AI service
         is instructed to never invent clinical facts.
         """
-        import json as _json 
-        import urllib .request 
+        import json as _json
+        import urllib.request
 
-        patient =self .get_object ()
-        self .check_object_access (request ,patient ,'AI summary')
-
-        user =request .user 
+        patient = self.get_object()
+        user = request.user
+        self.check_patient_access(user, patient, 'AI summary')
         # Comment_252
-        if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
-            viewable_channels =list (patient .channels .all ())
-        else :
-            viewable_channels =[
-            c for c in patient .channels .all ()if c .can_view (user )
-            ]
+        viewable_channels = self.get_viewable_channels(user, patient)
 
         records =MedicalRecord .objects .filter (
         channel__in =viewable_channels 

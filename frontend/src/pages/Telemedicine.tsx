@@ -11,7 +11,7 @@ import { useAuthStore } from '../store/authStore';
 import CreateSessionModal from '../components/telemedicine/CreateSessionModal';
 
 export default function Telemedicine() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
   const [consultations, setConsultations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);

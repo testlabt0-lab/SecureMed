@@ -102,7 +102,7 @@ function AccountTab() {
 // ─── Security Tab ─────────────────────────────────────────────────────────────
 
 function SecurityTab() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [pwForm, setPwForm] = useState({ old_password: '', new_password: '', confirm_password: '' });

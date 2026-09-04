@@ -31,7 +31,7 @@ const roleColors: Record<string, string> = {
 export default function ChannelDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const queryClient = useQueryClient();
   const [showAddMember, setShowAddMember] = useState(false);
   const [showActions, setShowActions] = useState<string | null>(null);

@@ -29,7 +29,7 @@ const typeColors: Record<string, string> = {
 };
 
 export default function Basins() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'HOSPITAL_ADMIN';
   const isSuper = user?.role === 'SUPER_ADMIN';
   const queryClient = useQueryClient();

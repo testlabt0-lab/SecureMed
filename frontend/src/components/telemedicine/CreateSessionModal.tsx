@@ -22,7 +22,7 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess }: Creat
     enabled: isOpen,
   });
 
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
   const { data: doctorsData, isLoading: isLoadingDoctors } = useQuery({
     queryKey: ['doctors-list'],
     queryFn: () => usersAPI.byRole('DOCTOR'),

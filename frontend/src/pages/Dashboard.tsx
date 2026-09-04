@@ -56,7 +56,7 @@ const statCardStyles: Record<string, { tile: string; glow: string }> = {
 };
 
 export default function Dashboard() {
-  const { user } = useAuthStore();
+  const user = useAuthStore(state => state.user);
 
   const { data: statsData } = useQuery({
     queryKey: ['dashboard-stats'],

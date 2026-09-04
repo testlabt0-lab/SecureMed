@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Modal from '../common/Modal';
 import { appointmentsAPI } from '../../api/extendedApis';
+import { patientsAPI, usersAPI } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 
 export default function CreateAppointmentModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -10,8 +11,8 @@ export default function CreateAppointmentModal({ isOpen, onClose }: { isOpen: bo
   const { user } = useAuthStore();
   const [formData, setFormData] = useState({
     title: '',
-    patient_name: '',
-    doctor_name: user?.role === 'DOCTOR' ? user.full_name : '',
+    patient: '',
+    doctor: user?.role === 'DOCTOR' ? user.id : '',
     appointment_type: 'CONSULTATION',
     priority: 'MEDIUM',
     scheduled_at: '',
@@ -19,6 +20,42 @@ export default function CreateAppointmentModal({ isOpen, onClose }: { isOpen: bo
     is_virtual: false,
     notes: ''
   });
+
+  const { data: patientsData, isLoading: isLoadingPatients } = useQuery({
+    queryKey: ['patients-list'],
+    queryFn: () => patientsAPI.list(),
+    enabled: isOpen,
+  });
+
+  const { data: doctorsData, isLoading: isLoadingDoctors } = useQuery({
+    queryKey: ['doctors-list'],
+    queryFn: () => usersAPI.byRole('DOCTOR'),
+    enabled: isOpen && user?.role !== 'DOCTOR',
+  });
+
+  const patients = Array.isArray(patientsData?.data?.results)
+    ? patientsData.data.results
+    : Array.isArray(patientsData?.data)
+    ? patientsData.data
+    : [];
+
+  const doctors = Array.isArray(doctorsData?.data?.results)
+    ? doctorsData.data.results
+    : Array.isArray(doctorsData?.data)
+    ? doctorsData.data
+    : [];
+
+  useEffect(() => {
+    if (isOpen && patients.length > 0 && !formData.patient) {
+      setFormData(prev => ({ ...prev, patient: patients[0].id }));
+    }
+  }, [isOpen, patients]);
+
+  useEffect(() => {
+    if (isOpen && doctors.length > 0 && !formData.doctor && user?.role !== 'DOCTOR') {
+      setFormData(prev => ({ ...prev, doctor: doctors[0].id }));
+    }
+  }, [isOpen, doctors]);
 
   const mutation = useMutation({
     mutationFn: (data: any) => appointmentsAPI.create(data),
@@ -34,6 +71,10 @@ export default function CreateAppointmentModal({ isOpen, onClose }: { isOpen: bo
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.patient || !formData.doctor) {
+      toast.error('يرجى اختيار المريض والطبيب');
+      return;
+    }
     mutation.mutate(formData);
   };
 
@@ -53,25 +94,37 @@ export default function CreateAppointmentModal({ isOpen, onClose }: { isOpen: bo
         
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">اسم المريض</label>
-            <input
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">المريض</label>
+            <select
               required
-              type="text"
               className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              value={formData.patient_name}
-              onChange={e => setFormData({ ...formData, patient_name: e.target.value })}
-            />
+              value={formData.patient}
+              onChange={e => setFormData({ ...formData, patient: e.target.value })}
+            >
+              <option value="" disabled>اختر المريض...</option>
+              {patients.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.full_name} {p.national_id ? `(${p.national_id})` : ''}</option>
+              ))}
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">اسم الطبيب</label>
-            <input
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">الطبيب</label>
+            <select
               required
-              type="text"
               className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              value={formData.doctor_name}
-              onChange={e => setFormData({ ...formData, doctor_name: e.target.value })}
+              value={formData.doctor}
+              onChange={e => setFormData({ ...formData, doctor: e.target.value })}
               disabled={user?.role === 'DOCTOR'}
-            />
+            >
+              <option value="" disabled>اختر الطبيب...</option>
+              {user?.role === 'DOCTOR' ? (
+                <option value={user.id}>{user.full_name}</option>
+              ) : (
+                doctors.map((d: any) => (
+                  <option key={d.id} value={d.id}>{d.full_name}</option>
+                ))
+              )}
+            </select>
           </div>
         </div>
 

@@ -16,7 +16,7 @@ class PatientPagingSource(
             val patients = response.results
             
             // To simulate pagination for the demo, we check if we have more pages (next != null)
-            val nextKey = if (response.next != null) position + 1 else null
+            val nextKey = if (response.hasNext) position + 1 else null
 
             LoadResult.Page(
                 data = patients,

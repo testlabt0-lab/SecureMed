@@ -42,9 +42,12 @@ class ConsultationCreateSerializer (serializers .ModelSerializer ):
     notes =serializers .CharField (required =False ,allow_blank =True )
     diagnosis =serializers .CharField (required =False ,allow_blank =True )
 
-    class Meta :
-        model =Consultation 
-        fields =['patient','appointment','scheduled_time','scheduled_at','notes','diagnosis']
+    class Meta:
+        model = Consultation
+        fields = ['patient', 'doctor', 'appointment', 'scheduled_time', 'scheduled_at', 'notes', 'diagnosis']
+        extra_kwargs = {
+            'doctor': {'required': False}
+        }
 
     def create (self ,validated_data ):
         if 'scheduled_at'in validated_data and 'scheduled_time'not in validated_data :
@@ -52,8 +55,13 @@ class ConsultationCreateSerializer (serializers .ModelSerializer ):
         elif 'scheduled_at'in validated_data :
             validated_data .pop ('scheduled_at')
 
-            # Comment_415
-        return Consultation .objects .create (
-        doctor =self .context ['request'].user ,
-        **validated_data 
+        doctor = validated_data.pop('doctor', None)
+        user = self.context['request'].user
+        
+        if not doctor:
+            doctor = user
+            
+        return Consultation.objects.create(
+            doctor=doctor,
+            **validated_data
         )

@@ -14,6 +14,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import android.os.Build
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 
 // Color palettes
 private val PrimaryLight = Color(0xFF2563EB)

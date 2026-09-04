@@ -10,12 +10,12 @@ import androidx.room.PrimaryKey
 data class PatientEntity(
     @PrimaryKey val id: String,
     val fullName: String,
-    val email: String,
     val dateOfBirth: String,
-    val nationalId: String?,
-    val insuranceNumber: String?,
-    val phoneNumber: String?,
-    val isHighRisk: Boolean
+    val gender: String,
+    val bloodType: String?,
+    val age: Int?,
+    val phone: String?,
+    val chronicConditions: String?
 )
 
 /**
@@ -24,14 +24,14 @@ data class PatientEntity(
 @Entity(tableName = "medical_records")
 data class MedicalRecordEntity(
     @PrimaryKey val id: String,
-    val patientId: String,
     val channelId: String?,
+    val title: String,
+    val content: String,
     val recordType: String,
-    val contentSummary: String,
-    val diagnosis: String?,
-    val createdBy: String,
-    val createdAt: String,
-    val encryptedDataBlob: String? // For E2E encrypted records
+    val recordTypeDisplay: String,
+    val createdByName: String,
+    val isCritical: Boolean,
+    val createdAt: String
 )
 
 /**

@@ -313,6 +313,7 @@ fun ProfileScreen(
                                 title = "تسجيل البصمة",
                                 subtitle = "SecureMed",
                                 description = "ضع إصبعك على المستشعر لتسجيل بصمتك",
+                                cryptoObject = null,
                                 onSuccess = { template ->
                                     SecurePreferences.biometricEnabled = true
                                     statusMessage = "✓ تم تسجيل البصمة بنجاح!"

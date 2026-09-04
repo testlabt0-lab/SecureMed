@@ -22,10 +22,23 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess }: Creat
     enabled: isOpen,
   });
 
+  const { user } = useAuthStore();
+  const { data: doctorsData, isLoading: isLoadingDoctors } = useQuery({
+    queryKey: ['doctors-list'],
+    queryFn: () => usersAPI.byRole('DOCTOR'),
+    enabled: isOpen && user?.role !== 'DOCTOR',
+  });
+
   const patients = Array.isArray(patientsData?.data?.results)
     ? patientsData.data.results
     : Array.isArray(patientsData?.data)
     ? patientsData.data
+    : [];
+
+  const doctors = Array.isArray(doctorsData?.data?.results)
+    ? doctorsData.data.results
+    : Array.isArray(doctorsData?.data)
+    ? doctorsData.data
     : [];
 
   // Default to 15 minutes from now in local ISO string for datetime-local
@@ -37,6 +50,7 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess }: Creat
 
   const [formData, setFormData] = useState({
     patient: '',
+    doctor: user?.role === 'DOCTOR' ? user.id : '',
     scheduled_at: getDefaultScheduledTime(),
     duration_minutes: 30,
     notes: '',
@@ -48,6 +62,12 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess }: Creat
       setFormData(prev => ({ ...prev, patient: patients[0].id }));
     }
   }, [isOpen, patients]);
+
+  useEffect(() => {
+    if (isOpen && doctors.length > 0 && !formData.doctor && user?.role !== 'DOCTOR') {
+      setFormData(prev => ({ ...prev, doctor: doctors[0].id }));
+    }
+  }, [isOpen, doctors]);
 
   const mutation = useMutation({
     mutationFn: (data: any) => telemedicineAPI.createConsultation(data),
@@ -72,6 +92,7 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess }: Creat
 
     mutation.mutate({
       patient: formData.patient,
+      doctor: formData.doctor,
       scheduled_at: formData.scheduled_at,
       notes: formData.notes.trim(),
       diagnosis: formData.diagnosis.trim(),
@@ -111,6 +132,30 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess }: Creat
               ))}
             </select>
           )}
+        </div>
+
+        {/* Doctor Selection */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5 text-primary-500" />
+            الطبيب <span className="text-red-500">*</span>
+          </label>
+          <select
+            required
+            className="w-full px-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-primary-500 focus:outline-none text-gray-900 dark:text-white"
+            value={formData.doctor}
+            onChange={e => setFormData({ ...formData, doctor: e.target.value })}
+            disabled={user?.role === 'DOCTOR'}
+          >
+            <option value="" disabled>اختر الطبيب...</option>
+            {user?.role === 'DOCTOR' ? (
+              <option value={user.id}>{user.full_name}</option>
+            ) : (
+              doctors.map((d: any) => (
+                <option key={d.id} value={d.id}>{d.full_name}</option>
+              ))
+            )}
+          </select>
         </div>
 
         {/* Date & Time */}

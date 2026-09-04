@@ -170,7 +170,7 @@ fun MedicalRecordCard(record: MedicalRecord) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            crossAxisAlignment = CrossAxisAlignment.Start
+            verticalAlignment = Alignment.Top
         ) {
             Box(
                 modifier = Modifier

@@ -135,7 +135,7 @@ class SecureMedRepository @Inject constructor(
         Result.failure(e)
     }
 
-    fun logout() {
+    suspend fun logout() {
         // Patient data must not survive a session — wipe tokens and the
         // offline cache (medication plans + dose logs included).
         try {
@@ -183,12 +183,12 @@ class SecureMedRepository @Inject constructor(
             PatientEntity(
                 id = it.id,
                 fullName = it.fullName,
-                email = it.email,
                 dateOfBirth = it.dateOfBirth,
-                nationalId = it.nationalId,
-                insuranceNumber = it.insuranceNumber,
-                phoneNumber = it.phoneNumber,
-                isHighRisk = it.isHighRisk
+                gender = it.gender,
+                bloodType = it.bloodType,
+                age = it.age,
+                phone = it.phone,
+                chronicConditions = it.chronicConditions
             )
         }
         dao.insertPatients(entities)
@@ -200,13 +200,12 @@ class SecureMedRepository @Inject constructor(
                 Patient(
                     id = it.id,
                     fullName = it.fullName,
-                    email = it.email,
                     dateOfBirth = it.dateOfBirth,
-                    nationalId = it.nationalId,
-                    insuranceNumber = it.insuranceNumber,
-                    phoneNumber = it.phoneNumber,
-                    isHighRisk = it.isHighRisk,
-                    createdAt = ""
+                    gender = it.gender,
+                    bloodType = it.bloodType,
+                    age = it.age,
+                    phone = it.phone,
+                    chronicConditions = it.chronicConditions
                 )
             }
             Result.success(patients)
@@ -228,14 +227,14 @@ class SecureMedRepository @Inject constructor(
             val entities = records.map {
                 MedicalRecordEntity(
                     id = it.id,
-                    patientId = it.patientId,
-                    channelId = it.channelId,
+                    channelId = channelId,
+                    title = it.title,
+                    content = it.content,
                     recordType = it.recordType,
-                    contentSummary = it.contentSummary,
-                    diagnosis = it.diagnosis,
-                    createdBy = it.createdBy,
-                    createdAt = it.createdAt,
-                    encryptedDataBlob = it.encryptedDataBlob
+                    recordTypeDisplay = it.recordTypeDisplay,
+                    createdByName = it.createdByName,
+                    isCritical = it.isCritical,
+                    createdAt = it.createdAt
                 )
             }
             dao.insertRecords(entities)
@@ -246,14 +245,13 @@ class SecureMedRepository @Inject constructor(
                 val records = entities.map {
                     MedicalRecord(
                         id = it.id,
-                        patientId = it.patientId,
-                        channelId = it.channelId,
+                        title = it.title,
+                        content = it.content,
                         recordType = it.recordType,
-                        contentSummary = it.contentSummary,
-                        diagnosis = it.diagnosis,
-                        createdBy = it.createdBy,
-                        createdAt = it.createdAt,
-                        encryptedDataBlob = it.encryptedDataBlob
+                        recordTypeDisplay = it.recordTypeDisplay,
+                        createdByName = it.createdByName,
+                        isCritical = it.isCritical,
+                        createdAt = it.createdAt
                     )
                 }
                 Result.success(records)

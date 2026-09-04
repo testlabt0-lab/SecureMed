@@ -10,7 +10,7 @@ import {
   Calendar, FileText, Settings, MonitorSmartphone, History, KeyRound,
   Pill, CreditCard,
 } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import toast from 'react-hot-toast';
 import { notificationsApi } from '../api/extendedApis';
 import GlobalSearch from './GlobalSearch';
@@ -372,7 +372,15 @@ export default function Layout() {
         {/* Route transitions */}
         <main className="flex-1 p-4 lg:p-8 overflow-x-auto">
           <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={location.pathname}>{outlet}</motion.div>
+            <motion.div key={location.pathname}>
+              <Suspense fallback={
+                <div className="flex h-[60vh] w-full items-center justify-center">
+                  <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary-600 border-t-transparent"></div>
+                </div>
+              }>
+                {outlet}
+              </Suspense>
+            </motion.div>
           </AnimatePresence>
         </main>
       </div>

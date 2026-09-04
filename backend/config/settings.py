@@ -68,6 +68,7 @@ INSTALLED_APPS =[
 # Comment_460
 'channels',
 'django_prometheus',
+'storages',
 ]
 
 UNFOLD = {
@@ -415,6 +416,7 @@ ENCRYPTION_KEY =config (
 'ENCRYPTION_KEY',
 default ='securemed-field-encryption-key-32-bytes!!',# Comment_513
 )
+FIELD_ENCRYPTION_SALT = config('FIELD_ENCRYPTION_SALT', default='securemed_salt_v1').encode('utf-8')
 USE_FIELD_ENCRYPTION =True 
 
 # Comment_514
@@ -609,3 +611,39 @@ if SENTRY_DSN and not DEBUG:
         traces_sample_rate=1.0,
         send_default_pii=False,
     )
+
+# ---------- AWS S3 Storage Configuration ----------
+USE_S3_STORAGE = config('USE_S3_STORAGE', default='0') == '1'
+
+if USE_S3_STORAGE:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+    
+    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+    AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
+    
+    # Static files settings
+    STATIC_LOCATION = 'static'
+    STATIC_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{STATIC_LOCATION}/'
+    STATICFILES_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    
+    # Media files settings
+    PUBLIC_MEDIA_LOCATION = 'media'
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{PUBLIC_MEDIA_LOCATION}/'
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+
+# Security Check for Production
+if not DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    _insecure_defaults = {
+        'SECRET_KEY': 'django-insecure-securemed-development-key-change-in-production-2026',
+        'ENCRYPTION_KEY': 'securemed-field-encryption-key-32-bytes!!',
+    }
+    for name, default_val in _insecure_defaults.items():
+        if globals().get(name) == default_val:
+            raise ImproperlyConfigured(
+                f"{name} still uses the insecure default value in production. "
+                f"Set it via environment variable before deploying."
+            )

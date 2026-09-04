@@ -110,8 +110,7 @@ class WAFMiddleware :
                     cache .set (dev_blacklist_key ,True ,timeout =86400 )
                     return JsonResponse ({'error':'تم حظر هذا الجهاز'},status =403 )
         except Exception as e :
-        # Comment_323
-            pass 
+            logger.error(f"WAF_BLOCKLIST_CHECK_FAILED | error={e}")
 
             # Comment_324
         attack_detected =self ._detect_attacks (request )
@@ -135,15 +134,21 @@ class WAFMiddleware :
         unquote_plus (request .POST .urlencode ()),
         ]
 
+        try:
+            body_bytes = request.body
+            if body_bytes:
+                body_text = body_bytes.decode('utf-8', errors='ignore')
+                if len(body_text) < 100000:
+                    inputs_to_check.append(unquote_plus(body_text))
+        except Exception as e:
+            logger.error(f"WAF_BODY_READ_FAILED | error={e}")
+
         # Comment_328
         for value in request .GET .dict ().values ():
             inputs_to_check .append (value )
         for value in request .POST .dict ().values ():
             inputs_to_check .append (value )
 
-        # Don't read request.body here because it breaks DRF parsers
-        # DRF will handle JSON body parsing safely later
-            # Comment_330
         inputs_to_check .append (unquote_plus (request .path ))
 
         # Comment_331
@@ -224,7 +229,7 @@ class WAFMiddleware :
         response ['Referrer-Policy']='same-origin'
         response ['Content-Security-Policy']=(
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "img-src 'self' data: blob: https:; "
         "font-src 'self' data: https://fonts.gstatic.com; "
@@ -241,10 +246,12 @@ class WAFMiddleware :
 
     def _get_client_ip (self ,request ):
         """Get client IP from request."""
-        x_forwarded =request .META .get ('HTTP_X_FORWARDED_FOR')
-        if x_forwarded :
-            return x_forwarded .split (',')[0 ].strip ()
-        return request .META .get ('REMOTE_ADDR','0.0.0.0')  # nosec B104
+        remote_addr = request.META.get('REMOTE_ADDR', '0.0.0.0')
+        if getattr(settings, 'TRUST_X_FORWARDED_FOR', False):
+            x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded:
+                return x_forwarded.split(',')[0].strip()
+        return remote_addr
 
     def _detect_device_type (self ,device_fingerprint :str )->str :
         """Detect device type from fingerprint prefix."""
@@ -293,10 +300,12 @@ class RateLimitMiddleware :
         return self .get_response (request )
 
     def _get_client_ip (self ,request ):
-        x_forwarded =request .META .get ('HTTP_X_FORWARDED_FOR')
-        if x_forwarded :
-            return x_forwarded .split (',')[0 ].strip ()
-        return request .META .get ('REMOTE_ADDR','0.0.0.0')  # nosec B104
+        remote_addr = request.META.get('REMOTE_ADDR', '0.0.0.0')
+        if getattr(settings, 'TRUST_X_FORWARDED_FOR', False):
+            x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded:
+                return x_forwarded.split(',')[0].strip()
+        return remote_addr
 
 
 class SessionSecurityMiddleware :

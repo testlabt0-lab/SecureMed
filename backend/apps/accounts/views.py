@@ -34,10 +34,12 @@ from apps .security .models import LoginHistory, BlockedDevice
 import hashlib 
 
 def get_client_ip(request):
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        return x_forwarded_for.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR')
+    remote_addr = request.META.get('REMOTE_ADDR', '0.0.0.0')
+    if getattr(settings, 'TRUST_X_FORWARDED_FOR', False):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0].strip()
+    return remote_addr
 
 def get_tokens_for_user (user ,request =None ):
     """Generate JWT tokens for user."""
@@ -232,11 +234,13 @@ class LoginView (APIView ):
         details ={'method':'password'}
         )
 
-        return Response ({
+        response = Response ({
         'tokens':tokens ,
         'user':UserSerializer (user ).data ,
         'requires_biometric':user .is_biometric_enabled ,
         })
+        response.set_cookie('refresh_token', tokens['refresh'], httponly=True, secure=getattr(settings, 'SECURE_SSL_REDIRECT', False), samesite='Strict', max_age=86400*7)
+        return response
 
 
 class LogoutView (APIView ):
@@ -244,7 +248,7 @@ class LogoutView (APIView ):
 
     def post (self ,request ):
         try :
-            refresh_token =request .data .get ('refresh')
+            refresh_token =request .COOKIES .get ('refresh_token')or request .data .get ('refresh')
             if refresh_token :
                 token =RefreshToken (refresh_token )
                 token .blacklist ()
@@ -257,7 +261,9 @@ class LogoutView (APIView ):
             event_type ='LOGOUT',
             request =request ,
             )
-            return Response ({'detail':'تم تسجيل الخروج بنجاح'})
+            response = Response ({'detail':'تم تسجيل الخروج بنجاح'})
+            response .delete_cookie ('refresh_token')
+            return response
         except TokenError :
             return Response (
             {'detail':'الرمز غير صالح'},
@@ -270,7 +276,7 @@ class RefreshTokenView (APIView ):
     permission_classes =[permissions .AllowAny ]
 
     def post (self ,request ):
-        refresh_token =request .data .get ('refresh')
+        refresh_token =request .COOKIES .get ('refresh_token')or request .data .get ('refresh')
         if not refresh_token :
             return Response (
             {'detail':'رمز التحديث مطلوب'},
@@ -436,10 +442,12 @@ class BiometricLoginView (APIView ):
         request =request ,
         )
 
-        return Response ({
+        response = Response ({
         'tokens':tokens ,
         'user':UserSerializer (user ).data ,
         })
+        response.set_cookie('refresh_token', tokens['refresh'], httponly=True, secure=getattr(settings, 'SECURE_SSL_REDIRECT', False), samesite='Strict', max_age=86400*7)
+        return response
 
 
 class UserViewSet (viewsets .ModelViewSet ):
@@ -745,10 +753,12 @@ class MFALoginView (APIView ):
         log_security_event (
         user =user ,event_type ='MFA_LOGIN_SUCCESS',request =request ,
         )
-        return Response ({
+        response = Response ({
         'tokens':tokens ,
         'user':UserSerializer (user ).data ,
         })
+        response.set_cookie('refresh_token', tokens['refresh'], httponly=True, secure=getattr(settings, 'SECURE_SSL_REDIRECT', False), samesite='Strict', max_age=86400*7)
+        return response
 
 
         # Comment_42

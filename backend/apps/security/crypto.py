@@ -30,7 +30,7 @@ def _derive_fernet_key (encryption_key :str )->bytes :
     ~50ms on a laptop CPU and ~150-200ms on Render's free-tier CPU.
     Must never run per-field — get_fernet() caches the derived instance.
     """
-    salt =b'securemed_salt_v1'# Comment_312
+    salt = getattr(settings, 'FIELD_ENCRYPTION_SALT', b'securemed_salt_v1')
     kdf =PBKDF2HMAC (
     algorithm =hashes .SHA256 (),
     length =32 ,

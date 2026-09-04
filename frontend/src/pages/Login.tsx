@@ -212,7 +212,7 @@ export default function Login() {
                       <Smartphone className="w-5 h-5 text-blue-600 dark:text-primary-300 animate-wiggle" />
                     </div>
                     <p className="text-sm text-blue-900 dark:text-primary-100">
-                      أدخل رمز التحقق الستة أرقام من تطبيق المصادقة
+                      أدخل رمز التحقق الستة أرقام المرسل إلى بريدك الإلكتروني أو تطبيق المصادقة
                       <span className="block text-xs text-blue-600/80 dark:text-primary-300/80 mt-0.5" dir="ltr">{mfaEmail}</span>
                     </p>
                   </div>

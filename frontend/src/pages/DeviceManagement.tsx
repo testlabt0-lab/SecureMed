@@ -399,7 +399,7 @@ export const DeviceManagement = () => {
                 </table>
               </div>
             </motion.div>
-          ) : (
+          ) : activeTab === 'blocked' ? (
             <motion.div
               key="blocked"
               initial={{ opacity: 0 }}

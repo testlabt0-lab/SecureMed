@@ -112,11 +112,22 @@ class LoginSerializer (serializers .Serializer ):
                 # Comment_15
                     user .reset_failed_attempts ()
 
-            if not user .check_password (password ):
-                user .failed_login_attempts +=1 
-                if user .failed_login_attempts >=3 :
-                    user .lock_account ()
-                user .save ()
+            if not user.check_password(password):
+                user.failed_login_attempts += 1
+                if user.failed_login_attempts >= 3:
+                    user.lock_account()
+                    from apps.notifications.utils import send_notification
+                    admins = User.objects.filter(role__in=['SUPER_ADMIN', 'HOSPITAL_ADMIN'])
+                    for admin in admins:
+                        send_notification(
+                            recipient=admin,
+                            notification_type='SECURITY_ALERT',
+                            title='محاولات دخول فاشلة متكررة',
+                            message=f'تم قفل حساب المستخدم {user.email} بسبب تجاوز عدد محاولات الدخول الفاشلة.',
+                            sender=None,
+                            priority='HIGH'
+                        )
+                user.save()
                 raise serializers .ValidationError (
                 {'detail':'بيانات الاعتماد غير صحيحة'}
                 )

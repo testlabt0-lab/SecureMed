@@ -50,15 +50,16 @@ SIMPLE_JWT ={
 'JTI_CLAIM':'jti',
 }
 
-# Comment_443
-INSTALLED_APPS =[app for app in INSTALLED_APPS if app !='django_ratelimit']
-MIDDLEWARE =[m for m in MIDDLEWARE if 'ratelimit'not in m .lower ()]
+# Rate limiting is now enabled in dev as well to ensure security testing
 
 # Comment_444
 CACHES ={
 'default':{
-'BACKEND':'django.core.cache.backends.locmem.LocMemCache',
-'LOCATION':'dev',
+'BACKEND':'django_redis.cache.RedisCache',
+'LOCATION':os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
+'OPTIONS':{
+'CLIENT_CLASS':'django_redis.client.DefaultClient',
+}
 }
 }
 
@@ -73,8 +74,11 @@ if MOCK_SERVICES :
     # Comment_448
     CACHES ={
     'default':{
-    'BACKEND':'django.core.cache.backends.locmem.LocMemCache',
-    'LOCATION':'dev-mock',
+    'BACKEND':'django_redis.cache.RedisCache',
+    'LOCATION':os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
+    'OPTIONS':{
+    'CLIENT_CLASS':'django_redis.client.DefaultClient',
+    }
     }
     }
 

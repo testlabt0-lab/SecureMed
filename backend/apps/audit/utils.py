@@ -59,21 +59,44 @@ def log_security_event (user ,event_type ,request =None ,details =None ,severity
             os_info ='Unknown'
             browser_info ='Unknown'
 
-    AuditLog .objects .create (
-    user =user ,
-    event_type =event_type ,
-    severity =severity ,
-    ip_address =ip_address ,
-    user_agent =user_agent ,
-    path =path ,
-    method =method ,
-    mac_address =mac_address ,
-    device_fingerprint =device_fingerprint ,
-    os_info =os_info ,
-    browser_info =browser_info ,
-    screen_resolution =screen_resolution ,
-    timezone_offset =timezone_offset ,
-    language =language ,
-    session_id =session_id ,
-    details =details or {},
-    )
+    log_data = {
+        'user_id': user.id if user else None,
+        'event_type': event_type,
+        'severity': severity,
+        'ip_address': ip_address,
+        'user_agent': user_agent,
+        'path': path,
+        'method': method,
+        'mac_address': mac_address,
+        'device_fingerprint': device_fingerprint,
+        'os_info': os_info,
+        'browser_info': browser_info,
+        'screen_resolution': screen_resolution,
+        'timezone_offset': timezone_offset,
+        'language': language,
+        'session_id': session_id,
+        'details': details or {},
+    }
+    
+    try:
+        from apps.audit.tasks import async_save_audit_log
+        async_save_audit_log.delay(log_data)
+    except ImportError:
+        AuditLog.objects.create(
+            user=user,
+            event_type=event_type,
+            severity=severity,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            path=path,
+            method=method,
+            mac_address=mac_address,
+            device_fingerprint=device_fingerprint,
+            os_info=os_info,
+            browser_info=browser_info,
+            screen_resolution=screen_resolution,
+            timezone_offset=timezone_offset,
+            language=language,
+            session_id=session_id,
+            details=details or {},
+        )

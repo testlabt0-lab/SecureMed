@@ -75,6 +75,9 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         biometric_logins_today =AuditLog .objects .filter (
         timestamp__date =today ,event_type ='BIOMETRIC_LOGIN_SUCCESS'
         ).count ()
+        security_events_by_severity = AuditLog.objects.filter(
+            timestamp__gte=week_ago
+        ).values('severity').annotate(count=Count('id'))
 
         # Comment_80
         activity_trend =[]
@@ -121,6 +124,7 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         'waf_blocks_today':waf_blocks_today ,
         'failed_logins_today':failed_logins_today ,
         'biometric_logins_today':biometric_logins_today ,
+        'security_events_by_severity': {item['severity']: item['count'] for item in security_events_by_severity},
         'activity_trend':activity_trend ,
         'channels_trend':channels_trend ,
         'patients_trend':patients_trend ,

@@ -4,7 +4,8 @@ import toast from 'react-hot-toast';
 import { User, Calendar, Clock, FileText, Stethoscope, AlertCircle, Loader2 } from 'lucide-react';
 import Modal from '../common/Modal';
 import { telemedicineAPI } from '../../api/extendedApis';
-import { patientsAPI } from '../../api/client';
+import { patientsAPI, usersAPI } from '../../api/client';
+import { useAuthStore } from '../../store/authStore';
 
 interface CreateSessionModalProps {
   isOpen: boolean;

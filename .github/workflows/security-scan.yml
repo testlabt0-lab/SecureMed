@@ -1,0 +1,46 @@
+name: Security Scans (SAST & SCA)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 2 * * 1' # Run every Monday at 2 AM
+
+jobs:
+  sast_scan:
+    name: Run SAST Scans
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        
+    - name: Install security tools
+      run: |
+        pip install bandit semgrep safety
+        
+    - name: Run Bandit (Python SAST)
+      run: |
+        bandit -r backend/apps/ -ll -ii -f json -o bandit-results.json || true
+        
+    - name: Run Semgrep
+      run: |
+        semgrep scan --config auto --json -o semgrep-results.json || true
+        
+    - name: Run Safety (Dependency Vulnerabilities)
+      run: |
+        safety check -r backend/requirements.txt --json > safety-results.json || true
+
+    - name: Upload Scan Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-scan-results
+        path: |
+          bandit-results.json
+          semgrep-results.json
+          safety-results.json

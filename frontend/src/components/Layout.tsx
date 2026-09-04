@@ -371,17 +371,23 @@ export default function Layout() {
 
         {/* Route transitions */}
         <main className="flex-1 p-4 lg:p-8 overflow-x-auto">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={location.pathname}>
-              <Suspense fallback={
-                <div className="flex h-[60vh] w-full items-center justify-center">
-                  <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary-600 border-t-transparent"></div>
-                </div>
-              }>
+          <Suspense fallback={
+            <div className="flex h-[60vh] w-full items-center justify-center">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary-600 border-t-transparent"></div>
+            </div>
+          }>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div 
+                key={location.pathname}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
                 {outlet}
-              </Suspense>
-            </motion.div>
-          </AnimatePresence>
+              </motion.div>
+            </AnimatePresence>
+          </Suspense>
         </main>
       </div>
 

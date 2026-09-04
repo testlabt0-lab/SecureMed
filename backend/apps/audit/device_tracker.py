@@ -25,39 +25,59 @@ class DeviceTracker :
         if not user or not user .is_authenticated :
             return None ,False 
 
-        fingerprint =device_info .get ('device_fingerprint')
-        if not fingerprint :
-            return None ,False 
+        fingerprint = device_info.get('device_fingerprint')
+        if not fingerprint:
+            return None, False
+
+        ip_address = device_info.get('ip_address', '')
+        location = ''
+        if ip_address and ip_address not in ('127.0.0.1', '::1', 'localhost'):
+            try:
+                import requests
+                # Use ip-api for location tracking (with timeout to avoid hanging)
+                response = requests.get(f'http://ip-api.com/json/{ip_address}', timeout=2)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status') == 'success':
+                        location = f"{data.get('city', '')}, {data.get('country', '')}".strip(', ')
+            except Exception as e:
+                logger.warning(f"Could not fetch location for IP {ip_address}: {e}")
+
+        existing_device = DeviceRegistry.objects.filter(user=user, device_fingerprint=fingerprint).first()
+        is_new_location = False
+        if existing_device and existing_device.location and location:
+            if existing_device.location != location:
+                is_new_location = True
 
             # Comment_111
-        device ,created =DeviceRegistry .objects .update_or_create (
-        user =user ,
-        device_fingerprint =fingerprint ,
-        defaults ={
-        'mac_address':device_info .get ('mac_address',''),
-        'os_info':device_info .get ('os_info',''),
-        'browser_info':device_info .get ('browser_info',''),
-        'last_ip_address':device_info .get ('ip_address',''),
-        'last_login':timezone .now (),
-        }
+        device, created = DeviceRegistry.objects.update_or_create(
+            user=user,
+            device_fingerprint=fingerprint,
+            defaults={
+                'mac_address': device_info.get('mac_address', ''),
+                'os_info': device_info.get('os_info', ''),
+                'browser_info': device_info.get('browser_info', ''),
+                'last_ip_address': ip_address,
+                'location': location if location else (existing_device.location if existing_device else ''),
+                'last_login': timezone.now(),
+            }
         )
 
-        if created :
+        is_suspicious = created or is_new_location
+
+        if is_suspicious:
         # Comment_112
-            logger .info (f"New device detected for user {user .id }: {fingerprint }")
-            log_security_event (
-            user =user ,
-            event_type ='SUSPICIOUS_ACTIVITY',# Comment_113
-            request =request ,
-            severity ='WARNING',
-            details ={'reason':'New device detected','device_fingerprint':fingerprint }
+            reason_msg = "New location detected" if is_new_location else "New device detected"
+            logger.info(f"{reason_msg} for user {user.id}: {fingerprint} at {location}")
+            log_security_event(
+                user=user,
+                event_type='SUSPICIOUS_ACTIVITY',# Comment_113
+                request=request,
+                severity='WARNING',
+                details={'reason': reason_msg, 'device_fingerprint': fingerprint, 'location': location}
             )
 
-            # Comment_114
-            # Comment_115
-            # Comment_116
-
-        return device ,created 
+        return device, is_suspicious
 
     @staticmethod 
     def is_device_blocked (fingerprint ,mac_address =None ):

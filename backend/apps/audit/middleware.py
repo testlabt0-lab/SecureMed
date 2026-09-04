@@ -21,25 +21,26 @@ class AuditLogMiddleware :
         duration =time .time ()-start_time 
 
         # Comment_120
-        if request .path .startswith ('/api/')and hasattr (request ,'user')and request .user .is_authenticated :
-            if request .method in ('POST','PUT','PATCH','DELETE'):
+        if request.path.startswith('/api/') and hasattr(request, 'user') and request.user.is_authenticated:
             # Comment_121
-                if request .method =='POST':
-                    event_type ='DATA_CREATED'
-                elif request .method in ('PUT','PATCH'):
-                    event_type ='DATA_MODIFIED'
-                elif request .method =='DELETE':
-                    event_type ='DATA_DELETED'
-                else :
-                    event_type ='SYSTEM_EVENT'
+            if request.method == 'POST':
+                event_type = 'DATA_CREATED'
+            elif request.method in ('PUT', 'PATCH'):
+                event_type = 'DATA_MODIFIED'
+            elif request.method == 'DELETE':
+                event_type = 'DATA_DELETED'
+            elif request.method == 'GET':
+                event_type = 'DATA_ACCESSED'
+            else:
+                event_type = 'SYSTEM_EVENT'
 
-                    # Comment_122
-                if 'settings'in request .path or 'config'in request .path :
-                    event_type ='CONFIG_CHANGED'
+                # Comment_122
+            if 'settings' in request.path or 'config' in request.path:
+                event_type = 'CONFIG_CHANGED'
 
-                    # Comment_123
-                    # Comment_124
-                    # Comment_125
+                # Comment_123
+                # Comment_124
+                # Comment_125
                 if not getattr (request ,'_audit_logged',False ):
                     severity =AuditLog .Severity .INFO 
                     if response .status_code >=400 :

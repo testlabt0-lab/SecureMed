@@ -358,8 +358,8 @@ BIOMETRIC_SETTINGS ={
 'HASH_ALGORITHM':'sha256',
 }
 
-# Comment_515
-ADAPTIVE_MFA_ENABLED = False
+# Comment_315
+ADAPTIVE_MFA_ENABLED = True
 
 # Comment_516
 # Comment_517
@@ -464,9 +464,17 @@ INITIAL_ADMIN_USERNAME =config ('INITIAL_ADMIN_USERNAME',default ='admin')
 INITIAL_ADMIN_PASSWORD =config ('INITIAL_ADMIN_PASSWORD',default ='ChangeMe@2026!')
 INITIAL_ADMIN_EMAIL =config ('INITIAL_ADMIN_EMAIL',default ='admin@securemed.app')
 
-# Comment_541
-# Comment_542
-# Comment_543
+# Production Security Settings
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Use WhiteNoise for static files
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 REDIS_URL =config ('REDIS_URL',default ='redis://localhost:6379/0')
 
 CELERY_BROKER_URL =config ('CELERY_BROKER_URL',default ='redis://127.0.0.1:6379/0')

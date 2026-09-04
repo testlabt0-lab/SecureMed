@@ -17,6 +17,7 @@ class DeviceRegistry(models.Model):
     os_info = models.CharField(_('نظام التشغيل'), max_length=255, blank=True)
     browser_info = models.CharField(_('المتصفح'), max_length=255, blank=True)
     last_ip_address = models.GenericIPAddressField(_('آخر عنوان IP'), null=True, blank=True)
+    location = models.CharField(_('الموقع الجغرافي'), max_length=255, blank=True)
     is_trusted = models.BooleanField(_('موثوق'), default=False)
     modules_activated = models.JSONField(_('مModules مففعل'), default=list, blank=True)
     
@@ -87,6 +88,7 @@ class LoginHistory(models.Model):
     device_fingerprint = models.CharField(_('بصمة الجهاز'), max_length=255, blank=True)
     os_info = models.CharField(_('نظام التشغيل'), max_length=255, blank=True)
     browser_info = models.CharField(_('المتصفح'), max_length=255, blank=True)
+    location = models.CharField(_('الموقع الجغرافي'), max_length=255, blank=True)
     is_success = models.BooleanField(_('ناجح'), default=True)
     failure_reason = models.CharField(_('سبب الفشل'), max_length=255, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -99,3 +101,18 @@ class LoginHistory(models.Model):
     def __str__(self):
         status = 'Success' if self.is_success else f'Failed: {self.failure_reason}'
         return f"{self.user.email} - {status} at {self.timestamp}"
+
+
+class DeviceVerificationOTP(models.Model):
+    """OTP codes for device/location verification."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    device_fingerprint = models.CharField(max_length=255)
+    otp_code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_used = models.BooleanField(default=False)
+
+    def is_valid(self):
+        from django.utils import timezone
+        import datetime
+        return not self.is_used and (timezone.now() - self.created_at) < datetime.timedelta(minutes=10)

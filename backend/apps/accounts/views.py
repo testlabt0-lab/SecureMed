@@ -208,22 +208,22 @@ class LoginView (APIView ):
             })
 
             # Comment_31
-        user .last_login =timezone .now ()
-        user .last_login_ip = ip_address
-        user .save (update_fields =['last_login','last_login_ip'])
-
-        tokens =get_tokens_for_user (user ,request )
-
-        SessionManager .register_session (user ,request ,token =tokens )
+        user.last_login = timezone.now()
+        user.last_login_ip = request.META.get('REMOTE_ADDR')
+        user.save(update_fields=['last_login', 'last_login_ip'])
         
+        # Log successful login history
+        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
         LoginHistory.objects.create(
             user=user,
-            ip_address=ip_address,
+            ip_address=user.last_login_ip,
             device_fingerprint=fingerprint,
-            os_info=os_info,
-            browser_info=browser_info,
-            is_success=True,
+            os_info=request.META.get('HTTP_X_OS_INFO', ''),
+            browser_info=request.META.get('HTTP_X_BROWSER_INFO', ''),
+            is_success=True
         )
+        tokens =get_tokens_for_user (user ,request )
+        SessionManager .register_session (user ,request ,token =tokens )
         
         log_security_event (
         user =user ,
@@ -730,6 +730,18 @@ class MFALoginView (APIView ):
         user .last_login_ip =request .META .get ('REMOTE_ADDR')
         user .save (update_fields =['last_login','last_login_ip'])
         tokens =get_tokens_for_user (user ,request )
+        
+        # Log successful login history
+        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+        LoginHistory.objects.create(
+            user=user,
+            ip_address=user.last_login_ip,
+            device_fingerprint=fingerprint,
+            os_info=request.META.get('HTTP_X_OS_INFO', ''),
+            browser_info=request.META.get('HTTP_X_BROWSER_INFO', ''),
+            is_success=True
+        )
+
         log_security_event (
         user =user ,event_type ='MFA_LOGIN_SUCCESS',request =request ,
         )

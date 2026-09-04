@@ -263,6 +263,15 @@ export default function AnalyticsDashboard() {
           </h3>
           <ChannelsActivityChart data={data?.channels_trend || []} isDark={isDark} />
         </div>
+        {/* Security Events Trend Chart */}
+        <div className={`p-5 rounded-xl border ${
+          isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        }`}>
+          <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            الأحداث الأمنية حسب الخطورة
+          </h3>
+          <SecurityEventsChart data={data?.security_events_by_severity || {}} isDark={isDark} />
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -445,6 +454,40 @@ function ChannelsActivityChart({ data, isDark }: { data: any[]; isDark: boolean 
             itemStyle={{ color: isDark ? '#F3F4F6' : '#111827' }}
           />
           <Bar dataKey="count" name="القنوات" fill="#0D9488" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function SecurityEventsChart({ data, isDark }: { data: any; isDark: boolean }) {
+  const chartData = [
+    { name: 'خطير (Critical)', count: data['CRITICAL'] || 0, fill: '#ef4444' },
+    { name: 'تحذير (Warning)', count: data['WARNING'] || 0, fill: '#f59e0b' },
+    { name: 'معلومات (Info)', count: data['INFO'] || 0, fill: '#3b82f6' }
+  ];
+
+  if (!data || Object.keys(data).length === 0) {
+    return <div className={`h-64 flex items-center justify-center ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>لا توجد بيانات</div>;
+  }
+
+  return (
+    <div className="h-64">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} layout="vertical">
+          <XAxis type="number" stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} allowDecimals={false} />
+          <YAxis type="category" dataKey="name" stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} width={100} />
+          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#E5E7EB'} horizontal={false} />
+          <Tooltip 
+            cursor={{ fill: isDark ? '#374151' : '#F3F4F6' }}
+            contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '8px' }}
+            itemStyle={{ color: isDark ? '#F3F4F6' : '#111827' }}
+          />
+          <Bar dataKey="count" name="عدد الأحداث" radius={[0, 4, 4, 0]}>
+            {chartData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.fill} />
+            ))}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>

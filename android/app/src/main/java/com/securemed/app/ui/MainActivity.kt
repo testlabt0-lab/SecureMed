@@ -141,7 +141,19 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
+                    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+                    
+                    LaunchedEffect(Unit) {
+                        com.securemed.app.util.GlobalErrorHandler.errorFlow.collect { message ->
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                duration = androidx.compose.material3.SnackbarDuration.Long
+                            )
+                        }
+                    }
+
                     Scaffold(
+                        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
                         bottomBar = { BottomNavBar(navController) }
                     ) { innerPadding ->
                         NavHost(

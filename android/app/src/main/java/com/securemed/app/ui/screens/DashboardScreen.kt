@@ -20,6 +20,7 @@ import com.securemed.app.SecureMedApp
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.Channel
 import com.securemed.app.data.model.Patient
+import com.securemed.app.ui.components.shimmerEffect
 
 private val ADMIN_ROLES = listOf("SUPER_ADMIN", "HOSPITAL_ADMIN")
 
@@ -233,13 +234,14 @@ fun DashboardScreen(
             }
 
             if (state.channels.isEmpty() && state.isLoading) {
-                item {
+                items(3) {
                     Box(
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .padding(vertical = 4.dp)
+                            .shimmerEffect()
+                    )
                 }
             } else {
                 items(state.channels.take(5)) { channel ->

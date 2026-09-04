@@ -109,6 +109,13 @@ class BlockedDeviceViewSet (viewsets .ModelViewSet ):
         device =self .get_object ()
         device .is_active =False 
         device .save (update_fields =['is_active'])
+        
+        if device.device_fingerprint:
+            from django.core.cache import cache
+            cache.delete(f"blocked_device_{device.device_fingerprint}")
+            cache.delete(f"failed_login_level_{device.device_fingerprint}")
+            cache.delete(f"failed_login_device_{device.device_fingerprint}")
+            
         return Response ({'detail':'تم إلغاء حظر الجهاز'})
 
 

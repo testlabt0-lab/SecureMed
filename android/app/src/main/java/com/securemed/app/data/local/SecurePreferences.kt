@@ -33,9 +33,12 @@ object SecurePreferences {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
             
             // Delete the file manually for safety
-            val sharedPrefsFile = java.io.File(context.filesDir.parent + "/shared_prefs/" + PREFS_NAME + ".xml")
-            if (sharedPrefsFile.exists()) {
-                sharedPrefsFile.delete()
+            val parentDir = context.filesDir.parent
+            if (parentDir != null) {
+                val sharedPrefsFile = java.io.File("$parentDir/shared_prefs/$PREFS_NAME.xml")
+                if (sharedPrefsFile.exists()) {
+                    sharedPrefsFile.delete()
+                }
             }
             
             // Delete the master key alias from Keystore

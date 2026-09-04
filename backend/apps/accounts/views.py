@@ -30,9 +30,14 @@ from apps .audit .device_tracker import DeviceTracker
 from apps .security .session_security import SessionManager 
 from apps .security .throttling import BiometricRateThrottle ,LoginRateThrottle 
 from apps .security .crypto import encrypt_field ,decrypt_field 
-
-
+from apps .security .models import LoginHistory, BlockedDevice
 import hashlib 
+
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR')
 
 def get_tokens_for_user (user ,request =None ):
     """Generate JWT tokens for user."""
@@ -69,31 +74,68 @@ class LoginView (APIView ):
     throttle_classes =[LoginRateThrottle ]
 
     def post (self ,request ):
+        ip_address = get_client_ip(request)
+        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+        mac_address = request.META.get('HTTP_X_MAC_ADDRESS', '')
+        os_info = request.META.get('HTTP_X_OS_INFO', '')
+        browser_info = request.META.get('HTTP_X_BROWSER_INFO', '')
+        
+        # Check if currently blocked
+        if fingerprint:
+            block_key = f"blocked_device_{fingerprint}"
+            if cache.get(block_key):
+                raise drf_serializers.ValidationError({'error': 'تم حظر هذا الجهاز. يرجى المحاولة بعد انتهاء مدة الحظر.'})
+
         serializer =LoginSerializer (data =request .data )
         try :
             serializer .is_valid (raise_exception =True )
         except drf_serializers .ValidationError as e :
-            # Log failed login attempt even if user doesn't exist or password is wrong
-            email = request.data.get('email')
+            # Log failed login attempt
+            email = request.data.get('email', '')
             user = User.objects.filter(email=email).first() if email else None
             
-            fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
             if fingerprint:
                 cache_key = f"failed_login_device_{fingerprint}"
+                level_key = f"failed_login_level_{fingerprint}"
+                
                 attempts = cache.get(cache_key, 0) + 1
                 cache.set(cache_key, attempts, timeout=86400)
                 
                 if attempts >= 5:
-                    from apps.security.models import BlockedDevice
+                    level = cache.get(level_key, 0)
+                    if level == 0:
+                        timeout_seconds = 30 * 60
+                        new_level = 1
+                    elif level == 1:
+                        timeout_seconds = 5 * 3600
+                        new_level = 2
+                    else:
+                        timeout_seconds = 12 * 3600
+                        new_level = 3
+                        
+                    cache.set(block_key, True, timeout=timeout_seconds)
+                    cache.set(level_key, new_level, timeout=timeout_seconds + 86400)
+                    cache.delete(cache_key) # Reset attempts for next block cycle
+                    
                     BlockedDevice.objects.get_or_create(
                         device_fingerprint=fingerprint,
                         defaults={
-                            'reason': '5 failed login attempts',
-                            'mac_address': request.META.get('HTTP_X_MAC_ADDRESS', ''),
-                            'ip_address': request.META.get('REMOTE_ADDR')
+                            'reason': f'Blocked at level {new_level} ({attempts} attempts)',
+                            'mac_address': mac_address,
                         }
                     )
             
+            if user:
+                LoginHistory.objects.create(
+                    user=user,
+                    ip_address=ip_address,
+                    device_fingerprint=fingerprint,
+                    os_info=os_info,
+                    browser_info=browser_info,
+                    is_success=False,
+                    failure_reason=str(e.detail)
+                )
+
             log_security_event(
                 user=user,
                 event_type='LOGIN_FAILED',
@@ -104,14 +146,19 @@ class LoginView (APIView ):
             raise e
 
         user =serializer .validated_data ['user']
+        
+        # Clear failure counts on success
+        if fingerprint:
+            cache.delete(f"failed_login_device_{fingerprint}")
+            cache.delete(f"failed_login_level_{fingerprint}")
 
         # Comment_26
         device_info ={
-        'ip_address':request .META .get ('REMOTE_ADDR'),
-        'mac_address':request .META .get ('HTTP_X_MAC_ADDRESS',''),
-        'device_fingerprint':request .META .get ('HTTP_X_DEVICE_FINGERPRINT',''),
-        'os_info':request .META .get ('HTTP_X_OS_INFO',''),
-        'browser_info':request .META .get ('HTTP_X_BROWSER_INFO','')
+        'ip_address': ip_address,
+        'mac_address': mac_address,
+        'device_fingerprint': fingerprint,
+        'os_info': os_info,
+        'browser_info': browser_info
         }
         tracked =DeviceTracker .track_device (user ,request ,device_info )
         device ,is_new_device =tracked if tracked else (None ,False )
@@ -162,12 +209,22 @@ class LoginView (APIView ):
 
             # Comment_31
         user .last_login =timezone .now ()
-        user .last_login_ip =request .META .get ('REMOTE_ADDR')
+        user .last_login_ip = ip_address
         user .save (update_fields =['last_login','last_login_ip'])
 
         tokens =get_tokens_for_user (user ,request )
 
         SessionManager .register_session (user ,request ,token =tokens )
+        
+        LoginHistory.objects.create(
+            user=user,
+            ip_address=ip_address,
+            device_fingerprint=fingerprint,
+            os_info=os_info,
+            browser_info=browser_info,
+            is_success=True,
+        )
+        
         log_security_event (
         user =user ,
         event_type ='LOGIN_SUCCESS',
@@ -283,24 +340,96 @@ class BiometricLoginView (APIView ):
     throttle_classes =[BiometricRateThrottle ]
 
     def post (self ,request ):
+        ip_address = get_client_ip(request)
+        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+        mac_address = request.META.get('HTTP_X_MAC_ADDRESS', '')
+        os_info = request.META.get('HTTP_X_OS_INFO', '')
+        browser_info = request.META.get('HTTP_X_BROWSER_INFO', '')
+
+        if fingerprint:
+            block_key = f"blocked_device_{fingerprint}"
+            if cache.get(block_key):
+                raise drf_serializers.ValidationError({'error': 'تم حظر هذا الجهاز. يرجى المحاولة بعد انتهاء مدة الحظر.'})
+
         serializer =BiometricLoginSerializer (data =request .data )
-        serializer .is_valid (raise_exception =True )
+        try:
+            serializer .is_valid (raise_exception =True )
+        except drf_serializers.ValidationError as e:
+            # Handle failed biometric login
+            if fingerprint:
+                cache_key = f"failed_login_device_{fingerprint}"
+                level_key = f"failed_login_level_{fingerprint}"
+                
+                attempts = cache.get(cache_key, 0) + 1
+                cache.set(cache_key, attempts, timeout=86400)
+                
+                if attempts >= 5:
+                    level = cache.get(level_key, 0)
+                    if level == 0:
+                        timeout_seconds = 30 * 60
+                        new_level = 1
+                    elif level == 1:
+                        timeout_seconds = 5 * 3600
+                        new_level = 2
+                    else:
+                        timeout_seconds = 12 * 3600
+                        new_level = 3
+                        
+                    cache.set(block_key, True, timeout=timeout_seconds)
+                    cache.set(level_key, new_level, timeout=timeout_seconds + 86400)
+                    cache.delete(cache_key)
+                    
+                    BlockedDevice.objects.get_or_create(
+                        device_fingerprint=fingerprint,
+                        defaults={
+                            'reason': f'Blocked at level {new_level} ({attempts} attempts) via biometric',
+                            'mac_address': mac_address,
+                        }
+                    )
+            
+            # Note: We can't easily know the user here because the challenge ID might be invalid.
+            # But log_security_event will still log it anonymously.
+            log_security_event(
+                user=None,
+                event_type='LOGIN_FAILED',
+                request=request,
+                severity='WARNING',
+                details={'reason': str(e.detail), 'method': 'biometric'}
+            )
+            raise e
+            
         user =serializer .validated_data ['user']
 
+        if fingerprint:
+            cache.delete(f"failed_login_device_{fingerprint}")
+            cache.delete(f"failed_login_level_{fingerprint}")
+
         user .last_login =timezone .now ()
-        user .last_login_ip =request .META .get ('REMOTE_ADDR')
+        user .last_login_ip =ip_address
         user .save (update_fields =['last_login','last_login_ip'])
 
         # Comment_32
         device_info ={
-        'ip_address':user .last_login_ip ,
-        'mac_address':request .META .get ('HTTP_X_MAC_ADDRESS',''),
-        'device_fingerprint':request .META .get ('HTTP_X_DEVICE_FINGERPRINT',''),
+        'ip_address':ip_address,
+        'mac_address':mac_address,
+        'device_fingerprint':fingerprint,
+        'os_info':os_info,
+        'browser_info':browser_info,
         }
         DeviceTracker .track_device (user ,request ,device_info )
         tokens =get_tokens_for_user (user ,request )
 
         SessionManager .register_session (user ,request ,token =tokens )
+        
+        LoginHistory.objects.create(
+            user=user,
+            ip_address=ip_address,
+            device_fingerprint=fingerprint,
+            os_info=os_info,
+            browser_info=browser_info,
+            is_success=True,
+        )
+        
         log_security_event (
         user =user ,
         event_type ='BIOMETRIC_LOGIN_SUCCESS',

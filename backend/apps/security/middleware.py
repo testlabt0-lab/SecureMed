@@ -244,7 +244,7 @@ class WAFMiddleware :
         x_forwarded =request .META .get ('HTTP_X_FORWARDED_FOR')
         if x_forwarded :
             return x_forwarded .split (',')[0 ].strip ()
-        return request .META .get ('REMOTE_ADDR','0.0.0.0')
+        return request .META .get ('REMOTE_ADDR','0.0.0.0')  # nosec B104
 
     def _detect_device_type (self ,device_fingerprint :str )->str :
         """Detect device type from fingerprint prefix."""
@@ -296,7 +296,7 @@ class RateLimitMiddleware :
         x_forwarded =request .META .get ('HTTP_X_FORWARDED_FOR')
         if x_forwarded :
             return x_forwarded .split (',')[0 ].strip ()
-        return request .META .get ('REMOTE_ADDR','0.0.0.0')
+        return request .META .get ('REMOTE_ADDR','0.0.0.0')  # nosec B104
 
 
 class SessionSecurityMiddleware :

@@ -46,21 +46,21 @@ def _check_redis ():
 
 def _check_ai_service ():
     """Verify AI service reachability."""
-    import urllib .request 
+    import requests 
     ai_url =getattr (settings ,'AI_SERVICE_URL','http://localhost:8100')
     t0 =time .monotonic ()
     try :
-        req =urllib .request .Request (
-        f'{ai_url }/health',
-        headers ={'User-Agent':'SecureMed-HealthCheck/1.0'},
+        resp = requests.get(
+            f'{ai_url}/health',
+            headers={'User-Agent': 'SecureMed-HealthCheck/1.0'},
+            timeout=3
         )
-        with urllib .request .urlopen (req ,timeout =3 )as resp :
-            latency_ms =round ((time .monotonic ()-t0 )*1000 ,2 )
-            return {
-            'status':'ok'if resp .status ==200 else 'degraded',
-            'latency_ms':latency_ms ,
-            'http_status':resp .status ,
-            }
+        latency_ms =round ((time .monotonic ()-t0 )*1000 ,2 )
+        return {
+        'status':'ok'if resp .status_code ==200 else 'degraded',
+        'latency_ms':latency_ms ,
+        'http_status':resp .status_code ,
+        }
     except Exception as exc :
         return {'status':'degraded','detail':str (exc )}
 

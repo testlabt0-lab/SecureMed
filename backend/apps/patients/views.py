@@ -191,15 +191,15 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
 
         # Comment_254
         ai_url =getattr (settings ,'AI_SERVICE_URL','http://127.0.0.1:8100')
+        import requests
         try :
-            req =urllib .request .Request (
-            f'{ai_url }/case-summary',
-            data =_json .dumps (payload ).encode ('utf-8'),
-            headers ={'Content-Type':'application/json'},
-            method ='POST',
+            resp = requests.post(
+                f'{ai_url}/case-summary',
+                json=payload,
+                timeout=75
             )
-            with urllib .request .urlopen (req ,timeout =75 )as resp :
-                ai_data =_json .loads (resp .read ().decode ('utf-8'))
+            resp.raise_for_status()
+            ai_data = resp.json()
         except Exception as e :# Comment_255
             log_security_event (
             user =user ,

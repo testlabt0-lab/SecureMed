@@ -10,13 +10,14 @@ from decouple import config
 BASE_DIR =Path (__file__ ).resolve ().parent .parent 
 
 # Comment_454
-SECRET_KEY =config (
-'SECRET_KEY',
-default ='django-insecure-securemed-development-key-change-in-production-2026',
-)
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-# Comment_455
-DEBUG =config ('DEBUG',default =False ,cast =bool )
+if DEBUG:
+    SECRET_KEY = config('SECRET_KEY', default='django-insecure-securemed-development-key-change-in-production-2026')
+else:
+    SECRET_KEY = config('SECRET_KEY')
+
+
 ALLOWED_HOSTS =config (
 'ALLOWED_HOSTS',
 default ='localhost,127.0.0.1,0.0.0.0',
@@ -59,12 +60,14 @@ INSTALLED_APPS =[
 'apps.lab',
 'apps.wards',
 'apps.telemedicine',
+'apps.interoperability',
 # Comment_459
 'django_celery_beat',
 'django_celery_results',
 
 # Comment_460
 'channels',
+'django_prometheus',
 ]
 
 UNFOLD = {
@@ -90,6 +93,7 @@ UNFOLD = {
 }
 
 MIDDLEWARE =[
+'django_prometheus.middleware.PrometheusBeforeMiddleware',
 # Comment_461
 'django.middleware.security.SecurityMiddleware',
 # Comment_462
@@ -112,6 +116,7 @@ MIDDLEWARE =[
 'apps.security.middleware.RateLimitMiddleware',
 # Comment_468
 'apps.security.middleware.SessionSecurityMiddleware',
+'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
 ROOT_URLCONF ='config.urls'
@@ -585,3 +590,22 @@ else :
     'TIMEOUT':300 ,# Comment_549
     }
     }
+
+# ---------- Sentry APM Initialization ----------
+SENTRY_DSN = config('SENTRY_DSN', default='')
+if SENTRY_DSN and not DEBUG:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.redis import RedisIntegration
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            DjangoIntegration(),
+            CeleryIntegration(),
+            RedisIntegration(),
+        ],
+        traces_sample_rate=1.0,
+        send_default_pii=False,
+    )

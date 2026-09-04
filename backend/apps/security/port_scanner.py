@@ -205,7 +205,7 @@ class PortScanner :
             return ip .is_private or ip .is_loopback 
         except ValueError :
         # Comment_359
-            return host in ['localhost','127.0.0.1','0.0.0.0']
+            return host in ['localhost','127.0.0.1','0.0.0.0']  # nosec B104
 
     def _generate_risk_assessment (self ,open_ports ,high_risk_open )->str :
         """Generate human-readable risk assessment."""

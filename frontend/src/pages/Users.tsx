@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus, Search, Users as UsersIcon, Shield, Pencil, Power } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { usersAPI, basinsAPI } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import toast from 'react-hot-toast';
@@ -8,12 +9,15 @@ import toast from 'react-hot-toast';
 const roleLabels: Record<string, string> = {
   SUPER_ADMIN: 'مدير النظام',
   HOSPITAL_ADMIN: 'مدير المستشفى',
+  CENTER_ADMIN: 'مدير مركز',
   DOCTOR: 'طبيب',
   NURSE: 'ممرض',
   LAB_TECH: 'فني مختبر',
   PHARMACIST: 'صيدلي',
   AUDITOR: 'مراجع أمني',
   PATIENT: 'مريض',
+  ACCOUNTANT: 'محاسب',
+  RECEPTIONIST: 'موظف استقبال',
 };
 
 export default function Users() {
@@ -131,12 +135,18 @@ export default function Users() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((u: any) => (
-                  <tr key={u.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                {users.map((u: any, index: number) => (
+                  <motion.tr 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05, duration: 0.2 }}
+                    key={u.id} 
+                    className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                  >
                     <td className="py-3 pr-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center">
-                          <span className="text-primary-700 dark:text-primary-400 text-sm font-medium">
+                        <div className="w-9 h-9 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center">
+                          <span className="text-indigo-700 dark:text-indigo-400 text-sm font-medium">
                             {u.full_name?.charAt(0) || '?'}
                           </span>
                         </div>
@@ -148,26 +158,28 @@ export default function Users() {
                     </td>
                     <td className="text-sm">{u.email}</td>
                     <td>
-                      <span className="badge badge-info">{roleLabels[u.role]}</span>
+                      <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-900/50">
+                        {roleLabels[u.role]}
+                      </span>
                     </td>
                     <td className="text-xs text-gray-500">
                       {u.basin_name || '—'}
                     </td>
                     <td>
                       {u.is_active ? (
-                        <span className="badge badge-success">نشط</span>
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-900/50">نشط</span>
                       ) : (
-                        <span className="badge badge-danger">موقوف</span>
+                        <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10 dark:bg-red-900/30 dark:text-red-400 dark:ring-red-900/50">موقوف</span>
                       )}
                     </td>
                     <td className="pl-4">
                       <div className="flex gap-1 justify-end">
                         <button
                           onClick={() => setEditing(u)}
-                          className="p-2 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg"
+                          className="p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors"
                           title="تعديل"
                         >
-                          <Pencil className="w-4 h-4 text-primary-600" />
+                          <Pencil className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                         </button>
                         {u.is_active ? (
                           u.id !== currentUser?.id && (
@@ -175,7 +187,7 @@ export default function Users() {
                               onClick={() => {
                                 if (confirm('هل تريد إلغاء تفعيل هذا المستخدم؟')) deactivateMutation.mutate(u.id);
                               }}
-                              className="p-2 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
+                              className="p-2 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                               title="إيقاف"
                             >
                               <Power className="w-4 h-4 text-red-500" />
@@ -184,15 +196,15 @@ export default function Users() {
                         ) : (
                           <button
                             onClick={() => activateMutation.mutate(u.id)}
-                            className="p-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg"
+                            className="p-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors"
                             title="تفعيل"
                           >
-                            <Power className="w-4 h-4 text-emerald-600" />
+                            <Power className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                           </button>
                         )}
                       </div>
                     </td>
-                  </tr>
+                  </motion.tr>
                 ))}
               </tbody>
             </table>

@@ -13,7 +13,8 @@ data class User(
     @SerialName("license_number") val licenseNumber: String? = null,
     val department: String? = null,
     val specialization: String? = null,
-    @SerialName("is_biometric_enabled") val isBiometricEnabled: Boolean = false
+    @SerialName("is_biometric_enabled") val isBiometricEnabled: Boolean = false,
+    @SerialName("is_active") val isActive: Boolean = true
 )
 
 @Serializable
@@ -135,4 +136,80 @@ data class DashboardStats(
     @SerialName("security_alerts_today") val securityAlertsToday: Int,
     @SerialName("waf_blocks_today") val wafBlocksToday: Int,
     @SerialName("biometric_logins_today") val biometricLoginsToday: Int
+)
+
+/**
+ * Envelope for the backend's paginated list responses
+ * (SecureMedPagination: count/page/results…).
+ */
+@Serializable
+data class PagedResponse<T>(
+    val count: Int = 0,
+    val page: Int = 1,
+    @SerialName("page_size") val pageSize: Int = 20,
+    @SerialName("total_pages") val totalPages: Int = 1,
+    @SerialName("has_next") val hasNext: Boolean = false,
+    @SerialName("has_previous") val hasPrevious: Boolean = false,
+    val results: List<T> = emptyList()
+)
+
+// ===== Medication plans (device-local; reminders work offline) =====
+
+/**
+ * A medication plan created on this device by an authorized clinician.
+ * Persisted locally so dose alarms fire even without connectivity and
+ * are re-armed after reboot by [com.securemed.app.reminders.BootReceiver].
+ */
+@Serializable
+data class Medication(
+    val id: String,
+    @SerialName("patient_id") val patientId: String,
+    @SerialName("patient_name") val patientName: String,
+    val name: String,
+    val dosage: String,
+    val times: List<String> = emptyList(),
+    @SerialName("start_date") val startDate: String,
+    @SerialName("end_date") val endDate: String? = null,
+    val instructions: String = "",
+    @SerialName("prescribed_by") val prescribedByName: String = "",
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("created_at") val createdAt: String
+)
+
+/** Outcome of one scheduled dose on a given day. */
+@Serializable
+data class MedicationDoseLog(
+    val key: String,
+    @SerialName("plan_id") val planId: String,
+    val date: String,
+    val time: String,
+    val status: String,
+    @SerialName("logged_at") val loggedAt: String
+)
+
+/** A single dose card shown in "today's doses". */
+@Serializable
+data class TodayDose(
+    @SerialName("medication_id") val medicationId: String,
+    @SerialName("medication_name") val medicationName: String,
+    val dosage: String,
+    @SerialName("patient_name") val patientName: String,
+    val time: String,
+    /** ISO local date-time of the scheduled dose, e.g. 2026-09-02T08:00:00. */
+    @SerialName("scheduled_for") val scheduledFor: String,
+    val status: String,
+    val instructions: String = ""
+)
+
+@Serializable
+data class TodayDosesResponse(
+    val doses: List<TodayDose> = emptyList()
+)
+
+/** 7-day adherence summary computed from local dose logs. */
+@Serializable
+data class AdherenceStats(
+    @SerialName("total_doses") val totalDoses: Int,
+    @SerialName("taken_doses") val takenDoses: Int,
+    @SerialName("adherence_percent") val adherencePercent: Int
 )

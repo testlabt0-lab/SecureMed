@@ -6,10 +6,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import com.securemed.app.data.local.LocalCache
+import com.securemed.app.data.local.MedicationStore
 import com.securemed.app.data.model.Medication
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -22,9 +20,8 @@ import java.time.format.DateTimeFormatter
  * when it fires, [ReminderReceiver] shows the notification and asks the
  * scheduler to queue the following dose.
  *
- * The medication list is mirrored into the offline disk cache by the
- * repository, so scheduling also works offline and after reboot
- * (see [BootReceiver]).
+ * Plans are read from [MedicationStore] (device-local), so scheduling
+ * works offline and after reboot (see [BootReceiver]).
  */
 class ReminderScheduler(private val context: Context) {
 
@@ -35,22 +32,14 @@ class ReminderScheduler(private val context: Context) {
         const val EXTRA_INSTRUCTIONS = "med_instructions"
         const val EXTRA_TIME_TEXT = "time_text"
         const val EXTRA_MEDICATION_ID = "med_id"
-
-        private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     }
 
     private val alarmManager =
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    /** Load cached medications and (re)schedule every active one. */
+    /** Load stored plans and (re)schedule every active one. */
     fun refreshFromCache() {
-        val raw = LocalCache.load("medications") ?: return
-        val medications = try {
-            json.decodeFromString(ListSerializer(Medication.serializer()), raw)
-        } catch (_: Exception) {
-            return
-        }
-        medications
+        MedicationStore.loadPlans()
             .filter { it.isActive && it.times.isNotEmpty() }
             .forEach { scheduleNext(it) }
     }

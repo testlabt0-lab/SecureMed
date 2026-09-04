@@ -1,10 +1,12 @@
 package com.securemed.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
@@ -18,8 +20,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.securemed.app.auth.BiometricManager
 import com.securemed.app.data.local.SecurePreferences
+import com.securemed.app.ui.theme.ThemeController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,6 +37,10 @@ fun ProfileScreen(
     val isBiometricAvailable = remember { biometricManager.isBiometricAvailable() }
     var showEnrollDialog by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    // Theme preference: null = follow the system
+    val darkPreference by ThemeController.darkMode.collectAsState()
+    val isDarkTheme = darkPreference ?: isSystemInDarkTheme()
 
     Scaffold(
         topBar = {
@@ -63,22 +72,16 @@ fun ProfileScreen(
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data("https://ui-avatars.com/api/?name=${SecurePreferences.userName ?: "U"}&background=random")
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "صورة الملف الشخصي",
                         modifier = Modifier
                             .size(64.dp)
-                            .background(
-                                MaterialTheme.colorScheme.primary,
-                                RoundedCornerShape(20.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = SecurePreferences.userName?.firstOrNull()?.toString() ?: "?",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp))
+                    )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
@@ -165,6 +168,47 @@ fun ProfileScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Dark mode toggle
+                    Surface(
+                        onClick = { ThemeController.setDarkMode(!isDarkTheme) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.DarkMode,
+                                null,
+                                tint = if (isDarkTheme) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "الوضع الداكن",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (isDarkTheme) "مفعل" else "غير مفعل",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = isDarkTheme,
+                                onCheckedChange = { ThemeController.setDarkMode(it) }
+                            )
                         }
                     }
 

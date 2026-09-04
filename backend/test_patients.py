@@ -1,0 +1,1 @@
+import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); django.setup(); from apps.patients.models import Patient; from apps.patients.serializers import PatientSerializer; print(PatientSerializer(Patient.objects.first()).data)

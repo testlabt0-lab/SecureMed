@@ -8,6 +8,12 @@ import { useAuthStore } from '../store/authStore';
 import { analyticsApi, reportsApi, downloadBlobResponse } from '../api/extendedApis';
 import { useThemeStore } from '../store/themeStore';
 import toast from 'react-hot-toast';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, PieChart, Pie, Cell, Legend
+} from 'recharts';
+
+const COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6'];
 
 const roleLabels: Record<string, string> = {
   SUPER_ADMIN: 'مدير النظام',
@@ -245,7 +251,7 @@ export default function AnalyticsDashboard() {
           <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
             نشاط النظام (آخر 8 أيام)
           </h3>
-          <ActivityChart data={data?.activity_trend || []} isDark={isDark} />
+          <SystemActivityChart data={data?.activity_trend || []} isDark={isDark} />
         </div>
 
         {/* Channels Trend Chart */}
@@ -255,7 +261,7 @@ export default function AnalyticsDashboard() {
           <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
             القنوات الجديدة (آخر 8 أيام)
           </h3>
-          <ActivityChart data={data?.channels_trend || []} isDark={isDark} color="#0D9488" />
+          <ChannelsActivityChart data={data?.channels_trend || []} isDark={isDark} />
         </div>
       </div>
 
@@ -322,27 +328,32 @@ export default function AnalyticsDashboard() {
           <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
             المستخدمون حسب الدور
           </h3>
-          <div className="space-y-3">
-            {Object.entries(data?.users_by_role || {}).map(([role, count]) => (
-              <div key={role}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                    {roleLabels[role] || role}
-                  </span>
-                  <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {count as number}
-                  </span>
-                </div>
-                <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                  <div
-                    className="h-full bg-gradient-to-r from-primary-500 to-medical-500 rounded-full"
-                    style={{
-                      width: `${((count as number) / Math.max(data?.total_users || 1, 1)) * 100}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+          <div className="h-[280px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={Object.entries(data?.users_by_role || {}).map(([role, count]) => ({
+                    name: roleLabels[role] || role,
+                    value: count
+                  }))}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={70}
+                  outerRadius={90}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {Object.entries(data?.users_by_role || {}).map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '8px' }}
+                  itemStyle={{ color: isDark ? '#F3F4F6' : '#111827' }}
+                />
+                <Legend wrapperStyle={{ fontSize: '12px', color: isDark ? '#D1D5DB' : '#374151' }} />
+              </PieChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>
@@ -354,64 +365,88 @@ export default function AnalyticsDashboard() {
         <h3 className={`font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
           القنوات حسب النوع
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {Object.entries(data?.channels_by_type || {}).map(([type, count]) => (
-            <div
-              key={type}
-              className={`p-3 rounded-lg text-center ${
-                isDark ? 'bg-gray-700/50' : 'bg-gray-50'
-              }`}
+        <div className="h-[250px] mt-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={Object.entries(data?.channels_by_type || {}).map(([type, count]) => ({
+                name: channelTypeLabels[type] || type,
+                value: count
+              }))}
+              margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+              barSize={40}
             >
-              <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {count as number}
-              </div>
-              <div className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'} mt-1`}>
-                {channelTypeLabels[type] || type}
-              </div>
-            </div>
-          ))}
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#E5E7EB'} vertical={false} />
+              <XAxis dataKey="name" stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} />
+              <YAxis allowDecimals={false} stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} />
+              <Tooltip
+                cursor={{ fill: isDark ? '#374151' : '#F3F4F6' }}
+                contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '8px' }}
+                itemStyle={{ color: isDark ? '#F3F4F6' : '#111827' }}
+              />
+              <Bar dataKey="value" name="عدد القنوات" fill="#14b8a6" radius={[4, 4, 0, 0]}>
+                {Object.entries(data?.channels_by_type || {}).map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </div>
   );
 }
 
-// Simple SVG-based Activity Chart component
-function ActivityChart({ data, isDark, color = '#2563EB' }: { data: any[]; isDark: boolean; color?: string }) {
+function SystemActivityChart({ data, isDark }: { data: any[]; isDark: boolean }) {
   if (!data || data.length === 0) {
-    return (
-      <div className={`h-40 flex items-center justify-center ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-        لا توجد بيانات
-      </div>
-    );
+    return <div className={`h-64 flex items-center justify-center ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>لا توجد بيانات</div>;
   }
-
-  const max = Math.max(...data.map((d: any) => d.count), 1);
-  const chartHeight = 140;
-  const barWidth = 100 / data.length;
-
+  const formattedData = data.map(d => ({ ...d, dateFormatted: new Date(d.date).toLocaleDateString('ar-SA', { day: 'numeric', month: 'short' }) }));
+  
   return (
-    <div className="flex items-end justify-between h-40 gap-1">
-      {data.map((item: any, index: number) => {
-        const height = (item.count / max) * chartHeight;
-        return (
-          <div key={index} className="flex-1 flex flex-col items-center gap-1">
-            <div className="text-xs font-medium text-gray-500">{item.count}</div>
-            <div
-              className="w-full rounded-t-md transition-all hover:opacity-80"
-              style={{
-                height: `${height}px`,
-                backgroundColor: color,
-                minHeight: '4px',
-              }}
-              title={`${item.date}: ${item.count}`}
-            />
-            <div className="text-xs text-gray-400">
-              {new Date(item.date).toLocaleDateString('ar-SA', { day: 'numeric', month: 'short' })}
-            </div>
-          </div>
-        );
-      })}
+    <div className="h-64">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={formattedData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <defs>
+            <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <XAxis dataKey="dateFormatted" stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} />
+          <YAxis stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} allowDecimals={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#E5E7EB'} vertical={false} />
+          <Tooltip 
+            contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '8px' }}
+            itemStyle={{ color: isDark ? '#F3F4F6' : '#111827' }}
+          />
+          <Area type="monotone" dataKey="count" name="النشاط" stroke="#3b82f6" fillOpacity={1} fill="url(#colorCount)" />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ChannelsActivityChart({ data, isDark }: { data: any[]; isDark: boolean }) {
+  if (!data || data.length === 0) {
+    return <div className={`h-64 flex items-center justify-center ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>لا توجد بيانات</div>;
+  }
+  const formattedData = data.map(d => ({ ...d, dateFormatted: new Date(d.date).toLocaleDateString('ar-SA', { day: 'numeric', month: 'short' }) }));
+  
+  return (
+    <div className="h-64">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={formattedData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <XAxis dataKey="dateFormatted" stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} />
+          <YAxis stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#9CA3AF' : '#6B7280' }} allowDecimals={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#E5E7EB'} vertical={false} />
+          <Tooltip 
+            cursor={{ fill: isDark ? '#374151' : '#F3F4F6' }}
+            contentStyle={{ backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB', borderRadius: '8px' }}
+            itemStyle={{ color: isDark ? '#F3F4F6' : '#111827' }}
+          />
+          <Bar dataKey="count" name="القنوات" fill="#0D9488" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }

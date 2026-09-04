@@ -44,7 +44,8 @@ class BiometricManager(private val context: Context) {
         title: String,
         subtitle: String,
         description: String,
-        onSuccess: (String) -> Unit,
+        cryptoObject: BiometricPrompt.CryptoObject?,
+        onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
         onError: (String) -> Unit,
         onCancel: () -> Unit
     ) {
@@ -60,11 +61,8 @@ class BiometricManager(private val context: Context) {
         val prompt = BiometricPrompt(activity, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    // In production, use CryptoObject to get signed challenge
-                    // For demo, generate a unique template
-                    val userId = SecurePreferencesHelper.getUserId() ?: ""
-                    val template = generateBiometricTemplate(userId)
-                    onSuccess(template)
+                    // Return the result containing the unlocked CryptoObject
+                    onSuccess(result)
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -82,7 +80,12 @@ class BiometricManager(private val context: Context) {
                 }
             }
         )
-        prompt.authenticate(promptInfo)
+        
+        if (cryptoObject != null) {
+            prompt.authenticate(promptInfo, cryptoObject)
+        } else {
+            prompt.authenticate(promptInfo)
+        }
     }
 }
 

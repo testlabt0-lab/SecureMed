@@ -19,10 +19,39 @@ object SecurePreferences {
     private const val KEY_DEVICE_ID = "device_id"
     private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
     private const val KEY_DARK_MODE = "dark_mode"
+    private const val KEY_DB_PASSPHRASE = "db_passphrase"
 
     private lateinit var prefs: EncryptedSharedPreferences
 
     fun init(context: Context) {
+        try {
+            createEncryptedPrefs(context)
+        } catch (e: Exception) {
+            // Android KeyStore / SecurityException occasionally happens on some devices
+            // If the keys are corrupted, delete the preferences file and try again
+            android.util.Log.e("SecurePreferences", "Error creating EncryptedSharedPreferences, clearing and retrying: ${e.message}")
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+            
+            // Delete the file manually for safety
+            val sharedPrefsFile = java.io.File(context.filesDir.parent + "/shared_prefs/" + PREFS_NAME + ".xml")
+            if (sharedPrefsFile.exists()) {
+                sharedPrefsFile.delete()
+            }
+            
+            // Delete the master key alias from Keystore
+            try {
+                val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+                keyStore.load(null)
+                keyStore.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+            } catch (ex: Exception) {
+                // Ignore errors while cleaning Keystore
+            }
+            
+            createEncryptedPrefs(context)
+        }
+    }
+
+    private fun createEncryptedPrefs(context: Context) {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -64,9 +93,21 @@ object SecurePreferences {
         get() = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_BIOMETRIC_ENABLED, value).apply()
 
-    var darkMode: Boolean
-        get() = prefs.getBoolean(KEY_DARK_MODE, false)
-        set(value) = prefs.edit().putBoolean(KEY_DARK_MODE, value).apply()
+    /** Tri-state theme preference: null = follow the system setting. */
+    var darkMode: Boolean?
+        get() = if (prefs.contains(KEY_DARK_MODE)) prefs.getBoolean(KEY_DARK_MODE, false) else null
+        set(value) {
+            if (value == null) prefs.edit().remove(KEY_DARK_MODE).apply()
+            else prefs.edit().putBoolean(KEY_DARK_MODE, value).apply()
+        }
+
+    /** Drops only the session tokens — device identity and settings survive. */
+    fun clearTokens() {
+        prefs.edit()
+            .remove(KEY_ACCESS_TOKEN)
+            .remove(KEY_REFRESH_TOKEN)
+            .apply()
+    }
 
     val deviceId: String
         get() {
@@ -83,4 +124,13 @@ object SecurePreferences {
     }
 
     fun isLoggedIn(): Boolean = accessToken != null && refreshToken != null
+
+    fun getDatabasePassphrase(): ByteArray {
+        var passphrase = prefs.getString(KEY_DB_PASSPHRASE, null)
+        if (passphrase == null) {
+            passphrase = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DB_PASSPHRASE, passphrase).apply()
+        }
+        return passphrase.toByteArray()
+    }
 }

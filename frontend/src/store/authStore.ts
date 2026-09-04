@@ -11,6 +11,8 @@ export interface User {
   department?: string;
   specialization?: string;
   is_biometric_enabled: boolean;
+  permissions?: string[];
+  groups?: string[];
 }
 
 interface AuthState {

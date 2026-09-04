@@ -1,0 +1,20 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Essa\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe
+cachedir: .pytest_cache
+django: version: 6.0.1, settings: config.test_settings (from option)
+rootdir: C:\Users\Essa\Downloads\securemed\backend
+configfile: pytest.ini
+plugins: anyio-4.12.1, Faker-40.37.0, asyncio-1.4.0, cov-7.1.0, django-4.14.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 214 items
+
+tests/test_accounts.py::TestUserModel::test_create_user <- ..\SecureMed-main\backend\tests\test_accounts.py PASSED [  0%]
+tests/test_accounts.py::TestUserModel::test_create_superuser <- ..\SecureMed-main\backend\tests\test_accounts.py PASSED [  0%]
+tests/test_accounts.py::TestUserModel::test_user_str_representation <- ..\SecureMed-main\backend\tests\test_accounts.py PASSED [  1%]
+tests/test_accounts.py::TestUserModel::test_is_medical_staff_property <- ..\SecureMed-main\backend\tests\test_accounts.py PASSED [  1%]
+tests/test_accounts.py::TestUserModel::test_account_lock_after_failed_attempts <- ..\SecureMed-main\backend\tests\test_accounts.py FAILED [  2%]
+tests/test_accounts.py::TestUserModel::test_reset_failed_attempts <- ..\SecureMed-main\backend\tests\test_accounts.py PASSED [  2%]
+tests/test_accounts.py::TestLoginAPI::test_login_success <- ..\SecureMed-main\backend\tests\test_accounts.py FAILED [  3%]
+tests/test_accounts.py::TestLoginAPI::test_login_wrong_password <- ..\SecureMed-main\backend\tests\test_accounts.py FAILED [  3%]
+tests/test_accounts.py::TestLoginAPI::test_login_nonexistent_user <- ..\SecureMed-main\backend\tests\test_accounts.py FAILED [  4%]
+tests/test_accounts.py::TestLoginAPI::test_login_missing_fields <- ..\SecureMed-main\backend\tests\test_accounts.py 

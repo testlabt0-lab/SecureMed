@@ -1,25 +1,41 @@
 # Add project specific ProGuard rules here.
--keepattributes *Annotation*, InnerClasses
--dontwarn kotlinx.serialization.**
+# You can control the set of applied configuration files using the
+# proguardFiles setting in build.gradle.
 
 # Retrofit
+-dontwarn retrofit2.**
 -keep class retrofit2.** { *; }
--keepclasseswithmembers class * { @retrofit2.http.* <methods>; }
+-keepattributes Signature
+-keepattributes Exceptions
 
 # OkHttp
 -dontwarn okhttp3.**
 -dontwarn okio.**
+-keepclasseswithmembers class * {
+    @retrofit2.http.* <methods>;
+}
 
-# Kotlin Serialization
--keepclassmembers class kotlinx.serialization.json.** {
-    *** Companion;
+# Kotlinx Serialization
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.AnnotationsKd
+-keep,allowdictionarywarnings class kotlinx.serialization.** { *; }
+-keepclassmembers class kotlinx.serialization.** {
+    <init>(...);
+    static <methods>;
 }
--keepclasseswithmembers class kotlinx.serialization.json.** {
-    kotlinx.serialization.KSerializer serializer(...);
-}
-# Please add these rules to your existing keep rules in order to suppress warnings.
-# This is generated automatically by the Android Gradle plugin.
--dontwarn com.google.errorprone.annotations.CanIgnoreReturnValue
--dontwarn com.google.errorprone.annotations.CheckReturnValue
--dontwarn com.google.errorprone.annotations.Immutable
--dontwarn com.google.errorprone.annotations.RestrictedApi
+
+# Room
+-keep class * extends androidx.room.RoomDatabase
+-dontwarn androidx.room.paging.**
+
+# SQLCipher
+-keep class net.sqlcipher.** { *; }
+-keep class net.sqlcipher.database.** { *; }
+
+# Hilt / Dagger
+-keep class dagger.hilt.** { *; }
+-keep class * extends dagger.hilt.internal.GeneratedComponent
+
+# Keep data models
+-keep class com.securemed.app.data.model.** { *; }
+-keep class com.securemed.app.data.local.room.** { *; }

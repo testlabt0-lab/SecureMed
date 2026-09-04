@@ -16,7 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.securemed.app.data.model.Channel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -25,7 +25,7 @@ fun ChannelsScreen(
     onChannelClick: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    val viewModel: ChannelsViewModel = viewModel()
+    val viewModel: ChannelsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
     var search by remember { mutableStateOf("") }
 

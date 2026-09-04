@@ -5,10 +5,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 // Color palettes
 private val PrimaryLight = Color(0xFF2563EB)
@@ -70,15 +75,52 @@ private val DarkColorScheme = darkColorScheme(
     outlineVariant = Color(0xFF374151),
 )
 
+/**
+ * Holds the user's theme preference. `null` means "follow the system";
+ * an explicit true/false overrides it. Persisted through SecurePreferences.
+ */
+object ThemeController {
+
+    private val _darkMode = MutableStateFlow<Boolean?>(null)
+
+    /** Current preference: null = system, true = dark, false = light. */
+    val darkMode: StateFlow<Boolean?> = _darkMode.asStateFlow()
+
+    /** Called once from SecureMedApp.onCreate() with the stored preference. */
+    fun init(stored: Boolean?) {
+        _darkMode.value = stored
+    }
+
+    fun setDarkMode(enabled: Boolean) {
+        _darkMode.value = enabled
+        com.securemed.app.data.local.SecurePreferences.darkMode = enabled
+    }
+}
+
 @Composable
 fun SecureMedTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colors = if (darkTheme) DarkColorScheme else LightColorScheme
+    val themePreference by ThemeController.darkMode.collectAsState()
+    val useDarkTheme = themePreference ?: darkTheme
+    
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (useDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        useDarkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+    
     MaterialTheme(
-        colorScheme = colors,
-        typography = Typography,
-        content = content
-    )
+        colorScheme = colorScheme,
+        typography = Typography
+    ) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            content()
+        }
+    }
 }

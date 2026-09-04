@@ -15,22 +15,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.securemed.app.SecureMedApp
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.Channel
 import com.securemed.app.data.model.Patient
+
+private val ADMIN_ROLES = listOf("SUPER_ADMIN", "HOSPITAL_ADMIN")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onNavigateToChannels: () -> Unit,
     onNavigateToPatients: () -> Unit,
+    onNavigateToMedications: () -> Unit,
+    onNavigateToUsers: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToNotifications: () -> Unit,
+    onNavigateToAppointments: () -> Unit,
+    onNavigateToPharmacy: () -> Unit,
+    onNavigateToLab: () -> Unit,
+    onNavigateToTelemedicine: () -> Unit,
+    onNavigateToAnalytics: () -> Unit,
     onLogout: () -> Unit
 ) {
-    val viewModel: DashboardViewModel = viewModel()
+    val viewModel: DashboardViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
+    val isOnline by SecureMedApp.instance.connectivity.isOnline.collectAsState()
+    val isAdmin = SecurePreferences.userRole in ADMIN_ROLES
 
     Scaffold(
         topBar = {
@@ -59,6 +71,35 @@ fun DashboardScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Offline banner — cached data stays browsable without network
+            if (!isOnline) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.WifiOff, null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "لا يوجد اتصال — تُعرض آخر نسخة محفوظة من البيانات",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+
             item {
                 // Welcome card
                 Card(
@@ -111,13 +152,40 @@ fun DashboardScreen(
                 ) {
                     StatCard(
                         modifier = Modifier.weight(1f),
+                        title = "الأدوية",
+                        count = state.medicationsCount,
+                        icon = Icons.Default.Medication,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        onClick = onNavigateToMedications
+                    )
+                    StatCard(
+                        modifier = Modifier.weight(1f),
                         title = "البصمة",
                         count = if (SecurePreferences.biometricEnabled) 1 else 0,
                         countText = if (SecurePreferences.biometricEnabled) "مفعلة" else "غير مفعلة",
                         icon = Icons.Default.Fingerprint,
-                        color = MaterialTheme.colorScheme.tertiary,
+                        color = MaterialTheme.colorScheme.primary,
                         onClick = onNavigateToProfile
                     )
+                }
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (isAdmin) {
+                        StatCard(
+                            modifier = Modifier.weight(1f),
+                            title = "المستخدمون",
+                            count = state.usersCount,
+                            icon = Icons.Default.People,
+                            color = MaterialTheme.colorScheme.secondary,
+                            onClick = onNavigateToUsers
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                     StatCard(
                         modifier = Modifier.weight(1f),
                         title = "الأمان",
@@ -125,8 +193,32 @@ fun DashboardScreen(
                         countText = "مفعلة",
                         icon = Icons.Default.Security,
                         color = MaterialTheme.colorScheme.error,
-                        onClick = {}
+                        onClick = onNavigateToProfile
                     )
+                }
+            }
+
+            // Quick Services
+            item {
+                Text(
+                    text = "الخدمات السريعة",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "المواعيد", icon = Icons.Default.Event, onClick = onNavigateToAppointments)
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الصيدلية", icon = Icons.Default.LocalPharmacy, onClick = onNavigateToPharmacy)
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "المختبر", icon = Icons.Default.Science, onClick = onNavigateToLab)
+                }
+            }
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "عن بعد", icon = Icons.Default.VideoCall, onClick = onNavigateToTelemedicine)
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "التحليلات", icon = Icons.Default.Insights, onClick = onNavigateToAnalytics)
+                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
 

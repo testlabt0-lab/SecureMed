@@ -378,13 +378,15 @@ export default function Appointments() {
           <p className="text-gray-400 text-sm mt-1">إدارة مواعيد المرضى والجدول الطبي</p>
         </div>
         <div className="flex items-center gap-2">
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-bold rounded-xl transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            إضافة موعد
-          </button>
+          {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'].includes(user.role) && (
+            <button 
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-bold rounded-xl transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              إضافة موعد
+            </button>
+          )}
           <div className="flex bg-white/5 border border-white/10 rounded-xl overflow-hidden">
             {(['list', 'calendar'] as const).map(v => (
               <button

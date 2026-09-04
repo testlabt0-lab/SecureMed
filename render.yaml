@@ -1,86 +1,22 @@
-# ============================================================
-# SecureMed — Render Blueprint (نشر بنقرة واحدة)
-# ============================================================
-# Deploy both services with one import:
-#   Render Dashboard → New + → Blueprint → pick this repo
-#
-# Architecture:
-#   securemed-web : Django (API + built React SPA via whitenoise)
-#   securemed-ai  : Node AI microservice (GLM assistant) — private,
-#                   called server-to-server by Django only.
-#
-# Database: create a free PostgreSQL at https://neon.tech and paste its
-# connection string into the DATABASE_URL env var after the first deploy
-# (or before — Blueprint deploys with sync:false prompts).
-# ============================================================
-
 services:
-  # ---------------- Django web + SPA ----------------
   - type: web
-    name: securemed-web
-    runtime: python
-    plan: free
-    rootDir: backend
-    buildCommand: bash ../deploy/build.sh
-    startCommand: bash ../deploy/start.sh
-    healthCheckPath: /health/
+    name: securemed-production
+    env: docker
+    region: frankfurt # Or your preferred region
+    plan: starter # Starter plan recommended for PostgreSQL + Django
+    healthCheckPath: /health/live/
     envVars:
-      # Pin Python 3.12 — Django 5.0.6 / psycopg2-binary 2.9.9 / matplotlib 3.9.2
-      # have no cp313 wheels, so Render's newer default Python would fail to build.
-      - key: PYTHON_VERSION
-        value: "3.12.7"
-      - key: DJANGO_SETTINGS_MODULE
-        value: config.settings
+      - key: DEBUG
+        value: "False"
       - key: SECRET_KEY
         generateValue: true
-      # AES-256 field-encryption key (any random string — PBKDF2-derived)
       - key: ENCRYPTION_KEY
         generateValue: true
-      - key: DEBUG
-        value: "0"
-      # Accept any *.onrender.com subdomain (adjust after adding a custom domain)
-      - key: ALLOWED_HOSTS
-        value: ".onrender.com,localhost,127.0.0.1"
-      - key: CSRF_TRUSTED_ORIGINS
-        value: "https://*.onrender.com"
-      - key: SECURE_SSL_REDIRECT
-        value: "1"
-      # Free-forever PostgreSQL: https://neon.tech → copy the pooled URL
       - key: DATABASE_URL
-        sync: false
-      # SQLite fallback for demo-only deploys (ignored when DATABASE_URL is set)
+        sync: false # Set this in Render dashboard using your Neon DB URL
       - key: DB_ENGINE
-        value: "sqlite"
-      - key: SEED_DEMO_DATA
-        value: "1"
-      # AI microservice (set its hostname after both services exist,
-      # or leave the default and Render resolves it via fromService below)
-      - key: AI_SERVICE_HOST
-        fromService:
-          type: web
-          name: securemed-ai
-          property: host
-      # Optional: real SMTP for email notifications (Gmail app password etc.)
-      - key: EMAIL_HOST
-        sync: false
-      - key: EMAIL_HOST_USER
-        sync: false
-      - key: EMAIL_HOST_PASSWORD
-        sync: false
-
-  # ---------------- AI microservice ----------------
-  - type: web
-    name: securemed-ai
-    runtime: node
-    plan: free
-    rootDir: ai-service
-    buildCommand: npm install
-    startCommand: bash start.sh
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_VERSION
-        value: "20"
-      - key: ZAI_BASE_URL
-        sync: false   # e.g. https://api.z.ai/v1
-      - key: ZAI_API_KEY
-        sync: false   # your Z.ai API key
+        value: "postgres"
+      - key: FRONTEND_DIST
+        value: "/app/frontend/dist"
+      - key: SECURE_SSL_REDIRECT
+        value: "True"

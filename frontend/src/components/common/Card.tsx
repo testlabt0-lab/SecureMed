@@ -6,11 +6,15 @@ interface CardProps {
   title?: string;
   subtitle?: string;
   action?: React.ReactNode;
+  onClick?: () => void;
 }
 
-export default function Card({ children, className = '', title, subtitle, action }: CardProps) {
+export default function Card({ children, className = '', title, subtitle, action, onClick }: CardProps) {
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700/60 shadow-sm ${className}`}>
+    <div
+      onClick={onClick}
+      className={`bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700/60 shadow-sm ${className}`}
+    >
       {(title || action) && (
         <div className="flex items-center justify-between mb-4">
           <div>

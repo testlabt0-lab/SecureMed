@@ -4,12 +4,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Users, Heart } from 'lucide-react';
 import { patientsAPI } from '../api/client';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../store/authStore';
 
 export default function Patients() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
 
   const { data: patientsData, isLoading } = useQuery({
     queryKey: ['patients', { search }],
@@ -35,10 +37,12 @@ export default function Patients() {
           <h1 className="text-2xl font-bold">المرضى</h1>
           <p className="text-gray-600 text-sm mt-1">إدارة سجلات المرضى (مشفرة)</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" />
-          مريض جديد
-        </button>
+        {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'].includes(user.role) && (
+          <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" />
+            مريض جديد
+          </button>
+        )}
       </div>
 
       <div className="card">

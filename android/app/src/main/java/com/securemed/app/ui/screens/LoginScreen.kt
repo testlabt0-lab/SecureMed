@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.securemed.app.auth.BiometricManager
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.ui.AuthUiState
@@ -30,7 +31,7 @@ import com.securemed.app.ui.AuthViewModel
 
 @Composable
 fun LoginScreen(
-    viewModel: AuthViewModel,
+    viewModel: AuthViewModel = hiltViewModel(),
     onLoginSuccess: () -> Unit
 ) {
     val context = LocalContext.current
@@ -250,12 +251,22 @@ fun LoginScreen(
         LaunchedEffect(Unit) {
             val activity = context as? FragmentActivity
             activity?.let {
+                val cryptoObject = com.securemed.app.security.BiometricHelper.getCryptoObject()
                 biometricManager.authenticate(
                     activity = it,
                     title = "المصادقة بالبصمة",
                     subtitle = "استخدم بصمتك للدخول إلى SecureMed",
                     description = "SecureMed يتطلب المصادقة البيومترية للوصول للبيانات الحساسة",
-                    onSuccess = { template ->
+                    cryptoObject = cryptoObject,
+                    onSuccess = { result ->
+                        val cipher = result.cryptoObject?.cipher
+                        val template = if (cipher != null) {
+                            // Encrypt a challenge (e.g., email + timestamp) to prove key ownership
+                            com.securemed.app.security.BiometricHelper.encryptChallenge(cipher, "securemed-challenge-$email")
+                        } else {
+                            // Fallback if CryptoObject failed but auth succeeded
+                            "android-bio-$email-${System.currentTimeMillis()}-${(0..9999).random()}"
+                        }
                         viewModel.biometricLogin(email, template)
                         showBiometricPrompt = false
                     },

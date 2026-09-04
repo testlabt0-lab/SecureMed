@@ -17,3 +17,10 @@ class PasswordResetRateThrottle(AnonRateThrottle):
     Strict on purpose: prevents email-bombing and brute-force token guessing.
     """
     scope = 'password_reset'
+
+
+class LoginRateThrottle(AnonRateThrottle):
+    """
+    Throttle for login endpoints to prevent brute force attacks.
+    """
+    scope = 'login'

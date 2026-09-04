@@ -22,23 +22,30 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import android.app.Application
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.model.*
 import com.securemed.app.reminders.ReminderScheduler
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalDate
+import javax.inject.Inject
 
 // ============================================================
 // ViewModel
 // ============================================================
 
-class MedicationsViewModel : ViewModel() {
-    private val repository = SecureMedRepository()
+@HiltViewModel
+class MedicationsViewModel @Inject constructor(
+    private val repository: SecureMedRepository,
+    application: Application
+) : ViewModel() {
+
+    private val scheduler = ReminderScheduler(application)
 
     data class MedicationsState(
         val isLoading: Boolean = true,
@@ -76,20 +83,17 @@ class MedicationsViewModel : ViewModel() {
                 canPrescribe = role in listOf(
                     "SUPER_ADMIN", "HOSPITAL_ADMIN", "DOCTOR"
                 ),
-                error = if (doses.isFailure && meds.isFailure) "فشل تحميل الأدوية" else null
+                error = if (patients.isFailure) "تعذر تحميل قائمة المرضى — تحقق من الاتصال" else null
             )
 
-            // Mirror the plan into the reminder scheduler (alarms even when
-            // the app is closed, and after reboot via BootReceiver).
-            meds.getOrDefault(emptyList())
-                .filter { it.isActive }
-                .forEach { ReminderScheduler(nullAnyContext()).scheduleNext(it) }
+            // Re-arm one alarm per active plan; plans are device-local, so
+            // reminders fire even offline and after reboot (BootReceiver).
+            try {
+                scheduler.refreshFromCache()
+            } catch (_: Exception) {
+            }
         }
     }
-
-    /** The scheduler needs a Context — resolve it lazily via the app. */
-    private fun nullAnyContext(): android.content.Context =
-        com.securemed.app.SecureMedApp.instance!!
 
     fun logDose(dose: TodayDose, status: String) {
         viewModelScope.launch {
@@ -118,17 +122,22 @@ class MedicationsViewModel : ViewModel() {
         onDone: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
+            val times = doseTimes.split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
             repository.createMedication(
-                MedicationCreateRequest(
-                    patient = patient.id,
-                    name = name,
-                    dosage = dosage,
-                    doseTimes = doseTimes,
-                    startDate = LocalDate.now().toString(),
-                    instructions = instructions
-                )
+                patientId = patient.id,
+                patientName = patient.fullName,
+                name = name,
+                dosage = dosage,
+                doseTimes = times,
+                instructions = instructions
             )
-                .onSuccess {
+                .onSuccess { plan ->
+                    try {
+                        scheduler.scheduleNext(plan)
+                    } catch (_: Exception) {
+                    }
                     _state.value = _state.value.copy(
                         message = "✓ أُضيف الدواء $name — ستصل تذكيرات في مواعيدها"
                     )
@@ -158,7 +167,7 @@ class MedicationsViewModel : ViewModel() {
 fun MedicationsScreen(
     onBack: () -> Unit
 ) {
-    val viewModel: MedicationsViewModel = viewModel()
+    val viewModel: MedicationsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 

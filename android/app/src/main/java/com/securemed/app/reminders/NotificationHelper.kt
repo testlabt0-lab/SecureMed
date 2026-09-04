@@ -21,6 +21,9 @@ object NotificationHelper {
     const val CHANNEL_MEDICATIONS = "medication_reminders"
     const val MEDICATION_NOTIFICATION_ID_BASE = 4200
 
+    /** Intent extra that makes MainActivity open the medications screen. */
+    const val EXTRA_OPEN_MEDICATIONS = "open_medications"
+
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -61,7 +64,7 @@ object NotificationHelper {
             notificationId,
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("open_medications", true)
+                putExtra(EXTRA_OPEN_MEDICATIONS, true)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

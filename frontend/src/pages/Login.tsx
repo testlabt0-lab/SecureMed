@@ -7,7 +7,7 @@ import { mfaApi } from '../api/extendedApis';
 import {
   Stethoscope, Fingerprint, Mail, Lock, ShieldCheck, AlertCircle,
   Smartphone, HeartPulse, Activity, Eye, EyeOff, ArrowLeft, ScanFace,
-  Cpu, Monitor, ShieldAlert, RefreshCw, CheckCircle2,
+  Cpu, Monitor, ShieldAlert, CheckCircle2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AnimatedBackground from '../components/fx/AnimatedBackground';
@@ -38,22 +38,11 @@ export default function Login() {
   const [webauthnSupported] = useState(isWebAuthnAvailable());
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [rememberDevice, setRememberDevice] = useState(true);
-  const [failedCount, setFailedCount] = useState(0);
-  const [captchaAnswer, setCaptchaAnswer] = useState('');
-  const [captchaChallenge, setCaptchaChallenge] = useState({ a: 3, b: 5 });
   const [blockedAlert, setBlockedAlert] = useState<string | null>(null);
 
   useEffect(() => {
     getDeviceFingerprint().then((info) => setDeviceInfo(info)).catch(console.error);
-    generateCaptcha();
   }, []);
-
-  const generateCaptcha = () => {
-    const a = Math.floor(Math.random() * 8) + 1;
-    const b = Math.floor(Math.random() * 9) + 1;
-    setCaptchaChallenge({ a, b });
-    setCaptchaAnswer('');
-  };
 
   // 2FA step state
   const [pendingMfaToken, setPendingMfaToken] = useState<string | null>(null);
@@ -78,15 +67,6 @@ export default function Login() {
     e.preventDefault();
     setBlockedAlert(null);
 
-    // Verify captcha if enabled after multiple attempts
-    if (failedCount >= 2) {
-      if (parseInt(captchaAnswer, 10) !== captchaChallenge.a + captchaChallenge.b) {
-        toast.error('إجابة التحقق الأمني (CAPTCHA) غير صحيحة');
-        generateCaptcha();
-        return;
-      }
-    }
-
     setLoading(true);
     try {
       const { data } = await authAPI.login(email, password);
@@ -104,8 +84,6 @@ export default function Login() {
       if (err.response?.status === 403 || detail.includes('حظر') || detail.includes('blocked')) {
         setBlockedAlert(detail || 'تم حظر هذا الجهاز أو عنوان IP لأسباب أمنية');
       }
-      setFailedCount((c) => c + 1);
-      generateCaptcha();
       toast.error(detail);
     } finally {
       setLoading(false);
@@ -409,43 +387,6 @@ export default function Login() {
                             </button>
                           </div>
                         </motion.div>
-
-                        {/* Security CAPTCHA (active after multiple attempts) */}
-                        {failedCount >= 2 && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2"
-                          >
-                            <div className="flex items-center justify-between text-xs text-amber-300">
-                              <span className="font-semibold flex items-center gap-1.5">
-                                <ShieldCheck className="w-4 h-4 text-amber-400" />
-                                فحص التحقق البشري (مكافحة الهجمات الآلية)
-                              </span>
-                              <button
-                                type="button"
-                                onClick={generateCaptcha}
-                                className="hover:text-amber-200 flex items-center gap-1"
-                                title="تحديث التحدي"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="bg-gray-900/80 px-3 py-2 rounded-xl text-white font-mono font-bold tracking-wider text-sm border border-white/10">
-                                {captchaChallenge.a} + {captchaChallenge.b} = ؟
-                              </div>
-                              <input
-                                type="number"
-                                required
-                                value={captchaAnswer}
-                                onChange={(e) => setCaptchaAnswer(e.target.value)}
-                                placeholder="الناتج"
-                                className="input-field py-2 text-center text-sm font-bold w-28 bg-white/95 dark:bg-gray-800/95"
-                              />
-                            </div>
-                          </motion.div>
-                        )}
 
                         {/* Remember / Trust this device */}
                         <div className="flex items-center justify-between pt-1">

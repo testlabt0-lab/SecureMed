@@ -54,6 +54,11 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     const tokens = useAuthStore.getState().tokens;
 
+    if (error.response?.status === 403 && (error.response?.data?.error === 'تم حظر هذا الجهاز' || error.response?.data?.error === 'تم حظر هذا العنوان نهائيا')) {
+      window.location.href = '/blocked';
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry && tokens?.refresh) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

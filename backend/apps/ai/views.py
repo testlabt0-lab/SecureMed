@@ -1,17 +1,12 @@
 """
-Secure server-side proxy to the AI microservice.
+Secure server-side proxy for the AI microservice.
 
-Why a proxy?
-  * The AI service never touches the internet — only Django calls it
-    (server-to-server over the internal network / Docker network).
-  * Every assistant request is authenticated (JWT), filtered by the WAF,
-    rate-limited and audited before it reaches the model.
-  * In production the React SPA is served from Django itself, so the
-    frontend's same-origin `/ai/...` calls land here instead of the
-    Vite dev proxy used in development.
+Now natively implemented using google.generativeai (Gemini) directly in Django.
+No Node.js microservice required.
 """
 import json as _json
-import urllib.request
+import base64
+from io import BytesIO
 
 from django.conf import settings
 from rest_framework import status
@@ -21,113 +16,192 @@ from rest_framework.views import APIView
 
 from apps.audit.utils import log_security_event
 
+import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
 MAX_QUESTION_LEN = 2000
 MAX_HISTORY_MESSAGES = 10
-MAX_CONTEXT_CHARS = 500_000  # ~0.5 MB of JSON context from the SPA
+MAX_CONTEXT_CHARS = 500_000
 
-
-def _ai_url(path: str) -> str:
-    base = getattr(settings, 'AI_SERVICE_URL', 'http://127.0.0.1:8100')
-    return f"{base.rstrip('/')}{path}"
+def get_gemini_model(model_name='gemini-3.6-flash'):
+    """Initialize and return a Gemini model if the API key is configured."""
+    api_key = getattr(settings, 'GEMINI_API_KEY', '')
+    if not api_key:
+        return None
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel(model_name)
 
 
 class AIAssistantAskView(APIView):
-    """POST /ai/ask — proxy a question (with optional context/history) to the AI service."""
-
+    """POST /ai/ask — AI Chat Assistant for doctors."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Module activation by basin type (plan requirement)
         from apps.basins.utils import ensure_module_enabled
         ensure_module_enabled(request.user, 'ai_assistant')
 
         question = str(request.data.get('question') or '').strip()
         if not question:
-            return Response(
-                {'detail': 'السؤال مطلوب'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({'detail': 'السؤال مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
         if len(question) > MAX_QUESTION_LEN:
-            return Response(
-                {'detail': f'السؤال طويل جداً — الحد الأقصى {MAX_QUESTION_LEN} حرف'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({'detail': f'السؤال طويل جداً — الحد الأقصى {MAX_QUESTION_LEN} حرف'}, status=status.HTTP_400_BAD_REQUEST)
 
         history = request.data.get('history') or []
-        if not isinstance(history, list):
-            return Response(
-                {'detail': 'history يجب أن يكون قائمة'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        history = [
-            {
-                'role': 'assistant' if str(h.get('role')) == 'assistant' else 'user',
-                'content': str(h.get('content'))[:MAX_QUESTION_LEN],
-            }
-            for h in history[-MAX_HISTORY_MESSAGES:]
-            if isinstance(h, dict) and h.get('content')
-        ]
-
-        payload = {'question': question, 'history': history}
-
         context = request.data.get('context')
-        if context is not None:
-            try:
-                context_json = _json.dumps(context, ensure_ascii=False)
-            except (TypeError, ValueError):
-                return Response(
-                    {'detail': 'سياق غير صالح'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if len(context_json) > MAX_CONTEXT_CHARS:
-                return Response(
-                    {'detail': 'حجم السياق كبير جداً'},
-                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                )
-            payload['context'] = context
-
-        try:
-            req = urllib.request.Request(
-                _ai_url('/ask'),
-                data=_json.dumps(payload, ensure_ascii=False).encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
-                method='POST',
-            )
-            with urllib.request.urlopen(req, timeout=85) as resp:
-                ai_data = _json.loads(resp.read().decode('utf-8'))
-        except Exception as e:  # service down / timeout / invalid payload
-            log_security_event(
-                user=request.user,
-                event_type='AI_ASSISTANT_FAILED',
-                request=request,
-                details={'error': str(e)[:200]},
-            )
-            return Response(
-                {'detail': 'خدمة المساعد الذكي غير متاحة حالياً — حاول لاحقاً'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
 
         log_security_event(
             user=request.user,
             event_type='AI_ASSISTANT_QUERY',
             request=request,
-            details={'question_length': len(question), 'history_len': len(history)},
+            details={'question_length': len(question), 'history_len': len(history)}
         )
-        return Response(ai_data, status=status.HTTP_200_OK)
+
+        model = get_gemini_model()
+        if not model:
+            return Response({
+                "answer": "مفتاح API الخاص بـ Gemini غير متوفر. الرجاء إضافة GEMINI_API_KEY في إعدادات النظام.",
+                "suggestions": ["تواصل مع الدعم الفني لإعداد الذكاء الاصطناعي"]
+            }, status=status.HTTP_200_OK)
+
+        try:
+            prompt = f"أنت مساعد طبي ذكي (CDSS) في نظام SecureMed. أجب باللغة العربية.\n"
+            if context:
+                prompt += f"\nسياق المريض:\n{_json.dumps(context, ensure_ascii=False)[:MAX_CONTEXT_CHARS]}\n"
+            
+            prompt += f"\nتاريخ المحادثة:\n"
+            for h in history[-MAX_HISTORY_MESSAGES:]:
+                prompt += f"{h.get('role', 'user')}: {h.get('content', '')}\n"
+            
+            prompt += f"\nالسؤال الحالي:\n{question}\n"
+            prompt += "\nفي النهاية، قدم بالضبط 3 اقتراحات لأسئلة متابعة في صيغة JSON array فقط وافصل هذا الـ JSON بخط فاصل `---SUGGESTIONS---`."
+
+            response = model.generate_content(prompt)
+            text = response.text
+
+            parts = text.split('---SUGGESTIONS---')
+            answer = parts[0].strip()
+            
+            suggestions = ["استشارة طبيب مختص", "طلب تحاليل عامة", "مراجعة العلامات الحيوية"]
+            if len(parts) > 1:
+                try:
+                    raw_json = parts[1].strip().strip('`').replace('json\n', '')
+                    sugs = _json.loads(raw_json)
+                    if isinstance(sugs, list) and len(sugs) > 0:
+                        suggestions = sugs[:3]
+                except:
+                    pass
+
+            return Response({
+                "answer": answer,
+                "suggestions": suggestions
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            log_security_event(user=request.user, event_type='AI_ASSISTANT_FAILED', request=request, details={'error': str(e)[:200]})
+            return Response({'detail': f'خطأ في الذكاء الاصطناعي: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AIAnalyzeImageView(APIView):
+    """POST /ai/analyze-image — Analyzes medical images (X-ray, MRI, etc)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        image_base64 = request.data.get('imageBase64', '')
+        prompt = request.data.get('prompt', 'قم بتحليل هذه الصورة الطبية وقدم ملاحظاتك الأولية باللغة العربية.')
+
+        if not image_base64:
+            return Response({'detail': 'الصورة مطلوبة'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Remove data URI scheme if present (e.g. data:image/jpeg;base64,...)
+        if ',' in image_base64:
+            image_base64 = image_base64.split(',')[1]
+
+        model = get_gemini_model()
+        if not model:
+            return Response({
+                "analysis": "عذراً، ميزة تحليل الصور تتطلب تكوين مفتاح GEMINI_API_KEY."
+            }, status=status.HTTP_200_OK)
+
+        try:
+            image_data = base64.b64decode(image_base64)
+            image_parts = [{"mime_type": "image/jpeg", "data": image_data}]
+
+            response = model.generate_content([prompt, image_parts[0]])
+            return Response({"analysis": response.text}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': f'فشل تحليل الصورة: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AIStructureNoteView(APIView):
+    """POST /ai/structure-note — Structures raw clinical text into SOAP format."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        text = request.data.get('text', '')
+        if not text:
+            return Response({'detail': 'النص مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
+
+        model = get_gemini_model()
+        if not model:
+            return Response({"structured": text + "\n\n(تعذر التنظيم لعدم وجود مفتاح API)"}, status=status.HTTP_200_OK)
+
+        try:
+            prompt = f"قم بتنظيم الملاحظات الطبية التالية إلى تنسيق SOAP (Subjective, Objective, Assessment, Plan) باللغة العربية وبشكل احترافي:\n\n{text}"
+            response = model.generate_content(prompt)
+            return Response({"structured": response.text}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AITriageView(APIView):
+    """POST /ai/triage — Triages patient data based on symptoms and vitals."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        patient = request.data.get('patient', {})
+        symptoms = request.data.get('symptoms', '')
+        vitals = request.data.get('vitals', {})
+        lab_results = request.data.get('lab_results', {})
+
+        model = get_gemini_model()
+        if not model:
+            return Response({
+                "level": 3,
+                "reasoning": "التقييم الآلي معطل (مفتاح API مفقود).",
+                "recommendations": ["قم بالتقييم يدوياً"]
+            }, status=status.HTTP_200_OK)
+
+        try:
+            prompt = f"""
+قم بتقييم حالة هذا المريض وتحديد مستوى الخطورة (Triage Level) من 1 إلى 5 حيث 1 هو الأشد خطورة (إنعاش) و 5 غير طارئ.
+المريض: {_json.dumps(patient, ensure_ascii=False)}
+الأعراض: {symptoms}
+العلامات الحيوية: {_json.dumps(vitals, ensure_ascii=False)}
+التحاليل: {_json.dumps(lab_results, ensure_ascii=False)}
+
+يجب أن ترد بصيغة JSON فقط بهذا الشكل:
+{{
+  "level": 2,
+  "reasoning": "شرح سبب التقييم باللغة العربية",
+  "recommendations": ["توصية 1", "توصية 2"]
+}}
+"""
+            response = model.generate_content(prompt)
+            raw_json = response.text.strip().strip('`').replace('json\n', '')
+            result = _json.loads(raw_json)
+            
+            return Response({
+                "level": result.get("level", 3),
+                "reasoning": result.get("reasoning", ""),
+                "recommendations": result.get("recommendations", [])
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': f'فشل التقييم: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AIAssistantHealthView(APIView):
-    """GET /ai/health — lightweight reachability probe (no data exposed)."""
-
+    """GET /ai/health — Lightweight reachability probe."""
     permission_classes = [AllowAny]
 
     def get(self, request):
-        try:
-            with urllib.request.urlopen(_ai_url('/health'), timeout=5) as resp:
-                data = _json.loads(resp.read().decode('utf-8'))
-            return Response(data, status=status.HTTP_200_OK)
-        except Exception:
-            return Response(
-                {'status': 'unavailable', 'service': 'SecureMed AI Assistant'},
-                status=status.HTTP_200_OK,
-            )
+        # We no longer proxy, so the service is always available if Django is up.
+        return Response({'status': 'available', 'service': 'SecureMed AI Assistant'}, status=status.HTTP_200_OK)

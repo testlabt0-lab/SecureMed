@@ -22,6 +22,13 @@ import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.User
 import kotlinx.coroutines.launch
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
  * Admin-only screen: list, search, activate and deactivate platform users.
@@ -52,39 +59,87 @@ private fun roleColor(role: String): Color = when (role) {
     else -> Color(0xFF616161)
 }
 
+@HiltViewModel
+class UsersViewModel @Inject constructor(
+    private val repository: SecureMedRepository
+) : ViewModel() {
+
+    data class State(
+        val isLoading: Boolean = true,
+        val users: List<User> = emptyList(),
+        val errorMessage: String? = null,
+        val statusMessage: String? = null
+    )
+
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state
+
+    init {
+        loadUsers()
+    }
+
+    fun loadUsers() {
+        _state.value = _state.value.copy(isLoading = true, errorMessage = null)
+        viewModelScope.launch {
+            repository.getUsers().fold(
+                onSuccess = { users ->
+                    _state.value = _state.value.copy(isLoading = false, users = users)
+                },
+                onFailure = { error ->
+                    val msg = when {
+                        error.message?.contains("403") == true -> "غير مصرح لك بإدارة المستخدمين"
+                        else -> "تعذر تحميل المستخدمين — تحقق من الاتصال"
+                    }
+                    _state.value = _state.value.copy(isLoading = false, errorMessage = msg)
+                }
+            )
+        }
+    }
+
+    fun toggleUser(user: User) {
+        viewModelScope.launch {
+            val result = if (user.isActive) repository.deactivateUser(user.id)
+            else repository.activateUser(user.id)
+
+            result.fold(
+                onSuccess = { msg ->
+                    val updatedList = _state.value.users.map {
+                        if (it.id == user.id) it.copy(isActive = !user.isActive) else it
+                    }
+                    _state.value = _state.value.copy(
+                        statusMessage = msg,
+                        users = updatedList
+                    )
+                },
+                onFailure = {
+                    _state.value = _state.value.copy(statusMessage = "تعذر تنفيذ العملية — تحقق من الاتصال")
+                }
+            )
+        }
+    }
+    
+    fun clearStatusMessage() {
+        _state.value = _state.value.copy(statusMessage = null)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UsersScreen(
     onBack: () -> Unit
 ) {
-    val repository = remember { SecureMedRepository() }
-    val scope = rememberCoroutineScope()
+    val viewModel: UsersViewModel = hiltViewModel()
+    val state by viewModel.state.collectAsState()
     val isAdmin = SecurePreferences.userRole in ADMIN_ROLES
 
-    var users by remember { mutableStateOf<List<User>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var pendingUser by remember { mutableStateOf<User?>(null) }
-    var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    suspend fun loadUsers() {
-        isLoading = true
-        errorMessage = null
-        repository.getUsers().fold(
-            onSuccess = { users = it },
-            onFailure = { error ->
-                errorMessage = when {
-                    error.message?.contains("403") == true -> "غير مصرح لك بإدارة المستخدمين"
-                    else -> "تعذر تحميل المستخدمين — تحقق من الاتصال"
-                }
-            }
-        )
-        isLoading = false
-    }
 
-    LaunchedEffect(Unit) {
-        if (isAdmin) loadUsers() else isLoading = false
+    LaunchedEffect(isAdmin) {
+        if (!isAdmin) {
+            // Not authorized, UI handles this state
+        }
     }
 
     Scaffold(
@@ -132,7 +187,7 @@ fun UsersScreen(
                 )
             }
 
-            isLoading -> Column(
+            state.isLoading -> Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
@@ -144,7 +199,7 @@ fun UsersScreen(
                 Text("جارٍ تحميل المستخدمين...")
             }
 
-            errorMessage != null -> Column(
+            state.errorMessage != null -> Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -152,9 +207,9 @@ fun UsersScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(errorMessage!!, style = MaterialTheme.typography.bodyLarge)
+                Text(state.errorMessage!!, style = MaterialTheme.typography.bodyLarge)
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { scope.launch { loadUsers() } }) {
+                Button(onClick = { viewModel.loadUsers() }) {
                     Text("إعادة المحاولة")
                 }
             }
@@ -177,7 +232,7 @@ fun UsersScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                val filtered = users.filter {
+                val filtered = state.users.filter {
                     searchQuery.isBlank() ||
                         it.fullName.contains(searchQuery, ignoreCase = true) ||
                         it.email.contains(searchQuery, ignoreCase = true)
@@ -224,20 +279,8 @@ fun UsersScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch {
-                        val result = if (user.isActive) repository.deactivateUser(user.id)
-                        else repository.activateUser(user.id)
-                        result.fold(
-                            onSuccess = { msg ->
-                                statusMessage = msg
-                                users = users.map {
-                                    if (it.id == user.id) it.copy(isActive = !user.isActive) else it
-                                }
-                            },
-                            onFailure = { statusMessage = "تعذر تنفيذ العملية — تحقق من الاتصال" }
-                        )
-                        pendingUser = null
-                    }
+                    viewModel.toggleUser(user)
+                    pendingUser = null
                 }) {
                     Text(
                         if (user.isActive) "إيقاف" else "تفعيل",

@@ -6,12 +6,16 @@ import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.model.Channel
 import com.securemed.app.data.model.ChannelMembership
 import com.securemed.app.data.model.MedicalRecord
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
-class ChannelsViewModel : ViewModel() {
-    private val repository = SecureMedRepository()
+@HiltViewModel
+class ChannelsViewModel @Inject constructor(
+    private val repository: SecureMedRepository
+) : ViewModel() {
 
     data class ChannelsState(
         val isLoading: Boolean = true,
@@ -40,8 +44,10 @@ class ChannelsViewModel : ViewModel() {
     }
 }
 
-class ChannelDetailViewModel : ViewModel() {
-    private val repository = SecureMedRepository()
+@HiltViewModel
+class ChannelDetailViewModel @Inject constructor(
+    private val repository: SecureMedRepository
+) : ViewModel() {
 
     data class ChannelDetailState(
         val isLoading: Boolean = true,

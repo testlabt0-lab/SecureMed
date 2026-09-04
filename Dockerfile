@@ -1,74 +1,56 @@
-# =============================================================================
-#  SecureMed — Multi-stage Production Dockerfile
-#  Stage 1: Build (dependencies compilation)
-#  Stage 2: Runtime (minimal, non-root user)
-# =============================================================================
+# ==========================================
+# 1. Build Stage: Node.js (React/Vite)
+# ==========================================
+FROM node:20-alpine AS frontend-builder
 
-# ─── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+WORKDIR /app/frontend
 
-WORKDIR /build
+# Copy package files and install dependencies
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
 
-# System deps needed for compilation only
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc g++ libpq-dev libffi-dev libssl-dev curl \
-    && rm -rf /var/lib/apt/lists/*
+# Copy the rest of the frontend source code
+COPY frontend/ ./
 
-# Install Python deps into a prefix (no cache, reproducible)
-COPY backend/requirements.txt .
-RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
+# Build the React app (outputs to /app/frontend/dist)
+RUN npm run build
 
-# ─── Stage 2: Runtime ────────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
 
-# Security: create non-root user
-RUN addgroup --system securemed && adduser --system --ingroup securemed --no-create-home securemed
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    DJANGO_SETTINGS_MODULE=config.settings \
-    PATH="/install/bin:$PATH" \
-    PYTHONPATH="/install/lib/python3.12/site-packages"
-
-# Runtime system deps only (no compilers!)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq5 curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy installed packages from builder
-COPY --from=builder /install /install
+# ==========================================
+# 2. Production Stage: Python (Django)
+# ==========================================
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy source code
-COPY backend/ /app/backend/
-COPY frontend/dist/ /app/frontend/dist/
+# Set environment variables for production
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBUG=False
+# Port defaults to 8000, but Render might override it
+ENV PORT=8000 
 
+# Install system dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir gunicorn psycopg2-binary whitenoise
+
+# Copy backend source code
+COPY backend/ ./backend/
+
+# Copy the built React app from the frontend-builder stage
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+
+# Set the working directory to the backend so manage.py is accessible
 WORKDIR /app/backend
 
-# Create runtime dirs with correct ownership
-RUN mkdir -p logs/emails media staticfiles \
-    && chown -R securemed:securemed /app
+# Collect static files (whitenoise will serve them)
+RUN python manage.py collectstatic --noinput
 
-# Collect static files (runs as root before USER switch, so whitenoise can read them)
-RUN python manage.py collectstatic --noinput --settings=config.settings 2>/dev/null || true
-
-# Switch to non-root
-USER securemed
-
-EXPOSE 8000
-
-# Liveness check (fast)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -sf http://localhost:8000/health/live/ || exit 1
-
-# Gunicorn: 2 workers per CPU core (standard formula: 2*cores + 1)
-CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
-     "--worker-class", "sync", \
-     "--timeout", "120", \
-     "--keep-alive", "5", \
-     "--log-level", "info", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Run Gunicorn
+CMD gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --threads 2 --timeout 60

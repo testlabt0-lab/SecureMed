@@ -13,15 +13,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.model.Notification
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.serialization.Serializable
+import javax.inject.Inject
 
 @Serializable
 data class NotificationListResponse(
@@ -29,8 +31,10 @@ data class NotificationListResponse(
     val count: Int = 0
 )
 
-class NotificationsViewModel : ViewModel() {
-    private val repository = SecureMedRepository()
+@HiltViewModel
+class NotificationsViewModel @Inject constructor(
+    private val repository: SecureMedRepository
+) : ViewModel() {
 
     data class State(
         val isLoading: Boolean = true,
@@ -68,12 +72,25 @@ class NotificationsViewModel : ViewModel() {
             loadNotifications()
         }
     }
+
+    fun markAllRead() {
+        viewModelScope.launch {
+            repository.markAllNotificationsRead()
+                .onSuccess {
+                    _state.value = _state.value.copy(
+                        notifications = _state.value.notifications.map { it.copy(isRead = true) },
+                        unreadCount = 0
+                    )
+                }
+            loadNotifications()
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationsScreen(onBack: () -> Unit) {
-    val viewModel: NotificationsViewModel = viewModel()
+    val viewModel: NotificationsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
 
     Scaffold(
@@ -87,7 +104,7 @@ fun NotificationsScreen(onBack: () -> Unit) {
                 },
                 actions = {
                     if (state.unreadCount > 0) {
-                        IconButton(onClick = { /* Mark all read */ }) {
+                        IconButton(onClick = { viewModel.markAllRead() }) {
                             Icon(Icons.Default.DoneAll, "تعليم الكل كمقروء")
                         }
                     }

@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,7 +23,7 @@ fun ChannelDetailScreen(
     channelId: String,
     onBack: () -> Unit
 ) {
-    val viewModel: ChannelDetailViewModel = viewModel()
+    val viewModel: ChannelDetailViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(channelId) {

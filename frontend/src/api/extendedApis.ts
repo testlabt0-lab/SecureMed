@@ -120,8 +120,18 @@ export const aiApi = {
     question: string,
     context?: any,
     history?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  ) => api.post('/appointments/ai/ask/', { question, context, history }),
-  health: () => api.get('/appointments/ai/health/'),
+  ) => api.post('/ai/ask/', { question, context, history }),
+  health: () => api.get('/ai/health/'),
+};
+
+// ============== Smart Assistant API (Node AI Service) ==============
+export const smartAssistantApi = {
+  analyzeImage: (imageBase64: string, prompt?: string) =>
+    api.post('/ai/analyze-image/', { imageBase64, prompt }),
+  structureNote: (text: string) =>
+    api.post('/ai/structure-note/', { text }),
+  triage: (data: { patient?: any; symptoms?: string; vitals?: any; lab_results?: any }) =>
+    api.post('/ai/triage/', data),
 };
 
 // ============== Appointments API ==============

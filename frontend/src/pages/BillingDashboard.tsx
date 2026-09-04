@@ -10,6 +10,7 @@ import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import { billingAPI } from '../api/extendedApis';
 import CreateInvoiceModal from '../components/billing/CreateInvoiceModal';
+import { useAuthStore } from '../store/authStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface Invoice {
@@ -80,6 +81,7 @@ export default function BillingManagement() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPayModal, setShowPayModal] = useState<Invoice | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const { user } = useAuthStore();
 
   // Queries
   const { data: statsData } = useQuery({
@@ -194,13 +196,15 @@ export default function BillingManagement() {
               <option value="CANCELLED">ملغاة</option>
               <option value="PENDING_INSURANCE">بانتظار التأمين</option>
             </select>
-            <button 
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              إصدار فاتورة
-            </button>
+            {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'ACCOUNTANT', 'RECEPTIONIST'].includes(user.role) && (
+              <button 
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                إصدار فاتورة
+              </button>
+            )}
           </div>
 
           {isLoading ? (
@@ -299,23 +303,27 @@ export default function BillingManagement() {
                         )}
 
                         <div className="flex gap-3 justify-end">
-                          {inv.status === 'UNPAID' && (
-                            <button
-                              onClick={e => { e.stopPropagation(); setShowPayModal(inv); }}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors"
-                            >
-                              <Banknote className="w-4 h-4 inline ml-1" />
-                              تسجيل دفع
-                            </button>
-                          )}
-                          {inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
-                            <button
-                              onClick={e => { e.stopPropagation(); if (confirm('إلغاء هذه الفاتورة؟')) cancelMutation.mutate(inv.id); }}
-                              className="px-4 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 rounded-xl text-sm font-medium transition-colors"
-                            >
-                              <XCircle className="w-4 h-4 inline ml-1" />
-                              إلغاء الفاتورة
-                            </button>
+                          {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'ACCOUNTANT', 'RECEPTIONIST'].includes(user.role) && (
+                            <>
+                              {inv.status === 'UNPAID' && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); setShowPayModal(inv); }}
+                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors"
+                                >
+                                  <Banknote className="w-4 h-4 inline ml-1" />
+                                  تسجيل دفع
+                                </button>
+                              )}
+                              {inv.status !== 'PAID' && inv.status !== 'CANCELLED' && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); if (confirm('إلغاء هذه الفاتورة؟')) cancelMutation.mutate(inv.id); }}
+                                  className="px-4 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 rounded-xl text-sm font-medium transition-colors"
+                                >
+                                  <XCircle className="w-4 h-4 inline ml-1" />
+                                  إلغاء الفاتورة
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>

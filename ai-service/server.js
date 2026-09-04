@@ -161,6 +161,127 @@ app.post('/ask', async (req, res) => {
   }
 });
 
+// ============================================================
+// Medical Image Analysis
+// ============================================================
+const IMAGE_ANALYSIS_PROMPT = `أنت طبيب خبير في قراءة وتحليل الصور الطبية (الأشعة، الرنين المغناطيسي، وغيرها).
+مهمتك: تقديم تحليل أولي للصورة المرفقة.
+تنبيه: أضف دائماً ملاحظة إخلاء مسؤولية أن هذا التحليل مبدئي ويجب مراجعته من قبل طبيب مختص.
+أجب باللغة العربية وبأسلوب احترافي.`;
+
+app.post('/analyze-image', async (req, res) => {
+  try {
+    const { imageBase64, prompt } = req.body || {};
+    if (!imageBase64) {
+      return res.status(400).json({ error: 'الصورة مطلوبة' });
+    }
+
+    const zai = await getZAI();
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: 'system', content: IMAGE_ANALYSIS_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt || 'قم بتحليل هذه الصورة الطبية واستخراج أهم الملاحظات.' },
+            { type: 'image_url', image_url: { url: imageBase64 } }
+          ]
+        }
+      ],
+      thinking: { type: 'disabled' },
+    });
+
+    const analysis = completion?.choices?.[0]?.message?.content;
+    if (!analysis) return res.status(502).json({ error: 'لم يصل رد من نموذج الذكاء الاصطناعي' });
+    res.json({ analysis });
+  } catch (err) {
+    console.error('[ai-service] analyze-image error:', err.message);
+    res.status(500).json({ error: 'خطأ في تحليل الصورة، حاول مجدداً' });
+  }
+});
+
+// ============================================================
+// Voice-to-SOAP Note Structuring
+// ============================================================
+const SOAP_NOTE_PROMPT = `أنت مساعد طبي ذكي متخصص في تحويل الإملاء الصوتي العشوائي للأطباء إلى تقارير طبية مهيكلة بتنسيق SOAP.
+S (Subjective): الشكوى والأعراض كما يصفها المريض
+O (Objective): الملاحظات السريرية، القياسات، والفحوصات
+A (Assessment): التقييم والتشخيص المبدئي
+P (Plan): خطة العلاج والمتابعة
+
+قم بتنظيم النص التالي المستخرج من التسجيل الصوتي للطبيب إلى تنسيق SOAP. إذا كانت هناك معلومات ناقصة لأحد الأقسام، اترك القسم فارغاً أو اكتب "غير مذكور".
+أجب باللغة العربية، واستخدم تنسيق Markdown لعرض الأقسام بشكل جميل وواضح.
+النص الخام للإملاء الصوتي هو كالتالي:`;
+
+app.post('/structure-note', async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: 'النص مطلوب' });
+    }
+
+    const zai = await getZAI();
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: 'system', content: 'أنت مساعد طبي متخصص في كتابة التقارير المهيكلة (SOAP).' },
+        { role: 'user', content: `${SOAP_NOTE_PROMPT}\n\n${text}` }
+      ],
+      thinking: { type: 'disabled' },
+    });
+
+    const structuredNote = completion?.choices?.[0]?.message?.content;
+    if (!structuredNote) return res.status(502).json({ error: 'لم يصل رد من نموذج الذكاء الاصطناعي' });
+    res.json({ structuredNote, generated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[ai-service] structure-note error:', err.message);
+    res.status(500).json({ error: 'خطأ في هيكلة التقرير، حاول مجدداً' });
+  }
+});
+
+// ============================================================
+// AI Triage & Differential Diagnosis
+// ============================================================
+const TRIAGE_PROMPT = `أنت مساعد طبي ذكي للتشخيص التفريقي وتقييم الحالات (Triage).
+سأزودك بمعلومات المريض (الأعراض، العلامات الحيوية، نتائج المختبر إن وجدت).
+المطلوب منك:
+1. تقييم مستوى الخطورة (منخفض، متوسط، عالي، حرج) مع ذكر السبب.
+2. اقتراح 3-5 تشخيصات تفريقية (Differential Diagnoses) محتملة مرتبة حسب الاحتمالية الأكبر للأقل.
+3. التوصية بفحوصات إضافية أو إجراءات فورية لتأكيد التشخيص واستبعاد الحالات الخطيرة.
+
+تنبيه: أضف إخلاء مسؤولية أن هذا تقييم آلي ولا يغني عن قرار الطبيب المختص.
+أجب باللغة العربية وباستخدام تنسيق Markdown لتسهيل القراءة.`;
+
+app.post('/triage', async (req, res) => {
+  try {
+    const { patient, symptoms, vitals, lab_results } = req.body || {};
+    if (!patient && !symptoms) {
+      return res.status(400).json({ error: 'بيانات المريض أو الأعراض مطلوبة على الأقل' });
+    }
+
+    const context = `=== بيانات المريض ===
+معلومات عامة: ${JSON.stringify(patient || {})}
+الأعراض أو الشكوى الحالية: ${JSON.stringify(symptoms || {})}
+العلامات الحيوية: ${JSON.stringify(vitals || {})}
+نتائج المختبر الأخيرة: ${JSON.stringify(lab_results || {})}`;
+
+    const zai = await getZAI();
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: 'system', content: TRIAGE_PROMPT },
+        { role: 'user', content: context }
+      ],
+      thinking: { type: 'disabled' },
+    });
+
+    const triageResult = completion?.choices?.[0]?.message?.content;
+    if (!triageResult) return res.status(502).json({ error: 'لم يصل رد من نموذج الذكاء الاصطناعي' });
+    res.json({ triageResult, generated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[ai-service] triage error:', err.message);
+    res.status(500).json({ error: 'خطأ في عملية التقييم الذكي، حاول مجدداً' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`[ai-service] SecureMed Smart Assistant listening on :${PORT}`);
 });

@@ -3,18 +3,23 @@ package com.securemed.app.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securemed.app.data.SecureMedRepository
-import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.LoginResponse
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * AuthViewModel - manages authentication state.
+ *
+ * Dependencies are injected by Hilt instead of being created internally,
+ * making this ViewModel fully testable with fake implementations.
  */
-class AuthViewModel : ViewModel() {
-
-    private val repository = SecureMedRepository()
+@HiltViewModel
+class AuthViewModel @Inject constructor(
+    private val repository: SecureMedRepository
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val uiState: StateFlow<AuthUiState> = _uiState
@@ -76,9 +81,9 @@ class AuthViewModel : ViewModel() {
 }
 
 sealed class AuthUiState {
-    object Idle : AuthUiState()
-    object Loading : AuthUiState()
+    data object Idle : AuthUiState()
+    data object Loading : AuthUiState()
     data class Success(val response: LoginResponse) : AuthUiState()
-    object BiometricEnrolled : AuthUiState()
-    object Error : AuthUiState()
+    data object BiometricEnrolled : AuthUiState()
+    data object Error : AuthUiState()
 }

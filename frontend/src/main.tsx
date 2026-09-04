@@ -6,6 +6,8 @@ import { Toaster } from 'react-hot-toast';
 import App from './App';
 import './index.css';
 
+import ErrorBoundary from './components/ErrorBoundary';
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -17,11 +19,12 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-      <Toaster
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+        <Toaster
         position="top-center"
         toastOptions={{
           duration: 4000,
@@ -39,6 +42,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           error: { iconTheme: { primary: '#ef4444', secondary: '#f1f5f9' } },
         }}
       />
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

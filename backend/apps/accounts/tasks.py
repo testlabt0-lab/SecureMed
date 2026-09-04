@@ -11,11 +11,18 @@ logger = logging.getLogger(__name__)
 def cleanup_expired_tokens():
     """Remove expired JWT tokens from the blacklist table."""
     try:
-        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
-        from django.utils import timezone
-        deleted, _ = OutstandingToken.objects.filter(expires_at__lt=timezone.now()).delete()
-        logger.info(f'Cleaned up {deleted} expired JWT tokens')
-        return {'deleted_tokens': deleted}
+        from django.core.management import call_command
+        import sys
+        from io import StringIO
+        
+        out = StringIO()
+        sys.stdout = out
+        call_command('flushexpiredtokens')
+        sys.stdout = sys.__stdout__
+        
+        output = out.getvalue().strip()
+        logger.info(f'Token cleanup: {output}')
+        return {'status': 'success', 'output': output}
     except Exception as exc:
         logger.exception('Token cleanup failed')
         return {'error': str(exc)}

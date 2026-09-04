@@ -1,3 +1,4 @@
+from unfold.admin import ModelAdmin
 """
 Admin configuration for accounts app.
 """
@@ -40,7 +41,7 @@ class UserAdmin(BaseUserAdmin):
 
 
 @admin.register(BiometricProfile)
-class BiometricProfileAdmin(admin.ModelAdmin):
+class BiometricProfileAdmin(ModelAdmin):
     list_display = ('user', 'device_name', 'platform', 'is_active', 'last_used')
     list_filter = ('platform', 'is_active')
     search_fields = ('user__email', 'user__full_name', 'device_id')
@@ -48,7 +49,7 @@ class BiometricProfileAdmin(admin.ModelAdmin):
 
 
 @admin.register(BiometricChallenge)
-class BiometricChallengeAdmin(admin.ModelAdmin):
+class BiometricChallengeAdmin(ModelAdmin):
     list_display = ('user', 'expires_at', 'used', 'created_at')
     list_filter = ('used',)
     readonly_fields = ('challenge', 'expected_response', 'created_at')

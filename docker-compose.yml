@@ -124,6 +124,11 @@ services:
       DB_HOST: "${DB_HOST:-}"
       REDIS_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
       CELERY_BROKER_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
+      USE_S3_STORAGE: "${USE_S3_STORAGE:-0}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_STORAGE_BUCKET_NAME: "${AWS_STORAGE_BUCKET_NAME:-}"
+      AWS_S3_REGION_NAME: "${AWS_S3_REGION_NAME:-us-east-1}"
     depends_on:
       ai:
         condition: service_healthy
@@ -171,6 +176,11 @@ services:
       DB_HOST: "${DB_HOST:-}"
       REDIS_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
       CELERY_BROKER_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
+      USE_S3_STORAGE: "${USE_S3_STORAGE:-0}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_STORAGE_BUCKET_NAME: "${AWS_STORAGE_BUCKET_NAME:-}"
+      AWS_S3_REGION_NAME: "${AWS_S3_REGION_NAME:-us-east-1}"
     depends_on:
       backend:
         condition: service_healthy
@@ -209,6 +219,11 @@ services:
       DB_HOST: "${DB_HOST:-}"
       REDIS_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
       CELERY_BROKER_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
+      USE_S3_STORAGE: "${USE_S3_STORAGE:-0}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_STORAGE_BUCKET_NAME: "${AWS_STORAGE_BUCKET_NAME:-}"
+      AWS_S3_REGION_NAME: "${AWS_S3_REGION_NAME:-us-east-1}"
     depends_on:
       backend:
         condition: service_healthy

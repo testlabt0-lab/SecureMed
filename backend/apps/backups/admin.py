@@ -1,3 +1,4 @@
+from unfold.admin import ModelAdmin
 """Admin registration for the backups app."""
 from django .contrib import admin 
 from django .utils .translation import gettext_lazy as _ 

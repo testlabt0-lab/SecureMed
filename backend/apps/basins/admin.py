@@ -1,3 +1,4 @@
+from unfold.admin import ModelAdmin
 """Admin registration for the basins app."""
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
@@ -6,7 +7,7 @@ from apps.basins.models import Basin
 
 
 @admin.register(Basin)
-class BasinAdmin(admin.ModelAdmin):
+class BasinAdmin(ModelAdmin):
     list_display = [
         'name', 'code', 'basin_type', 'governorate',
         'is_active', 'modules_count', 'created_at',

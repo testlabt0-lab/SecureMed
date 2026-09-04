@@ -1,3 +1,4 @@
+from unfold.admin import ModelAdmin
 """
 Admin for audit app.
 """
@@ -6,7 +7,7 @@ from apps.audit.models import AuditLog
 
 
 @admin.register(AuditLog)
-class AuditLogAdmin(admin.ModelAdmin):
+class AuditLogAdmin(ModelAdmin):
     list_display = ('timestamp', 'user', 'event_type', 'severity', 'ip_address', 'path')
     list_filter = ('event_type', 'severity')
     search_fields = ('user__email', 'user__full_name', 'path', 'ip_address')

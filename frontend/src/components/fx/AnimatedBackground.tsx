@@ -58,7 +58,19 @@ export default function AnimatedBackground({
         />
       )}
 
-      {/* 3 — grid with radial mask */}
+      {/* 3 — SVG Grid Overlay (gives structural elegance) */}
+      <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.02]" 
+           style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, currentColor 1px, transparent 0)', backgroundSize: '32px 32px' }} 
+      />
+      
+      {/* 4 — Abstract SVG Element */}
+      {rich && (
+        <svg className="absolute -left-[10%] top-[10%] w-[500px] h-[500px] opacity-10 animate-spin-slow pointer-events-none" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <path fill="currentColor" className="text-primary-300" d="M42.7,-73.4C55.9,-67.2,67.6,-57,75.4,-44.2C83.2,-31.4,87.2,-15.7,85.6,-0.9C84,13.9,76.8,27.8,68.2,39.9C59.6,52,49.6,62.3,37.3,70.5C25,78.7,10.5,84.8,-4.2,91.8C-18.9,98.8,-37.8,106.7,-51.7,99.9C-65.6,93.1,-74.5,71.6,-80.7,51.8C-86.9,32,-90.4,14,-88.2,-2.8C-86,-19.6,-78,-35.1,-67.5,-47.9C-57,-60.7,-44,-70.8,-30.3,-76.3C-16.6,-81.8,-2.2,-82.7,11.2,-79C24.6,-75.3,42.7,-73.4,42.7,-73.4Z" transform="translate(100 100)" />
+        </svg>
+      )}
+
+      {/* 5 — grid with radial mask */}
       <div
         className={`absolute inset-0 ${rich ? 'bg-grid-dark' : 'bg-grid dark:bg-grid-dark'}`}
         style={{

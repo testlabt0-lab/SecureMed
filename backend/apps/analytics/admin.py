@@ -1,3 +1,4 @@
+from unfold.admin import ModelAdmin
 """
 Admin for analytics app.
 """
@@ -6,14 +7,14 @@ from apps.analytics.models import SystemMetric, UserActivity, SecurityDashboardS
 
 
 @admin.register(SystemMetric)
-class SystemMetricAdmin(admin.ModelAdmin):
+class SystemMetricAdmin(ModelAdmin):
     list_display = ('metric_type', 'value', 'date', 'hour')
     list_filter = ('metric_type', 'date')
     readonly_fields = ('created_at',)
 
 
 @admin.register(UserActivity)
-class UserActivityAdmin(admin.ModelAdmin):
+class UserActivityAdmin(ModelAdmin):
     list_display = ('user', 'activity_type', 'timestamp', 'ip_address')
     list_filter = ('activity_type',)
     search_fields = ('user__email', 'description')
@@ -21,7 +22,7 @@ class UserActivityAdmin(admin.ModelAdmin):
 
 
 @admin.register(SecurityDashboardStat)
-class SecurityDashboardStatAdmin(admin.ModelAdmin):
+class SecurityDashboardStatAdmin(ModelAdmin):
     list_display = ('stat_key', 'last_updated')
     search_fields = ('stat_key',)
     readonly_fields = ('last_updated',)

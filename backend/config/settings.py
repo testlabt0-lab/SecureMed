@@ -25,6 +25,7 @@ cast =lambda v :[s .strip ()for s in v .split (',')]
 
 # Comment_456
 INSTALLED_APPS =[
+'unfold', # Must be before django.contrib.admin
 'daphne',
 'django.contrib.admin',
 'django.contrib.auth',
@@ -65,6 +66,28 @@ INSTALLED_APPS =[
 # Comment_460
 'channels',
 ]
+
+UNFOLD = {
+    "SITE_TITLE": "SecureMed Admin",
+    "SITE_HEADER": "SecureMed Admin",
+    "SITE_URL": "/",
+    "DASHBOARD_CALLBACK": "apps.analytics.admin_dashboard.dashboard_callback",
+    "COLORS": {
+        "primary": {
+            "50": "236 253 245",
+            "100": "209 250 229",
+            "200": "167 243 208",
+            "300": "110 231 183",
+            "400": "52 211 153",
+            "500": "16 185 129",
+            "600": "5 150 105",
+            "700": "4 120 87",
+            "800": "6 95 70",
+            "900": "6 78 59",
+            "950": "2 44 34",
+        },
+    },
+}
 
 MIDDLEWARE =[
 # Comment_461
@@ -197,6 +220,31 @@ AUTH_PASSWORD_VALIDATORS =[
 # Comment_483
 AUTH_USER_MODEL ='accounts.User'
 
+UNFOLD = {
+    "SITE_TITLE": "SecureMed Admin",
+    "SITE_HEADER": "SecureMed Platform",
+    "SITE_URL": "/",
+    "COLORS": {
+        "primary": {
+            "50": "240 253 250",
+            "100": "204 251 241",
+            "200": "153 246 228",
+            "300": "94 234 212",
+            "400": "45 212 191",
+            "500": "20 184 166",
+            "600": "13 148 136",
+            "700": "15 118 110",
+            "800": "17 94 89",
+            "900": "19 78 74",
+            "950": "4 47 46",
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": True,
+    }
+}
+
 # Comment_484
 LANGUAGE_CODE ='ar'
 TIME_ZONE ='Asia/Aden'
@@ -218,6 +266,20 @@ STATICFILES_DIRS =[str (FRONTEND_DIST )]if FRONTEND_DIST .exists ()else []
 # Comment_489
 MEDIA_URL ='/media/'
 MEDIA_ROOT =BASE_DIR /'media'
+
+# ---------- AWS S3 Cloud Storage ----------
+USE_S3_STORAGE = config('USE_S3_STORAGE', default=False, cast=bool)
+
+if USE_S3_STORAGE:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_DEFAULT_ACL = None
+    AWS_S3_VERIFY = True
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+
 
 # Comment_490
 DATA_UPLOAD_MAX_MEMORY_SIZE =20 *1024 *1024 # Comment_491
@@ -457,6 +519,13 @@ SPECTACULAR_SETTINGS ={
 'VERSION':'2.0.0',
 'SERVE_INCLUDE_SCHEMA':False ,
 'COMPONENT_SPLIT_REQUEST':True ,
+'SWAGGER_UI_SETTINGS': {
+    'deepLinking': True,
+    'persistAuthorization': True,
+    'displayOperationId': True,
+    'syntaxHighlight.theme': 'monokai',
+    'filter': True,
+},
 }
 
 # Comment_540

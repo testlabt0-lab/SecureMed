@@ -18,7 +18,7 @@
 # Kotlinx Serialization
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKd
--keep,allowdictionarywarnings class kotlinx.serialization.** { *; }
+-keep class kotlinx.serialization.** { *; }
 -keepclassmembers class kotlinx.serialization.** {
     <init>(...);
     static <methods>;
@@ -31,6 +31,12 @@
 # SQLCipher
 -keep class net.sqlcipher.** { *; }
 -keep class net.sqlcipher.database.** { *; }
+
+# ErrorProne annotations (Tink / crypto)
+-dontwarn com.google.errorprone.annotations.CanIgnoreReturnValue
+-dontwarn com.google.errorprone.annotations.CheckReturnValue
+-dontwarn com.google.errorprone.annotations.Immutable
+-dontwarn com.google.errorprone.annotations.RestrictedApi
 
 # Hilt / Dagger
 -keep class dagger.hilt.** { *; }

@@ -18,6 +18,7 @@ from apps.audit.utils import log_security_event
 
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from .utils import anonymize_patient_data
 
 MAX_QUESTION_LEN = 2000
 MAX_HISTORY_MESSAGES = 10
@@ -66,7 +67,8 @@ class AIAssistantAskView(APIView):
         try:
             prompt = f"أنت مساعد طبي ذكي (CDSS) في نظام SecureMed. أجب باللغة العربية.\n"
             if context:
-                prompt += f"\nسياق المريض:\n{_json.dumps(context, ensure_ascii=False)[:MAX_CONTEXT_CHARS]}\n"
+                safe_context = anonymize_patient_data(context)
+                prompt += f"\nسياق المريض:\n{_json.dumps(safe_context, ensure_ascii=False)[:MAX_CONTEXT_CHARS]}\n"
             
             prompt += f"\nتاريخ المحادثة:\n"
             for h in history[-MAX_HISTORY_MESSAGES:]:
@@ -171,12 +173,17 @@ class AITriageView(APIView):
             }, status=status.HTTP_200_OK)
 
         try:
+            safe_patient = anonymize_patient_data(patient)
+            safe_symptoms = anonymize_patient_data(symptoms)
+            safe_vitals = anonymize_patient_data(vitals)
+            safe_lab = anonymize_patient_data(lab_results)
+            
             prompt = f"""
 قم بتقييم حالة هذا المريض وتحديد مستوى الخطورة (Triage Level) من 1 إلى 5 حيث 1 هو الأشد خطورة (إنعاش) و 5 غير طارئ.
-المريض: {_json.dumps(patient, ensure_ascii=False)}
-الأعراض: {symptoms}
-العلامات الحيوية: {_json.dumps(vitals, ensure_ascii=False)}
-التحاليل: {_json.dumps(lab_results, ensure_ascii=False)}
+المريض: {_json.dumps(safe_patient, ensure_ascii=False)}
+الأعراض: {safe_symptoms}
+العلامات الحيوية: {_json.dumps(safe_vitals, ensure_ascii=False)}
+التحاليل: {_json.dumps(safe_lab, ensure_ascii=False)}
 
 يجب أن ترد بصيغة JSON فقط بهذا الشكل:
 {{

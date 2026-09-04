@@ -57,6 +57,10 @@ app .conf .beat_schedule ={
 'task':'apps.audit.tasks.send_security_digest',
 'schedule':crontab (minute =0 ,hour =8 ),
 },
+'check-pharmacy-inventory':{
+'task':'apps.pharmacy.tasks.check_pharmacy_inventory',
+'schedule':crontab (minute =0 ,hour =7 ),
+},
 }
 
 app .conf .timezone ='Asia/Riyadh'

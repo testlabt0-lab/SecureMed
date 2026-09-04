@@ -1,3 +1,4 @@
+from unfold.admin import ModelAdmin
 """
 Admin for notifications app.
 """
@@ -8,7 +9,7 @@ from apps.notifications.models import (
 
 
 @admin.register(Notification)
-class NotificationAdmin(admin.ModelAdmin):
+class NotificationAdmin(ModelAdmin):
     list_display = ('title', 'recipient', 'notification_type', 'priority',
                     'is_read', 'created_at')
     list_filter = ('notification_type', 'priority', 'is_read')
@@ -18,13 +19,13 @@ class NotificationAdmin(admin.ModelAdmin):
 
 
 @admin.register(NotificationPreference)
-class NotificationPreferenceAdmin(admin.ModelAdmin):
+class NotificationPreferenceAdmin(ModelAdmin):
     list_display = ('user', 'email_channel_updates', 'push_security_alerts')
     search_fields = ('user__email',)
 
 
 @admin.register(EmailLog)
-class EmailLogAdmin(admin.ModelAdmin):
+class EmailLogAdmin(ModelAdmin):
     list_display = ('recipient_email', 'subject', 'status', 'sent_at', 'created_at')
     list_filter = ('status',)
     search_fields = ('recipient_email', 'subject')

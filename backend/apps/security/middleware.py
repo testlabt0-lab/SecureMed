@@ -95,8 +95,11 @@ class WAFMiddleware :
 
         # 1. Check IP Blacklist (cache first, then DB)
         blacklist_key =f'waf_blacklist:{client_ip }'
-        if cache .get (blacklist_key ):
-            return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا'},status =403 )
+        try:
+            if cache .get (blacklist_key ):
+                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا'},status =403 )
+        except Exception as e:
+            logger.error(f"WAF_CACHE_READ_FAILED | error={e}")
 
         try :
             from apps .security .models import BlockedIP ,BlockedDevice
@@ -395,13 +398,17 @@ class RateLimitMiddleware :
 
     def _hit (self ,cache_key ):
         """Increment the window counter without extending its expiry."""
-        if cache .add (cache_key ,1 ,timeout =self .WINDOW ):
-            return 1
-        try :
-            return cache .incr (cache_key )
-        except ValueError :
-            # The window expired between ``add`` and ``incr``; start a new one.
-            cache .set (cache_key ,1 ,timeout =self .WINDOW )
+        try:
+            if cache .add (cache_key ,1 ,timeout =self .WINDOW ):
+                return 1
+            try :
+                return cache .incr (cache_key )
+            except ValueError :
+                # The window expired between ``add`` and ``incr``; start a new one.
+                cache .set (cache_key ,1 ,timeout =self .WINDOW )
+                return 1
+        except Exception as e:
+            logger.error(f"RATELIMIT_CACHE_FAILED | error={e}")
             return 1
 
     def _get_client_ip (self ,request ):

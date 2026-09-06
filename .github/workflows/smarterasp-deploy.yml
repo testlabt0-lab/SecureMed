@@ -1,0 +1,61 @@
+name: Deploy to SmarterASP.net
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: ⚙️ Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: './frontend/package-lock.json'
+
+    - name: 🛠️ Build Frontend (Vite)
+      working-directory: ./frontend
+      run: |
+        npm ci
+        npm run build
+
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: 📦 Install Python Dependencies & Collect Static
+      working-directory: ./backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        # إنشاء مجلدات ضرورية
+        mkdir -p staticfiles
+        # سحب ملفات الواجهة الأمامية ودمجها مع الباك إند
+        python manage.py collectstatic --noinput
+
+    - name: 🚀 Deploy to SmarterASP.net via FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      with:
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        local-dir: ./backend/ # نرفع مجلد الباك إند فقط لأنه يحتوي الآن على كل شيء
+        server-dir: ./ # المسار الجذري في الاستضافة (عدله إذا كان موقعك في مجلد فرعي)
+        exclude: |
+          **/.git*
+          **/.git*/**
+          **/venv/**
+          **/.venv/**
+          **/__pycache__/**
+          **/.pytest_cache/**
+          **/.env
+          db.sqlite3

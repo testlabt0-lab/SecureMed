@@ -69,12 +69,25 @@ else
     cd ..
 fi
 
-# ─── AI Service SBOM ──────────────────────────────────────────────────────────
+# ─── Retired AI sidecar SBOM ──────────────────────────────────────────────────
+# ai-service/ is retired (the AI endpoints are Django views under /api/v1/ai/),
+# but the directory and its dependency tree are still in the repository, so they
+# are still part of the supply chain that gets cloned and scanned. It is listed
+# separately and labelled so a reviewer does not read its CVEs as exposed
+# production surface — nothing deploys this service.
+#
+# Guarded with -d because `set -e` is on: a bare `cd ai-service` into a missing
+# directory would abort the script before the summary below, and the `cd ..` that
+# followed would have walked out of the repository root.
 echo ""
-echo "📦 AI service Node.js..."
-cd ai-service
-npm list --json > "../${OUTPUT_DIR}/sbom-ai-service-${TIMESTAMP}.json" 2>/dev/null || true
-cd ..
+if [ -d ai-service ]; then
+    echo "📦 Retired AI sidecar (ai-service/, not deployed)..."
+    cd ai-service
+    npm list --json > "../${OUTPUT_DIR}/sbom-ai-service-retired-${TIMESTAMP}.json" 2>/dev/null || true
+    cd ..
+else
+    echo "📦 ai-service/ not present — skipping (retired component)"
+fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""

@@ -22,7 +22,7 @@ class DashboardStatsView (APIView ):
         user =request .user 
         from django .db .models import Q 
 
-        # Comment_375
+        # Base query for accessible channels
         if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             channels =Channel .objects .all ()
             patients =Patient .objects .all ()
@@ -32,21 +32,21 @@ class DashboardStatsView (APIView ):
             ).distinct ()
             patients =Patient .objects .filter (channels__in =channels ).distinct ()
 
-            # Comment_376
+            # Channel stats
         total_channels =channels .count ()
         active_channels =channels .filter (status =Channel .Status .ACTIVE ).count ()
         urgent_channels =channels .filter (priority ='URGENT').count ()
 
-        # Comment_377
+        # Patient stats
         total_patients =patients .count ()
 
-        # Comment_378
+        # Record stats
         accessible_channel_ids =channels .values_list ('id',flat =True )
         records =MedicalRecord .objects .filter (channel_id__in =accessible_channel_ids )
         total_records =records .count ()
         critical_records =records .filter (is_critical =True ).count ()
 
-        # Comment_379
+        # User stats (admin only)
         user_stats = {}
         if user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
             role_counts = dict(User.objects.values('role').annotate(count=Count('id')).values_list('role', 'count'))
@@ -60,7 +60,7 @@ class DashboardStatsView (APIView ):
                 },
             }
 
-            # Comment_380
+            # Recent activity (last 7 days)
         seven_days_ago =timezone .now ()-timedelta (days =7 )
         recent_audit =AuditLog .objects .filter (timestamp__gte =seven_days_ago )
         audit_stats ={
@@ -69,7 +69,7 @@ class DashboardStatsView (APIView ):
         'warnings':recent_audit .filter (severity =AuditLog .Severity .WARNING ).count (),
         }
 
-        # Comment_381
+        # Channels by type
         channels_by_type =channels .values ('channel_type').annotate (
         count =Count ('id')
         ).order_by ('channel_type')
@@ -77,12 +77,12 @@ class DashboardStatsView (APIView ):
         item ['channel_type']:item ['count']for item in channels_by_type 
         }
 
-        # Comment_382
+        # Channels by priority
         channels_by_priority ={}
         for priority in ['LOW','MEDIUM','HIGH','URGENT']:
             channels_by_priority [priority ]=channels .filter (priority =priority ).count ()
 
-            # Comment_383
+            # Records by type
         records_by_type =records .values ('record_type').annotate (
         count =Count ('id')
         ).order_by ('record_type')
@@ -90,7 +90,7 @@ class DashboardStatsView (APIView ):
         item ['record_type']:item ['count']for item in records_by_type 
         }
 
-        # Comment_384
+        # Device stats
         from apps .security .models import DeviceRegistry 
         device_queryset =DeviceRegistry .objects .filter (user =user )
         device_type_counts ={}
@@ -164,7 +164,7 @@ class ActivityFeedView (APIView ):
         user =request .user 
         from django .db .models import Q 
 
-        # Comment_385
+        # Get accessible channels
         if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             channels =Channel .objects .all ()
         else :
@@ -174,7 +174,7 @@ class ActivityFeedView (APIView ):
 
         accessible_channel_ids =channels .values_list ('id',flat =True )
 
-        # Comment_386
+        # Get recent records
         recent_records =MedicalRecord .objects .filter (
         channel_id__in =accessible_channel_ids 
         ).select_related ('channel','created_by').order_by ('-created_at')[:10 ]

@@ -45,6 +45,27 @@ function renderSummary(text: string) {
   });
 }
 
+/** Shape returned by POST /api/v1/ai/triage — see backend/apps/ai/views.py. */
+interface TriageResult {
+  level?: number;
+  reasoning?: string;
+  recommendations?: string[];
+}
+
+/**
+ * Emergency Severity Index: 1 is the most urgent (resuscitation), 5 is non-urgent.
+ * The backend prompt asks Gemini for this scale explicitly, and falls back to 3
+ * when the API key is missing, so an unknown/out-of-range value is treated as
+ * "unclassified" rather than silently coloured as if it were safe.
+ */
+const triageLevels: Record<number, { label: string; classes: string }> = {
+  1: { label: 'المستوى 1 — إنعاش', classes: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-200 dark:border-red-800' },
+  2: { label: 'المستوى 2 — طارئ', classes: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/30 dark:text-orange-200 dark:border-orange-800' },
+  3: { label: 'المستوى 3 — عاجل', classes: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800' },
+  4: { label: 'المستوى 4 — أقل إلحاحاً', classes: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800' },
+  5: { label: 'المستوى 5 — غير طارئ', classes: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800' },
+};
+
 const recordTypeLabels: Record<string, string> = {
   DIAGNOSIS: 'تشخيص',
   PRESCRIPTION: 'وصفة طبية',
@@ -124,7 +145,7 @@ export default function PatientProfile() {
     oxygen_saturation: '',
   });
 
-  const [triageResult, setTriageResult] = useState<any>(null);
+  const [triageResult, setTriageResult] = useState<TriageResult | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [analyzingFileId, setAnalyzingFileId] = useState<string | null>(null);
   const [imageAnalysisResult, setImageAnalysisResult] = useState<{ id: string, result: string } | null>(null);
@@ -153,7 +174,9 @@ export default function PatientProfile() {
   const structureNoteMutation = useMutation({
     mutationFn: (text: string) => smartAssistantApi.structureNote(text),
     onSuccess: (res) => {
-      setFormData(prev => ({ ...prev, content: res.data.structuredNote }));
+      // The endpoint returns {"structured": "..."} — reading `structuredNote`
+      // here silently wrote `undefined` into the note and wiped the dictation.
+      setFormData(prev => ({ ...prev, content: res.data.structured ?? prev.content }));
     }
   });
 
@@ -642,7 +665,7 @@ export default function PatientProfile() {
                 <Loader2 className="w-4 h-4 animate-spin" />
                 يتم التقييم...
               </>
-            ) : triageResult?.triageResult ? (
+            ) : triageResult ? (
               <>
                 <RefreshCw className="w-4 h-4" />
                 إعادة التقييم
@@ -662,9 +685,46 @@ export default function PatientProfile() {
           </p>
         )}
 
-        {triageResult?.triageResult ? (
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-100 dark:border-gray-700 mt-2">
-            {renderSummary(triageResult.triageResult)}
+        {triageResult ? (
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-100 dark:border-gray-700 mt-2 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  (triageResult.level && triageLevels[triageResult.level])
+                    ? triageLevels[triageResult.level].classes
+                    : 'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600'
+                }`}
+              >
+                {(triageResult.level && triageLevels[triageResult.level])
+                  ? triageLevels[triageResult.level].label
+                  : 'مستوى غير مُحدَّد'}
+              </span>
+            </div>
+
+            {triageResult.reasoning ? (
+              <div className="text-gray-700 dark:text-gray-300">
+                {renderSummary(triageResult.reasoning)}
+              </div>
+            ) : null}
+
+            {triageResult.recommendations?.length ? (
+              <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+                <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1.5">التوصيات</p>
+                <ul className="space-y-1">
+                  {triageResult.recommendations.map((rec, i) => (
+                    <li key={i} className="text-sm leading-6 flex gap-2 text-gray-700 dark:text-gray-300">
+                      <span className="text-primary-500 flex-shrink-0">•</span>
+                      <span>{rec}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <p className="text-[11px] text-gray-400 flex items-center gap-1.5 pt-1">
+              <AlertTriangle className="w-3 h-3 text-amber-400" />
+              تقييم آلي مساعد فقط — القرار السريري النهائي مسؤولية الطبيب المعالج.
+            </p>
           </div>
         ) : (
           !triageMutation.isPending && !triageMutation.isError && (

@@ -1,4 +1,4 @@
-# Comment_3
+#!/usr/bin/env python
 """Django management script for SecureMed platform."""
 import os 
 import sys 

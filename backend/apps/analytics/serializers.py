@@ -35,33 +35,33 @@ class UserActivitySerializer (serializers .ModelSerializer ):
 
 class DashboardStatsSerializer (serializers .Serializer ):
     """Serializer for dashboard statistics."""
-    # Comment_68
+    # User stats
     total_users =serializers .IntegerField ()
     active_users =serializers .IntegerField ()
     users_by_role =serializers .DictField ()
 
-    # Comment_69
+    # Channel stats
     total_channels =serializers .IntegerField ()
     active_channels =serializers .IntegerField ()
     channels_by_type =serializers .DictField ()
     channels_by_priority =serializers .DictField ()
 
-    # Comment_70
+    # Patient stats
     total_patients =serializers .IntegerField ()
     new_patients_today =serializers .IntegerField ()
     new_patients_this_week =serializers .IntegerField ()
 
-    # Comment_71
+    # Medical records stats
     total_medical_records =serializers .IntegerField ()
     critical_records =serializers .IntegerField ()
 
-    # Comment_72
+    # Security stats
     security_alerts_today =serializers .IntegerField ()
     waf_blocks_today =serializers .IntegerField ()
     failed_logins_today =serializers .IntegerField ()
     biometric_logins_today =serializers .IntegerField ()
 
-    # Comment_73
+    # Activity trends (last 7 days)
     activity_trend =serializers .ListField ()
     channels_trend =serializers .ListField ()
     patients_trend =serializers .ListField ()

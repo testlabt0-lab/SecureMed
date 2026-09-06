@@ -7,17 +7,39 @@ import java.io.InputStreamReader
 
 object SecurityUtils {
     /**
-     * التحقق مما إذا كان الجهاز مكسور الحماية (Rooted) أو يعمل على محاكي (Emulator).
-     * هذه الفحوصات موسعة لتشمل Magisk وأدوات الروت الحديثة، بالإضافة لبيئات المحاكاة.
+     * هل الجهاز مكسور الحماية (Root)؟
+     *
+     * الفحوصات تغطي Magisk وKernelSU وأدوات الروت الحديثة. المحاكي **ليس**
+     * جزءاً من هذه الدالة: خلطهما معاً كان يعني أن أي محاكي يُعَدّ جهازاً
+     * مكسور الحماية، فيُغلق التطبيق على كل بيئات التطوير والاختبار الآلي.
+     * من يحتاج التمييز يستدعي [isProbablyEmulator] صراحةً.
+     *
+     * هذه الفحوصات إرشادية لا حاسمة: Magisk في وضع الإخفاء يتجاوزها،
+     * والاعتماد الأمني الحقيقي هو التشفير والمصادقة على الخادم.
      */
     fun isDeviceRooted(): Boolean {
-        return checkTestKeys() || checkRootFiles() || checkSuCommand() || checkEmulator()
+        return hasTestKeys() || checkRootFiles() || checkSuCommand()
     }
 
-    private fun checkTestKeys(): Boolean {
-        val buildTags = Build.TAGS
-        return buildTags != null && buildTags.contains("test-keys")
-    }
+    /**
+     * هل توقيع البناء يحمل `test-keys`؟
+     *
+     * الوسيط صريح لأن `Build.TAGS` حقل ثابت (static final) لا دالة، وMockK
+     * تعترض الدوال الساكنة فقط؛ فالاختبار الذي كان يحاول
+     * `every { Build.TAGS } returns …` يفشل دائماً بـ MockKException قبل أن
+     * يصل إلى الفحص نفسه. بتمرير الوسيط يصبح هذا الفحص دالة نقية قابلة
+     * للاختبار بلا جهاز ولا محاكي، وسلوك الإنتاج لم يتغير.
+     */
+    internal fun hasTestKeys(buildTags: String? = Build.TAGS): Boolean =
+        buildTags?.contains("test-keys") == true
+
+    /**
+     * هل نعمل على محاكي أو بيئة افتراضية؟
+     *
+     * للتسجيل والقياس فقط — صور المحاكي الرسمية موقّعة بـ test-keys وتحمل
+     * أسماء عامة، فبعض هذه المؤشرات تتطابق مع أجهزة تطوير مشروعة.
+     */
+    fun isProbablyEmulator(): Boolean = checkEmulator()
 
     private fun checkRootFiles(): Boolean {
         val paths = arrayOf(

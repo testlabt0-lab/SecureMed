@@ -70,17 +70,17 @@ class ChannelViewSet (viewsets .ModelViewSet ):
 
     def perform_create (self ,serializer ):
         """Create channel - automatically set owner as the creator."""
-        # Comment_186
+        # Module activation by basin type (plan requirement)
         from apps .basins .utils import ensure_module_enabled ,basin_of 
         ensure_module_enabled (self .request .user ,'channels')
 
-        # Comment_187
+        # Auto-link the basin: owner's basin, else patient's basin.
         basin =basin_of (self .request .user )
         if basin is None :
             patient =serializer .validated_data .get ('patient')
             basin =getattr (patient ,'basin',None )
         channel =serializer .save (owner =self .request .user ,basin =basin )
-        # Comment_188
+        # Create owner membership
         ChannelMembership .objects .create (
         channel =channel ,
         user =self .request .user ,
@@ -138,7 +138,7 @@ class ChannelViewSet (viewsets .ModelViewSet ):
             status =status .HTTP_404_NOT_FOUND 
             )
 
-            # Comment_189
+            # DV: Check user doesn't already have an active role
         existing =ChannelMembership .objects .filter (
         channel =channel ,user =user ,is_active =True 
         ).first ()
@@ -148,7 +148,7 @@ class ChannelViewSet (viewsets .ModelViewSet ):
             status =status .HTTP_400_BAD_REQUEST 
             )
 
-            # Comment_190
+            # Reactivate or create
         membership ,created =ChannelMembership .objects .get_or_create (
         channel =channel ,user =user ,
         defaults ={
@@ -178,7 +178,7 @@ class ChannelViewSet (viewsets .ModelViewSet ):
         }
         )
 
-        # Comment_191
+        # Send notification to the user who was granted permission
         send_notification (
         recipient =user ,
         notification_type ='PERMISSION_GRANTED',
@@ -276,7 +276,7 @@ class ChannelViewSet (viewsets .ModelViewSet ):
         'reason':request .data .get ('reason',''),
         }
         )
-        # Comment_192
+        # Send notification
         send_notification (
         recipient =membership .user ,
         notification_type ='PERMISSION_REVOKED',
@@ -361,7 +361,7 @@ class ChannelViewSet (viewsets .ModelViewSet ):
             ).data 
             return Response (data )
 
-            # Comment_193
+            # POST — must still be an active member to send
         membership =channel .memberships .filter (
         user =request .user ,is_active =True 
         ).first ()

@@ -42,27 +42,27 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         week_ago =now -timedelta (days =7 )
         day_ago =now -timedelta (days =1 )
 
-        # Comment_75
+        # User stats
         total_users =User .objects .count ()
         active_users =User .objects .filter (is_active =True ).count ()
         users_by_role =User .objects .values ('role').annotate (count =Count ('id'))
 
-        # Comment_76
+        # Channel stats
         total_channels =Channel .objects .count ()
         active_channels =Channel .objects .filter (status =Channel .Status .ACTIVE ).count ()
         channels_by_type =Channel .objects .values ('channel_type').annotate (count =Count ('id'))
         channels_by_priority =Channel .objects .values ('priority').annotate (count =Count ('id'))
 
-        # Comment_77
+        # Patient stats
         total_patients =Patient .objects .count ()
         new_patients_today =Patient .objects .filter (created_at__date =today ).count ()
         new_patients_this_week =Patient .objects .filter (created_at__gte =week_ago ).count ()
 
-        # Comment_78
+        # Medical records stats
         total_medical_records =MedicalRecord .objects .count ()
         critical_records =MedicalRecord .objects .filter (is_critical =True ).count ()
 
-        # Comment_79
+        # Security stats
         security_alerts_today =AuditLog .objects .filter (
         timestamp__date =today ,severity__in =['WARNING','CRITICAL']
         ).count ()
@@ -79,7 +79,7 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
             timestamp__gte=week_ago
         ).values('severity').annotate(count=Count('id'))
 
-        # Comment_80
+        # Activity trends (last 7 days)
         activity_trend =[]
         for i in range (7 ,-1 ,-1 ):
             day =today -timedelta (days =i )
@@ -153,12 +153,12 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         today =now .date ()
         week_ago =now -timedelta (days =7 )
 
-        # Comment_81
+        # Security events by type
         security_events_by_type =AuditLog .objects .filter (
         timestamp__gte =week_ago 
         ).values ('event_type').annotate (count =Count ('id'))
 
-        # Comment_82
+        # Security events trend
         security_events_trend =[]
         for i in range (7 ,-1 ,-1 ):
             day =today -timedelta (days =i )
@@ -171,11 +171,11 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
             'count':count ,
             })
 
-            # Comment_83
+            # Top blocked IPs
         from django .db .models import Count 
         from django .core .cache import cache 
         top_blocked =[]
-        # Comment_84
+        # Get IPs with most WAF blocks from cache (WAF middleware stores them)
         for key in cache ._cache .keys ()if hasattr (cache ._cache ,'keys')else []:
             if key .startswith ('waf_blocked:'):
                 ip =key .split (':')[1 ]
@@ -185,7 +185,7 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         top_blocked .sort (key =lambda x :x ['blocks'],reverse =True )
         top_blocked =top_blocked [:10 ]
 
-        # Comment_85
+        # Port scan results
         from apps .security .port_scanner import scan_host_ports 
         try :
             port_result =scan_host_ports ('localhost')
@@ -197,7 +197,7 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         except Exception :
             port_scan_results ={'open_ports':0 ,'ports_scanned':0 ,'risk_assessment':''}
 
-            # Comment_86
+            # Vulnerability scan
         from apps .security .vulnerability_scanner import run_vulnerability_scan 
         try :
             vuln_report =run_vulnerability_scan ()
@@ -229,7 +229,7 @@ class DashboardAnalyticsView (viewsets .ViewSet ):
         limit =int (request .query_params .get ('limit',20 ))
         limit =min (limit ,100 )
 
-        # Comment_87
+        # Recent audit logs as activity feed
         activities =AuditLog .objects .select_related ('user').order_by ('-timestamp')[:limit ]
         feed =[]
         for log in activities :

@@ -34,7 +34,7 @@ class SystemMetric (models .Model ):
     )
     value =models .BigIntegerField (_ ('القيمة'),default =0 )
     date =models .DateField (_ ('التاريخ'),db_index =True )
-    hour =models .PositiveSmallIntegerField (null =True ,blank =True )# Comment_67
+    hour =models .PositiveSmallIntegerField (null =True ,blank =True )# For hourly metrics
     metadata =models .JSONField (default =dict ,blank =True )
 
     created_at =models .DateTimeField (auto_now_add =True )

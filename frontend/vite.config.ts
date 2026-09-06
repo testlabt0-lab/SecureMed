@@ -19,11 +19,12 @@ export default defineConfig(({ mode }) => ({
         ws: true,
         changeOrigin: true,
       },
-      '/ai': {
-        target: 'http://localhost:8100',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/ai/, ''),
-      },
+      // There is no '/ai' entry any more. It forwarded to the retired Node
+      // sidecar on :8100; every AI call the SPA makes now goes to
+      // /api/v1/ai/* (see src/api/extendedApis.ts), which the '/api' rule
+      // above already covers. Keeping the old rule only meant a developer
+      // running the sidecar could reach an unauthenticated copy of these
+      // endpoints while believing they were testing the real ones.
     },
   },
   build: {

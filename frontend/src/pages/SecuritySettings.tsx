@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { authAPI } from '../api/client';
 import { settingsAPI } from '../api/extendedApis';
-import { registerWebAuthnCredential } from '../utils/webauthn';
+import { enrollBiometric } from '../utils/webauthn';
 import toast from 'react-hot-toast';
 import { X, ShieldCheck, Copy, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const SecuritySettings = () => {
   const user = useAuthStore(state => state.user);
+  const updateUser = useAuthStore(state => state.updateUser);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -17,7 +18,10 @@ export const SecuritySettings = () => {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [showMfaModal, setShowMfaModal] = useState(false);
   const [showDisableModal, setShowDisableModal] = useState(false);
-  const [mfaSetupData, setMfaSetupData] = useState<{ secret: string; qr_uri: string } | null>(null);
+  // Mirrors the /auth/2fa/setup/ response: qr_image is a base64 data: URI rendered
+  // server-side, otpauth_url is the raw provisioning URI. Neither may be sent to a
+  // third-party QR renderer — they carry the shared secret.
+  const [mfaSetupData, setMfaSetupData] = useState<{ secret: string; otpauth_url: string; qr_image: string } | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [mfaActionLoading, setMfaActionLoading] = useState(false);
 
@@ -65,13 +69,18 @@ export const SecuritySettings = () => {
     if (!user) return;
     try {
       setLoading(true);
-      const credential = await registerWebAuthnCredential(user.id, user.email, user.full_name || user.email);
-      await authAPI.enrollBiometric({
-        device_id: credential.id,
-        device_name: navigator.userAgent,
-        platform: 'web',
-        biometric_template: JSON.stringify(credential)
-      });
+      // The whole ceremony now lives in one place. This page used to send
+      // `device_id: credential.id`, `platform: 'web'` (lowercase, which the
+      // serializer's ChoiceField rejects outright) and the credential JSON as a
+      // `biometric_template`, so enrollment from here could never be used to log in.
+      const result = await enrollBiometric();
+      if (!result.success) {
+        toast.error(result.error || 'فشل تسجيل البصمة');
+        return;
+      }
+      // The status line below reads user.is_biometric_enabled from the store, so
+      // without this it kept saying "غير مفعّلة" until the next login.
+      updateUser({ is_biometric_enabled: true });
       toast.success('تم تفعيل البصمة البيومترية بنجاح');
     } catch (error: any) {
       toast.error(error.message || 'فشل تسجيل البصمة');
@@ -94,7 +103,11 @@ export const SecuritySettings = () => {
       setShowMfaModal(true);
       setMfaCode('');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'فشل في بدء إعداد المصادقة الثنائية');
+      // The 2FA endpoints answer with DRF's `detail`, like the rest of the API.
+      // Reading `error` swallowed the actionable messages — "التحقق بخطوتين مفعل
+      // بالفعل" and "سر التحقق غير صالح، أعد الإعداد" both showed as this generic
+      // line, so the user had no way to know re-running setup was the fix.
+      toast.error(err.response?.data?.detail || 'فشل في بدء إعداد المصادقة الثنائية');
     } finally {
       setMfaActionLoading(false);
     }
@@ -112,7 +125,7 @@ export const SecuritySettings = () => {
       setShowMfaModal(false);
       setMfaSetupData(null);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'رمز التحقق غير صحيح');
+      toast.error(err.response?.data?.detail || 'رمز التحقق غير صحيح');
     } finally {
       setMfaActionLoading(false);
     }
@@ -130,7 +143,7 @@ export const SecuritySettings = () => {
       setShowDisableModal(false);
       setMfaCode('');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'رمز التحقق غير صحيح');
+      toast.error(err.response?.data?.detail || 'رمز التحقق غير صحيح');
     } finally {
       setMfaActionLoading(false);
     }
@@ -260,9 +273,18 @@ export const SecuritySettings = () => {
               </div>
 
               <div className="flex justify-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mfaSetupData.qr_uri)}`} 
-                  alt="MFA QR Code" 
+                {/*
+                  The QR was previously built by sending the otpauth:// URI to
+                  api.qrserver.com — which hands the TOTP shared secret and the
+                  user's email to a third party (and into its access logs) every
+                  time someone enables 2FA. It also read mfaSetupData.qr_uri, a key
+                  the API never returns, so the rendered code was a QR of the string
+                  "undefined". The backend already returns qr_image as a self-
+                  contained data: URI; nothing leaves the browser.
+                */}
+                <img
+                  src={mfaSetupData.qr_image}
+                  alt="MFA QR Code"
                   className="w-48 h-48 rounded-lg"
                 />
               </div>

@@ -62,7 +62,17 @@ export default function AIAssistant({ open, onClose }: { open: boolean; onClose:
         },
       ]);
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Intentionally keyed on `open` alone. The effect seeds the greeting once per
+    // opening of the panel; listing `messages` would re-run it after every reply,
+    // and listing `user` would reseed mid-conversation if the profile refreshes.
+    // The `messages.length === 0` test inside is what makes it idempotent.
+    //
+    // Until now this directive named a rule that was not installed anywhere in the
+    // project (there was no ESLint config and no eslint packages), so it suppressed
+    // nothing. It is a real suppression as of eslint.config.mjs, which is why the
+    // reasoning is written down rather than left implied.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const buildContext = async () => {
     // Always fetch a fresh, permission-scoped analytics snapshot on demand
@@ -118,7 +128,10 @@ export default function AIAssistant({ open, onClose }: { open: boolean; onClose:
       );
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'تعذر الاتصال بالمساعد الذكي');
+      // DRF puts the message under `detail`; reading `error` meant every
+      // upstream failure showed the generic fallback instead of the real reason
+      // (missing API key, payload too large, module disabled for this basin).
+      toast.error(err.response?.data?.detail || 'تعذر الاتصال بالمساعد الذكي');
       setMessages((prev) => [
         ...prev,
         { role: 'assistant', content: 'عذراً، حدث خطأ أثناء معالجة سؤالك. حاول مرة أخرى.' },

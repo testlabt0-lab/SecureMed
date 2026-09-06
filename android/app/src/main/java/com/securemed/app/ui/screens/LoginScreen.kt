@@ -1,6 +1,5 @@
 package com.securemed.app.ui.screens
 
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,6 +12,7 @@ import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.securemed.app.auth.BiometricManager
-import com.securemed.app.data.local.SecurePreferences
+import com.securemed.app.security.BiometricHelper
 import com.securemed.app.ui.AuthUiState
 import com.securemed.app.ui.AuthViewModel
 
@@ -41,17 +41,58 @@ fun LoginScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var biometricMode by remember { mutableStateOf(false) }
-    var showBiometricPrompt by remember { mutableStateOf(false) }
 
     val biometricManager = remember { BiometricManager(context) }
     val isBiometricAvailable = remember { biometricManager.isBiometricAvailable() }
-    val isBiometricEnabled = remember { SecurePreferences.biometricEnabled }
+
+    /**
+     * The real precondition for a biometric login is a signing key in this
+     * device's Keystore, not the `biometricEnabled` session flag this screen used
+     * to read: logout clears that flag while the key and the server-side
+     * enrollment both survive, so the button was disabled exactly when it was
+     * needed. It is mutable because a fingerprint added since enrollment
+     * invalidates the key, and we only find that out when we try to use it.
+     */
+    var hasBiometricKey by remember { mutableStateOf(BiometricHelper.hasKey()) }
+
+    /**
+     * The challenge a prompt has already been raised for.
+     *
+     * `rememberSaveable`, because the ViewModel keeps [AuthUiState.AwaitingBiometric]
+     * across a rotation while the composition is rebuilt: without this the
+     * `LaunchedEffect` below would fire a second prompt on top of the one
+     * `BiometricPrompt` restores by itself, and the first CryptoObject — the only
+     * one that can sign — would be thrown away.
+     */
+    var promptedChallengeId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
             onLoginSuccess()
             viewModel.resetState()
         }
+    }
+
+    // A pending second factor takes over the screen. Leaving the credential
+    // fields reachable would invite a second login attempt while a challenge is
+    // outstanding, and that mints a new mfa_token — silently invalidating the
+    // code the user is already holding. `email`/`password` are remembered above
+    // this branch, so cancelling or timing out comes back to a filled form.
+    val twoFactor = uiState as? AuthUiState.AwaitingTwoFactor
+    if (twoFactor != null) {
+        TwoFactorScreen(
+            mfaToken = twoFactor.mfaToken,
+            method = twoFactor.method,
+            submitting = twoFactor.submitting,
+            errorMessage = errorMessage,
+            // Explicit lambda rather than a method reference: the ViewModel
+            // function's second parameter has a default, so a reference could
+            // bind the one-argument adaptation and silently drop `trust_device`.
+            onSubmit = { code, trust -> viewModel.submitTwoFactorCode(code, trust) },
+            onExpired = { viewModel.expireTwoFactor() },
+            onCancel = { viewModel.cancelTwoFactor() }
+        )
+        return
     }
 
     Box(
@@ -185,9 +226,9 @@ fun LoginScreen(
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
-                    } else if (!isBiometricEnabled) {
+                    } else if (!hasBiometricKey) {
                         Text(
-                            text = "⚠️ البصمة غير مفعلة. سجل الدخول بكلمة المرور أولاً ثم فعّل البصمة من الملف الشخصي",
+                            text = "⚠️ لا توجد بصمة مسجلة على هذا الجهاز. سجل الدخول بكلمة المرور ثم فعّل البصمة من الملف الشخصي",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -204,12 +245,19 @@ fun LoginScreen(
                     Button(
                         onClick = {
                             if (biometricMode) {
-                                showBiometricPrompt = true
+                                // Fetch the challenge first: the prompt has to
+                                // sign something the server chose, so there is
+                                // nothing to unlock until it arrives.
+                                if (email.isBlank()) {
+                                    viewModel.failBiometric("أدخل البريد الإلكتروني أولاً")
+                                } else {
+                                    viewModel.startBiometricLogin(email)
+                                }
                             } else {
                                 viewModel.login(email, password)
                             }
                         },
-                        enabled = !biometricMode || (isBiometricAvailable && isBiometricEnabled),
+                        enabled = !biometricMode || (isBiometricAvailable && hasBiometricKey),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
@@ -218,7 +266,9 @@ fun LoginScreen(
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ) else ButtonDefaults.buttonColors()
                     ) {
-                        if (uiState is AuthUiState.Loading) {
+                        if (uiState is AuthUiState.Loading ||
+                            uiState is AuthUiState.AwaitingBiometric
+                        ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 color = MaterialTheme.colorScheme.onPrimary,
@@ -247,37 +297,78 @@ fun LoginScreen(
     }
 
     // Biometric Prompt
-    if (showBiometricPrompt) {
-        LaunchedEffect(Unit) {
+    //
+    // Driven by AwaitingBiometric, so the order is fixed by construction:
+    // challenge from the server, then the prompt, then a signature over that
+    // challenge. The previous version ran the prompt first and encrypted a
+    // locally built string ("securemed-challenge-$email"), then fell back to a
+    // random string when the CryptoObject was missing — which meant a failure to
+    // unlock the key still produced a "credential" and still attempted a login.
+    val awaiting = uiState as? AuthUiState.AwaitingBiometric
+    if (awaiting != null) {
+        LaunchedEffect(awaiting.challenge.challengeId) {
+            if (promptedChallengeId == awaiting.challenge.challengeId) {
+                // A prompt for this challenge is already on screen.
+                return@LaunchedEffect
+            }
+            promptedChallengeId = awaiting.challenge.challengeId
             val activity = context as? FragmentActivity
-            activity?.let {
-                val cryptoObject = com.securemed.app.security.BiometricHelper.getCryptoObject()
-                biometricManager.authenticate(
-                    activity = it,
+            if (activity == null) {
+                viewModel.failBiometric("تعذر عرض نافذة البصمة")
+                return@LaunchedEffect
+            }
+            when (val unlock = BiometricHelper.unlockForSigning()) {
+                is BiometricHelper.Unlock.Ready -> biometricManager.authenticate(
+                    activity = activity,
                     title = "المصادقة بالبصمة",
                     subtitle = "استخدم بصمتك للدخول إلى SecureMed",
                     description = "SecureMed يتطلب المصادقة البيومترية للوصول للبيانات الحساسة",
-                    cryptoObject = cryptoObject,
+                    cryptoObject = unlock.cryptoObject,
                     onSuccess = { result ->
-                        val cipher = result.cryptoObject?.cipher
-                        val template = if (cipher != null) {
-                            // Encrypt a challenge (e.g., email + timestamp) to prove key ownership
-                            com.securemed.app.security.BiometricHelper.encryptChallenge(cipher, "securemed-challenge-$email")
+                        // The Signature the Keystore released; only this object
+                        // can sign, and only once.
+                        val signer = result.cryptoObject?.signature
+                        if (signer == null) {
+                            viewModel.failBiometric("لم يوفر النظام مفتاح التوقيع")
                         } else {
-                            // Fallback if CryptoObject failed but auth succeeded
-                            "android-bio-$email-${System.currentTimeMillis()}-${(0..9999).random()}"
+                            try {
+                                viewModel.completeBiometricLogin(
+                                    awaiting.challenge.challengeId,
+                                    BiometricHelper.signChallenge(
+                                        signer, awaiting.challenge.challenge
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                viewModel.failBiometric(
+                                    e.message ?: "تعذر توقيع تحدي المصادقة"
+                                )
+                            }
                         }
-                        viewModel.biometricLogin(email, template)
-                        showBiometricPrompt = false
                     },
-                    onError = { error ->
-                        viewModel.resetState()
-                        showBiometricPrompt = false
-                    },
-                    onCancel = {
-                        showBiometricPrompt = false
-                    }
+                    onError = { error -> viewModel.failBiometric(error) },
+                    onCancel = { viewModel.resetState() }
                 )
+
+                BiometricHelper.Unlock.NotEnrolled -> {
+                    hasBiometricKey = false
+                    viewModel.failBiometric(
+                        "لا توجد بصمة مسجلة على هذا الجهاز. سجل الدخول بكلمة المرور ثم فعّلها من الملف الشخصي"
+                    )
+                }
+
+                BiometricHelper.Unlock.Invalidated -> {
+                    // A fingerprint was added or removed after enrollment, so the
+                    // Keystore destroyed the key. This is the protection working:
+                    // a finger added to an unlocked phone must not inherit the
+                    // owner's enrollment.
+                    hasBiometricKey = false
+                    viewModel.failBiometric(
+                        "تغيّرت بصمات الجهاز، لذلك أُلغي المفتاح. سجل الدخول بكلمة المرور وفعّل البصمة من جديد"
+                    )
+                }
+
+                is BiometricHelper.Unlock.Failed ->
+                    viewModel.failBiometric(unlock.message)
             }
         }
     }

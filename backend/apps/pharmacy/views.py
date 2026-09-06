@@ -35,7 +35,7 @@ class MedicationViewSet (viewsets .ModelViewSet ):
 
     def get_queryset (self ):
         qs =super ().get_queryset ()
-        # Comment_278
+        # Filter options
         search =self .request .query_params .get ('search','')
         if search :
             qs =qs .filter (
@@ -106,7 +106,7 @@ class MedicationViewSet (viewsets .ModelViewSet ):
                 status =status .HTTP_400_BAD_REQUEST ,
                 )
             medication .stock_quantity -=qty 
-        else :# Comment_279
+        else :# ADJUSTMENT
             medication .stock_quantity =qty 
 
         medication .save (update_fields =['stock_quantity'])
@@ -189,7 +189,7 @@ class PrescriptionViewSet (viewsets .ModelViewSet ):
             status =status .HTTP_400_BAD_REQUEST ,
             )
 
-            # Comment_280
+            # Verify stock availability for all items
         insufficient =[]
         for item in prescription .items .select_related ('medication').all ():
             if item .medication .stock_quantity <item .quantity :
@@ -205,7 +205,7 @@ class PrescriptionViewSet (viewsets .ModelViewSet ):
             status =status .HTTP_400_BAD_REQUEST ,
             )
 
-            # Comment_281
+            # Deduct stock
         for item in prescription .items .select_related ('medication').all ():
             item .medication .stock_quantity -=item .quantity 
             item .medication .save (update_fields =['stock_quantity'])

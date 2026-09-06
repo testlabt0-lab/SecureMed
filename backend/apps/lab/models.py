@@ -128,11 +128,11 @@ class LabResult (models .Model ):
         return f'{self .order .test .name }: {val }'
 
     def save (self ,*args ,**kwargs ):
-    # Comment_197
+    # Auto-detect abnormal / critical values
         test =self .order .test 
         if self .numeric_value is not None and test .normal_range_min is not None and test .normal_range_max is not None :
             self .is_abnormal =not (test .normal_range_min <=self .numeric_value <=test .normal_range_max )
-            # Comment_198
+            # Critical if >2x above max or <0.5x below min
             if self .numeric_value >float (test .normal_range_max )*2 or self .numeric_value <float (test .normal_range_min )*0.5 :
                 self .is_critical =True 
         super ().save (*args ,**kwargs )

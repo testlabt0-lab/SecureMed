@@ -10,13 +10,13 @@ class Medication (models .Model ):
     scientific_name =models .CharField (_ ('الاسم العلمي'),max_length =255 ,blank =True )
     barcode =models .CharField (_ ('الباركود'),max_length =100 ,unique =True ,null =True ,blank =True )
 
-    # Comment_273
+    # Inventory
     stock_quantity =models .PositiveIntegerField (_ ('الكمية المتوفرة'),default =0 )
     reorder_level =models .PositiveIntegerField (_ ('حد إعادة الطلب'),default =10 )
     unit_price =models .DecimalField (_ ('سعر الوحدة'),max_digits =10 ,decimal_places =2 ,default =0.00 )
     expiry_date =models .DateField (_ ('تاريخ الانتهاء'),null =True ,blank =True )
 
-    # Comment_274
+    # Details
     description =models .TextField (_ ('الوصف'),blank =True )
     instructions =models .TextField (_ ('تعليمات عامة'),blank =True )
     is_active =models .BooleanField (_ ('نشط'),default =True )
@@ -52,10 +52,10 @@ class Prescription (models .Model ):
     patient =models .ForeignKey ('patients.Patient',on_delete =models .CASCADE ,related_name ='prescriptions')
     doctor =models .ForeignKey (settings .AUTH_USER_MODEL ,on_delete =models .CASCADE ,related_name ='prescriptions_issued')
 
-    # Comment_275
+    # HL7/FHIR compatibility fields
     diagnosis_code =models .CharField (_ ('رمز التشخيص ICD-10'),max_length =50 ,blank =True )
 
-    # Comment_276
+    # Digital Signature (PKI)
     digital_signature =models .TextField (_ ('التوقيع الرقمي'),blank =True ,help_text =_ ('توقيع مشفر يثبت صحة الوصفة'))
     is_signed =models .BooleanField (_ ('موقعة إلكترونياً'),default =False )
     signed_at =models .DateTimeField (_ ('تاريخ التوقيع'),null =True ,blank =True )
@@ -80,7 +80,7 @@ class Prescription (models .Model ):
         from apps .security .utils .digital_signature import DigitalSignatureService 
         from django .utils import timezone 
 
-        # Comment_277
+        # Prepare canonical data
         data_to_sign ={
         'prescription_id':str (self .id ),
         'patient_id':str (self .patient .id ),

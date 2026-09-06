@@ -4,21 +4,8 @@ import { UserPlus, Search, Users as UsersIcon, Shield, Pencil, Power } from 'luc
 import { motion } from 'framer-motion';
 import { usersAPI, basinsAPI } from '../api/client';
 import { useAuthStore } from '../store/authStore';
+import { ROLES, roleLabel, roleLabels } from '../constants/roles';
 import toast from 'react-hot-toast';
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'مدير النظام',
-  HOSPITAL_ADMIN: 'مدير المستشفى',
-  CENTER_ADMIN: 'مدير مركز',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع أمني',
-  PATIENT: 'مريض',
-  ACCOUNTANT: 'محاسب',
-  RECEPTIONIST: 'موظف استقبال',
-};
 
 export default function Users() {
   const currentUser = useAuthStore(state => state.user);
@@ -108,8 +95,8 @@ export default function Users() {
             className="input-field md:w-48"
           >
             <option value="">كل الأدوار</option>
-            {Object.entries(roleLabels).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
+            {ROLES.map(r => (
+              <option key={r} value={r}>{roleLabels[r]}</option>
             ))}
           </select>
         </div>
@@ -159,7 +146,7 @@ export default function Users() {
                     <td className="text-sm">{u.email}</td>
                     <td>
                       <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-900/50">
-                        {roleLabels[u.role]}
+                        {roleLabel(u.role)}
                       </span>
                     </td>
                     <td className="text-xs text-gray-500">
@@ -300,8 +287,8 @@ function CreateUserModal({ onSubmit, onClose, loading, basins }: any) {
                 onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                 className="input-field"
               >
-                {Object.entries(roleLabels).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
+                {ROLES.map(r => (
+                  <option key={r} value={r}>{roleLabels[r]}</option>
                 ))}
               </select>
             </div>
@@ -430,8 +417,8 @@ function EditUserModal({ user, basins, onSubmit, onClose, loading }: any) {
                 onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                 className="input-field"
               >
-                {Object.entries(roleLabels).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
+                {ROLES.map(r => (
+                  <option key={r} value={r}>{roleLabels[r]}</option>
                 ))}
               </select>
             </div>

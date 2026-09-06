@@ -50,7 +50,7 @@ class Command (BaseCommand ):
         else :
             self ._send_weekly (recipients )
 
-            # Comment_307
+            # -----------------------------------------------------------
     def _send_monthly (self ,month_str ,recipients ):
         pdf_bytes ,filename ,start =build_monthly_report (month_str ,generated_by ='الجدولة الآلية')
         month_label =start .strftime ('%Y-%m')
@@ -72,7 +72,7 @@ class Command (BaseCommand ):
         if failed :
             self .stdout .write (self .style .WARNING (f'فشل: {", ".join (failed )}'))
 
-            # Comment_308
+            # -----------------------------------------------------------
     def _send_weekly (self ,recipients ):
         now =timezone .now ()
         start =now -timedelta (days =7 )

@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -28,10 +30,15 @@ class PatientAccessTests(TestCase):
             full_name='Test Admin'
         )
 
+        # date_of_birth is NOT NULL and gender is a 1-char M/F/O choice — this
+        # setUp used to omit the first and pass 'MALE' for the second, so every
+        # test in the class died in setUp with an IntegrityError before asserting
+        # anything about access control.
         self.patient = Patient.objects.create(
             full_name='Test Patient',
             national_id='1234567890',
-            gender='MALE'
+            date_of_birth=date(1990, 5, 17),
+            gender=Patient.Gender.MALE,
         )
 
         self.channel = Channel.objects.create(

@@ -11,7 +11,7 @@ import io
 from datetime import datetime ,timedelta 
 
 import matplotlib 
-matplotlib .use ('Agg')# Comment_291
+matplotlib .use ('Agg')# headless
 import matplotlib .pyplot as plt 
 
 from django .http import HttpResponse 
@@ -49,6 +49,42 @@ BRAND_DARK =colors .HexColor ('#1E40AF')
 LIGHT_ROW =colors .HexColor ('#EFF6FF')
 GRID =colors .HexColor ('#BFDBFE')
 
+# ─── Who may export which report ──────────────────────────────────────────────
+#
+# UnifiedReportDownloadView and ReportListView were guarded by IsAuthenticated
+# alone, so any signed-in account — including PATIENT — could fetch
+# /api/v1/reports/patient_report/?format=excel and receive up to 2000 patients
+# with national_id, date of birth, gender and blood type, or pull the entire
+# audit trail via audit_report. The dedicated single-purpose views next to them
+# (MonthlyReportView, AuditExcelView, the audit PDF view) all require
+# IsAdmin|IsAuditor, so the unified view was not a deliberate relaxation but a
+# gap: it re-implements the same exports without the same gate. Worse,
+# audit_report reaches the audit export by instantiating AuditExcelView and
+# calling .get() directly, which skips DRF dispatch and therefore skips that
+# view's own permission_classes entirely.
+#
+# The two tiers below mirror the guards that already existed:
+#  - oversight  = what MonthlyReportView/AuditExcelView require (IsAdmin|IsAuditor).
+#  - clinical   = bulk patient/appointment/channel data, limited to admins and
+#                 doctors. Nurses and receptionists keep per-patient and
+#                 per-channel access, which is scoped by the record's own view
+#                 (Channel.can_view) rather than exported in bulk.
+#
+# Roles absent from a report's tuple get 403. Keep this in step with
+# frontend/src/pages/Reports.tsx, which hides the cards it may not download.
+_ADMIN_ROLES =('SUPER_ADMIN','HOSPITAL_ADMIN','CENTER_ADMIN')
+_OVERSIGHT_ROLES =_ADMIN_ROLES +('AUDITOR',)
+_CLINICAL_ROLES =_ADMIN_ROLES +('DOCTOR',)
+
+REPORT_ROLES ={
+'monthly_summary':_OVERSIGHT_ROLES ,
+'audit_report':_OVERSIGHT_ROLES ,
+'security_report':_OVERSIGHT_ROLES ,
+'patient_report':_CLINICAL_ROLES ,
+'appointments_report':_CLINICAL_ROLES ,
+'channels_report':_CLINICAL_ROLES ,
+}
+
 
 def _mpl_ar (text :str )->str :
     """Arabic shaping for matplotlib labels."""
@@ -71,9 +107,9 @@ class BaseReportView (APIView ):
         return resp 
 
 
-        # Comment_293
-        # Comment_294
-        # Comment_295
+        # ============================================================
+        # 1) Channel (medical case) PDF report
+        # ============================================================
 
 class ChannelReportPDFView (BaseReportView ):
     """Formatted PDF report for one medical case channel."""
@@ -220,9 +256,9 @@ class ChannelReportPDFView (BaseReportView ):
         )
 
 
-        # Comment_296
-        # Comment_297
-        # Comment_298
+        # ============================================================
+        # 2) Audit logs → Excel (xlsx)
+        # ============================================================
 
 class AuditExcelView (BaseReportView ):
     """Export audit logs to a styled xlsx workbook (admin/auditor)."""
@@ -276,7 +312,7 @@ class AuditExcelView (BaseReportView ):
             ws .column_dimensions [get_column_letter (i )].width =w 
         ws .freeze_panes ='A2'
 
-        # Comment_299
+        # Summary sheet
         ws2 =wb .create_sheet ('ملخص')
         ws2 .rightToLeft =True 
         ws2 .append (['الإحصائية','القيمة'])
@@ -299,9 +335,9 @@ class AuditExcelView (BaseReportView ):
         )
 
 
-        # Comment_300
-        # Comment_301
-        # Comment_302
+        # ============================================================
+        # 3) Monthly performance report (PDF with charts)
+        # ============================================================
 
 def _chart_bytes (fig )->io .BytesIO :
     buf =io .BytesIO ()
@@ -319,7 +355,7 @@ class MonthlyReportPDFView (BaseReportView ):
     def get (self ,request ):
         from .monthly import build_monthly_report 
 
-        month_str =request .query_params .get ('month')# Comment_303
+        month_str =request .query_params .get ('month')# YYYY-MM
         try :
             pdf_bytes ,filename ,_start =build_monthly_report (
             month_str ,generated_by =request .user .full_name 
@@ -384,12 +420,12 @@ class MonthlyReportEmailView (BaseReportView ):
         })
 
 
-        # Comment_304
-        # Comment_305
-        # Comment_306
+        # ============================================================
+        # 4) Unified Report Download & List Views
+        # ============================================================
 
 class ReportListView (APIView ):
-    """List all available system reports."""
+    """List the system reports the caller may actually export."""
     permission_classes =[permissions .IsAuthenticated ]
 
     def get (self ,request ):
@@ -431,7 +467,13 @@ class ReportListView (APIView ):
         'formats':['pdf','excel'],
         },
         ]
-        return Response ({'results':reports })
+        # Filtered by the same map the download view enforces, so the list never
+        # advertises a report that would come back 403. It used to return all six
+        # to everyone, which is how a nurse or a patient learned that an audit
+        # export exists and what its id is.
+        role =request .user .role
+        visible =[r for r in reports if role in REPORT_ROLES .get (r ['id'],())]
+        return Response ({'results':visible })
 
 
 class UnifiedReportDownloadView (BaseReportView ):
@@ -442,6 +484,24 @@ class UnifiedReportDownloadView (BaseReportView ):
     permission_classes =[permissions .IsAuthenticated ]
 
     def get (self ,request ,report_id :str ):
+        allowed =REPORT_ROLES .get (report_id )
+        if allowed is None :
+            return Response ({'detail':f'التقرير غير معروف: {report_id }'},status =404 )
+        if request .user .role not in allowed :
+            # Recorded, not just refused: an account asking for a report it may
+            # not export is worth seeing in the audit trail. SUSPICIOUS_ACTIVITY
+            # is used rather than a new enum member because AuditLog.EventType
+            # already covers this shape and adding a choice would need a
+            # migration for no schema change.
+            log_security_event (
+            user =request .user ,
+            event_type ='SUSPICIOUS_ACTIVITY',
+            request =request ,
+            details ={'denied_report':report_id ,'role':request .user .role },
+            severity ='WARNING',
+            )
+            return Response ({'detail':'غير مصرح لك بتصدير هذا التقرير'},status =403 )
+
         format_type =request .query_params .get ('format','pdf').lower ()
         start_date =request .query_params .get ('start_date')
         end_date =request .query_params .get ('end_date')
@@ -461,6 +521,10 @@ class UnifiedReportDownloadView (BaseReportView ):
 
         elif report_id =='audit_report':
             if format_type =='excel':
+                # Calling .get() on an instance skips DRF dispatch, so
+                # AuditExcelView.permission_classes never runs here. That is only
+                # safe because REPORT_ROLES['audit_report'] above enforces the
+                # same IsAdmin|IsAuditor set; do not widen one without the other.
                 return AuditExcelView ().get (request )
             return self ._export_audit_pdf (request ,start_date ,end_date )
 
@@ -484,6 +548,9 @@ class UnifiedReportDownloadView (BaseReportView ):
                 return self ._export_security_excel (request ,start_date ,end_date )
             return self ._export_security_pdf (request ,start_date ,end_date )
 
+        # Unreachable for a client: an unknown report_id is rejected above. This
+        # only fires if REPORT_ROLES gains an id that this dispatcher does not
+        # handle, and 404 is the right answer for that too.
         return Response ({'detail':f'التقرير غير معروف: {report_id }'},status =404 )
 
     def _export_patients_excel (self ,request ,start_date ,end_date ):

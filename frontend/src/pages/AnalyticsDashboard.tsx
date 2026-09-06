@@ -7,6 +7,7 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { analyticsApi, reportsApi, downloadBlobResponse } from '../api/extendedApis';
 import { useThemeStore } from '../store/themeStore';
+import { roleLabel, OVERSIGHT_ROLES } from '../constants/roles';
 import toast from 'react-hot-toast';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -14,17 +15,6 @@ import {
 } from 'recharts';
 
 const COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6'];
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'مدير النظام',
-  HOSPITAL_ADMIN: 'مدير المستشفى',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع أمني',
-  PATIENT: 'مريض',
-};
 
 const channelTypeLabels: Record<string, string> = {
   EMERGENCY: 'طارئة',
@@ -39,6 +29,10 @@ export default function AnalyticsDashboard() {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
   const [downloadingMonthly, setDownloadingMonthly] = useState(false);
+
+  // Same tier that guards MonthlyReportPDFView (IsAdmin|IsAuditor) and the
+  // monthly_summary entry in REPORT_ROLES on the server.
+  const canDownloadMonthly = user != null && OVERSIGHT_ROLES.includes(user.role);
 
   const handleMonthlyReport = async () => {
     setDownloadingMonthly(true);
@@ -170,14 +164,24 @@ export default function AnalyticsDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleMonthlyReport}
-            disabled={downloadingMonthly}
-            className="btn-primary text-sm flex items-center gap-2"
-          >
-            <CalendarClock className="w-4 h-4" />
-            {downloadingMonthly ? 'جاري التوليد...' : 'التقرير الشهري'}
-          </button>
+          {/*
+            Gated on OVERSIGHT_ROLES, not on the route guard. /analytics admits
+            REPORTING_ROLES, which includes ACCOUNTANT, but MonthlyReportPDFView
+            requires IsAdmin|IsAuditor — so an accountant was shown a button whose
+            request could only ever come back 403. The catch below still handles
+            403 for anyone who reaches the call another way; this only stops the
+            app from offering an action it knows will be refused.
+          */}
+          {canDownloadMonthly && (
+            <button
+              onClick={handleMonthlyReport}
+              disabled={downloadingMonthly}
+              className="btn-primary text-sm flex items-center gap-2"
+            >
+              <CalendarClock className="w-4 h-4" />
+              {downloadingMonthly ? 'جاري التوليد...' : 'التقرير الشهري'}
+            </button>
+          )}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
             <span className="text-sm text-green-700 dark:text-green-400">مباشر</span>
@@ -342,7 +346,7 @@ export default function AnalyticsDashboard() {
               <PieChart>
                 <Pie
                   data={Object.entries(data?.users_by_role || {}).map(([role, count]) => ({
-                    name: roleLabels[role] || role,
+                    name: roleLabel(role),
                     value: count
                   }))}
                   cx="50%"

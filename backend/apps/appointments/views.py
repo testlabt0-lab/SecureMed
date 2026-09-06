@@ -254,20 +254,20 @@ class AppointmentViewSet (viewsets .ModelViewSet ):
         try :
             from django .utils .dateparse import parse_date 
             target_date =parse_date (date_str )
-            day_of_week =target_date .weekday ()# Comment_106
-            # Comment_107
+            day_of_week =target_date .weekday ()# 0=Monday
+            # Convert to Sunday=0 system
             day_of_week =(day_of_week +1 )%7 
         except (ValueError ,TypeError ):
             return Response ({'error':'تنسيق التاريخ غير صحيح'},status =400 )
 
-            # Comment_108
+            # Get working slots
         slots =AppointmentSlot .objects .filter (
         doctor_id =doctor_id ,
         day_of_week =day_of_week ,
         is_active =True ,
         )
 
-        # Comment_109
+        # Get booked appointments
         booked =Appointment .objects .filter (
         doctor_id =doctor_id ,
         scheduled_at__date =target_date ,

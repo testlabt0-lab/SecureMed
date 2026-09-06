@@ -7,6 +7,7 @@ import {
 import { notificationsApi, reportsApi } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
+import { OVERSIGHT_ROLES } from '../constants/roles';
 import toast from 'react-hot-toast';
 
 const notificationIcons: Record<string, any> = {
@@ -38,7 +39,11 @@ export default function NotificationsCenter() {
 
   const [filter, setFilter] = useState<'all' | 'unread' | 'critical'>('all');
 
-  const canEmailReports = ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'].includes(user?.role || '');
+  // Matches IsAdmin|IsAuditor on MonthlyReportEmailView and the test-email
+  // endpoint in backend/apps/reports/views.py. CENTER_ADMIN is part of IsAdmin
+  // there but was missing from this literal, so centre admins were shown no
+  // send button for an action the server would have accepted.
+  const canEmailReports = user != null && OVERSIGHT_ROLES.includes(user.role);
 
   const testEmailMutation = useMutation({
     mutationFn: () => notificationsApi.testEmail(),

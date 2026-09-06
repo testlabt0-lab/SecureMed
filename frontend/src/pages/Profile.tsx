@@ -5,20 +5,10 @@ import { authAPI } from '../api/client';
 import { mfaApi, biometricDevicesApi } from '../api/extendedApis';
 import toast from 'react-hot-toast';
 import {
-  isWebAuthnAvailable, isBiometricAvailable,
-  enrollBiometric, getCredentialByEmail, removeCredential,
+  isWebAuthnAvailable,
+  enrollBiometric, describeDevice, getDeviceId, forgetEnrolledEmail,
 } from '../utils/webauthn';
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'مدير النظام',
-  HOSPITAL_ADMIN: 'مدير المستشفى',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع أمني',
-  PATIENT: 'مريض',
-};
+import { roleLabel } from '../constants/roles';
 
 export default function Profile() {
   const { user, updateUser, tokens } = useAuthStore();
@@ -31,8 +21,7 @@ export default function Profile() {
     confirm_password: '',
   });
   const [biometricData, setBiometricData] = useState({
-    device_name: 'جهاز ويب (WebAuthn)',
-    biometric_template: '',
+    device_name: describeDevice(),
   });
 
   // ===== 2FA state =====
@@ -100,9 +89,14 @@ export default function Profile() {
     }
   };
 
-  const handleRemoveDevice = async (id: string) => {
+  const handleRemoveDevice = async (id: string, deviceId?: string) => {
     try {
       await biometricDevicesApi.remove(id);
+      // Drop the local hint too, otherwise the login screen keeps offering a
+      // fingerprint button for a credential the server no longer knows.
+      if (user && deviceId && deviceId === getDeviceId()) {
+        forgetEnrolledEmail(user.email);
+      }
       toast.success('تم حذف الجهاز');
       loadDevices();
     } catch (err: any) {
@@ -134,36 +128,21 @@ export default function Profile() {
 
     setLoading(true);
     try {
-      // Step 1: Use WebAuthn to register a real biometric credential
-      const result = await enrollBiometric(
-        user.id,
-        user.email,
-        user.full_name
-      );
+      // One call: the server issues the challenge, the device signs it, the public
+      // key is stored. There is no second "notify the backend" step any more — the
+      // old one sent a different device_id than the login screen used and swallowed
+      // its own failure, so the UI reported success while the server had nothing.
+      const result = await enrollBiometric(biometricData.device_name);
 
       if (!result.success) {
         toast.error(result.error || 'فشل تسجيل البصمة');
-        setLoading(false);
         return;
       }
 
-      // Step 2: Notify the backend (optional - for audit log + server-side verification)
-      try {
-        await authAPI.enrollBiometric({
-          device_id: `webauthn-${navigator.userAgent.slice(0, 30)}`,
-          device_name: biometricData.device_name,
-          platform: 'WEB',
-          biometric_template: `webauthn-credential-${result.credentialId}`,
-        });
-      } catch (apiErr) {
-        // Backend enrollment failed, but WebAuthn credential is still stored locally
-        // User can still login with biometric, just the audit log entry is missing
-        console.warn('Backend biometric enrollment failed, but WebAuthn succeeded');
-      }
-
       updateUser({ is_biometric_enabled: true });
-      toast.success('تم تسجيل البصمة بنجاح عبر WebAuthn! 🎉');
+      toast.success('تم تسجيل البصمة بنجاح عبر WebAuthn');
       setShowBiometricForm(false);
+      loadDevices();
     } catch (err: any) {
       toast.error(err.message || 'فشل تسجيل البصمة');
     } finally {
@@ -190,7 +169,7 @@ export default function Profile() {
           </div>
           <div>
             <h2 className="text-xl font-bold">{user.full_name}</h2>
-            <p className="text-gray-600">{roleLabels[user.role]}</p>
+            <p className="text-gray-600">{roleLabel(user.role)}</p>
             <div className="flex items-center gap-2 mt-1">
               {user.is_biometric_enabled ? (
                 <span className="badge badge-success">
@@ -424,7 +403,7 @@ export default function Profile() {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleRemoveDevice(d.id)}
+                  onClick={() => handleRemoveDevice(d.id, d.device_id)}
                   className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0"
                   title="حذف الجهاز"
                   aria-label="حذف الجهاز"
@@ -502,8 +481,9 @@ export default function Profile() {
             <form onSubmit={handleEnrollBiometric} className="space-y-4">
               <div className="bg-blue-50 p-4 rounded-lg">
                 <p className="text-sm text-blue-800">
-                  سيتم تسجيل بصمتك بشكل آمن. لن يتم تخزين البصمة الأصلية،
-                  بل سيتم تخزين hash مشفر فقط (SHA-256 + salt).
+                  ستطلب منك بصمتك للتحقق داخل الجهاز فقط. لا تخرج البصمة ولا أي
+                  تمثيل لها من جهازك: يُنشئ الجهاز مفتاحاً خاصاً محفوظاً في عتاده
+                  الآمن، ويُرسل المفتاح العام وحده إلى الخادم.
                 </p>
               </div>
               <div>

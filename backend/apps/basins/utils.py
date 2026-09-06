@@ -50,7 +50,7 @@ def basin_scoped_queryset (qs ,user ,lookup :str ='basin_id'):
         return qs 
     if user .role in ['HOSPITAL_ADMIN','AUDITOR']:
         kwargs ={lookup :basin .id }
-        # Comment_173
+        # Admins also keep visibility of legacy basin-less rows.
         null_kwarg ={f'{lookup }__isnull':True }
         return (qs .filter (**kwargs )|qs .filter (**null_kwarg )).distinct ()
     return qs 

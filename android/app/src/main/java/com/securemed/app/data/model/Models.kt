@@ -17,23 +17,107 @@ data class User(
     @SerialName("is_active") val isActive: Boolean = true
 )
 
+/**
+ * The pair a completed sign-in hands over. Both halves are required, and
+ * deliberately so: a session with no refresh token dies at the first 401, fifteen
+ * minutes in, and it is better to fail the login loudly than to open one.
+ *
+ * `auth/refresh/` answers with a different shape — see [RefreshResponse].
+ */
 @Serializable
 data class TokenPair(
     val access: String,
     val refresh: String
 )
 
+/**
+ * `auth/refresh/`: a new access token, and a new refresh token *only when the
+ * server rotates*.
+ *
+ * `RefreshTokenView` builds `{'access': …}` and adds `refresh` inside
+ * `if settings.SIMPLE_JWT.get('ROTATE_REFRESH_TOKENS')`
+ * (`backend/apps/accounts/views.py:386-405`). Rotation is on in both settings
+ * files today, which is the only reason decoding this as a [TokenPair] worked:
+ * with rotation off, the required `refresh` field made kotlinx-serialization
+ * throw MissingFieldException, the authenticator read that as an unrecoverable
+ * session and cleared the tokens — sending every mobile user back to the login
+ * screen every fifteen minutes, on a server setting that says nothing about
+ * mobile.
+ */
+@Serializable
+data class RefreshResponse(
+    val access: String,
+    val refresh: String? = null
+)
+
+/**
+ * Two different bodies share one 200 response on `auth/login/`.
+ *
+ * A completed sign-in carries `tokens` + `user`. A sign-in that still needs a
+ * second factor carries `requires_2fa`, a short-lived `mfa_token` and the
+ * `method` chosen by the server ("email" for a mailed OTP, "totp" for an
+ * authenticator app) — and no tokens at all. The server picks the second path
+ * whenever the account has MFA enabled *or* adaptive MFA fires on a new or
+ * untrusted device, so it is not an edge case.
+ *
+ * Every field is therefore optional. While `tokens`/`user` were required,
+ * kotlinx-serialization threw MissingFieldException on the 2FA body and the
+ * repository turned that into a generic "login failed" — an account with MFA
+ * could not sign in and the reason was invisible.
+ */
 @Serializable
 data class LoginResponse(
-    val tokens: TokenPair,
-    val user: User,
-    @SerialName("requires_biometric") val requiresBiometric: Boolean = false
-)
+    val tokens: TokenPair? = null,
+    val user: User? = null,
+    @SerialName("requires_biometric") val requiresBiometric: Boolean = false,
+    @SerialName("requires_2fa") val requiresTwoFactor: Boolean = false,
+    @SerialName("mfa_token") val mfaToken: String? = null,
+    val method: String? = null,
+    val detail: String? = null
+) {
+    /** True only when a session can actually be opened from this response. */
+    val isAuthenticated: Boolean get() = tokens != null && user != null
+}
 
 @Serializable
 data class LoginRequest(
     val email: String,
     val password: String
+)
+
+/**
+ * Completing a sign-in the server answered with `requires_2fa`.
+ *
+ * [mfaToken] is the handle from [LoginResponse.mfaToken]. The server holds the
+ * user id under `mfa_pending:{token}` for 300 seconds and deletes it on the
+ * first success, so this body is single-use and short-lived: a 401 means the
+ * handle is gone and the password step has to run again
+ * (`backend/apps/accounts/views.py:814-821`).
+ *
+ * [code] is six digits either way — the mailed OTP when the server chose
+ * `method = "email"`, or the authenticator's TOTP when it chose `"totp"`. The
+ * server tries the mailed code first and only falls back to TOTP when none is
+ * cached (`views.py:831-842`), so the client does not have to say which kind it
+ * is holding.
+ *
+ * [trustDevice] marks this device trusted so adaptive MFA stops challenging it.
+ * It only has an effect on a request that also carries `X-Device-Fingerprint`:
+ * the server looks the device row up by that header and silently skips the
+ * update when it is absent (`views.py:855-862`). The app sends the header on
+ * every request now, so the flag does work — and it has to be offered, because
+ * `DeviceRegistry.is_trusted` defaults to false and the adaptive branch fires on
+ * `is_new_device or not device.is_trusted` (`views.py:215`): without a way to
+ * trust the device, every single login would wait on a mailed code.
+ *
+ * It changes nothing for an account with TOTP enabled — `mfa_enabled` is tested
+ * first and always demands a code — so the UI offers the option only for the
+ * `email` method, where it is the difference the user can actually feel.
+ */
+@Serializable
+data class MfaLoginRequest(
+    @SerialName("mfa_token") val mfaToken: String,
+    val code: String,
+    @SerialName("trust_device") val trustDevice: Boolean = false
 )
 
 @Serializable
@@ -42,25 +126,53 @@ data class BiometricChallengeRequest(
     @SerialName("device_id") val deviceId: String
 )
 
+/**
+ * The challenge to sign.
+ *
+ * The server also returns `rp_id`, `allow_credentials` and `user_verification`,
+ * which only the browser ceremony consumes; unknown keys are ignored by the
+ * Retrofit Json, so they are deliberately absent here. [timeout] is milliseconds
+ * and mirrors the row's real TTL — a challenge is single-use and burned by the
+ * server on first presentation, so a stale one cannot be retried.
+ *
+ * An unknown email or an unenrolled device gets a well-formed decoy backed by no
+ * database row, indistinguishable from the real thing on purpose. The client must
+ * not try to interpret that: it signs and lets the server refuse.
+ */
 @Serializable
 data class BiometricChallengeResponse(
     @SerialName("challenge_id") val challengeId: String,
-    val challenge: String
+    val challenge: String,
+    val timeout: Long = 0
 )
 
+/**
+ * A native assertion: the id of the challenge, and an ECDSA P-256 signature over
+ * its raw bytes, base64url.
+ *
+ * The retired shape carried `biometric_response` — a string the client built out
+ * of the challenge id — and `biometric_template`, a fresh random value per call.
+ * Neither was a signature, so the server could only ever have compared strings.
+ */
 @Serializable
 data class BiometricLoginRequest(
     @SerialName("challenge_id") val challengeId: String,
-    @SerialName("biometric_response") val biometricResponse: String,
-    @SerialName("biometric_template") val biometricTemplate: String
+    val signature: String
 )
 
+/**
+ * Enrollment: the public half of the Keystore key pair, base64url SPKI DER.
+ *
+ * `biometric_template` is gone. Sending a fingerprint template — or any stand-in
+ * for one — to a server is precisely what a biometric authenticator exists to
+ * avoid: the raw trait cannot be revoked once it leaks.
+ */
 @Serializable
 data class BiometricEnrollRequest(
     @SerialName("device_id") val deviceId: String,
     @SerialName("device_name") val deviceName: String,
     val platform: String,
-    @SerialName("biometric_template") val biometricTemplate: String
+    @SerialName("public_key") val publicKey: String
 )
 
 @Serializable

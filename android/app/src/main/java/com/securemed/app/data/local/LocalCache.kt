@@ -6,9 +6,18 @@ import java.io.File
 /**
  * Lightweight disk cache for offline mode.
  *
- * Successful GET responses are stored as JSON files in the app's private
- * storage. When the device is offline and a request fails, the repository
- * serves the last cached copy so the app remains browsable.
+ * Successful GET responses are stored in the app's private storage. When the
+ * device is offline and a request fails, the repository serves the last cached
+ * copy so the app remains browsable.
+ *
+ * The stored bytes are sealed by [CacheCrypto] (AES-256-GCM, hardware-backed
+ * key). Files keep the `.json` extension even though they are now binary: the
+ * name is the migration path, letting [load] find a plaintext file written by
+ * an older build, return it once, and rewrite it encrypted in place.
+ *
+ * Nothing here throws. A cache miss is always survivable — every entry is a
+ * copy of data the server still holds — so failures degrade to "no cache"
+ * instead of to an error the user sees.
  */
 object LocalCache {
 
@@ -23,7 +32,19 @@ object LocalCache {
     fun save(key: String, json: String) {
         val dir = cacheDir ?: return
         try {
-            File(dir, key.sanitized() + ".json").writeText(json)
+            // No envelope means no write. Persisting the plaintext as a
+            // fallback would put patient data back on disk unprotected,
+            // which is exactly what this layer exists to prevent.
+            val payload = CacheCrypto.encrypt(json) ?: return
+            val target = File(dir, key.sanitized() + ".json")
+            val staging = File(dir, key.sanitized() + ".tmp")
+            staging.writeBytes(payload)
+            // Swap in one step: a half-written file would fail its GCM tag and
+            // discard an entry that was still valid a moment ago.
+            if (!staging.renameTo(target)) {
+                target.delete()
+                if (!staging.renameTo(target)) staging.delete()
+            }
         } catch (_: Exception) {
             // Cache write failures must never crash the app.
         }
@@ -34,7 +55,24 @@ object LocalCache {
         return try {
             val dir = cacheDir ?: return null
             val file = File(dir, key.sanitized() + ".json")
-            if (file.exists()) file.readText() else null
+            if (!file.exists()) return null
+            val bytes = file.readBytes()
+            if (CacheCrypto.looksEncrypted(bytes)) {
+                CacheCrypto.decrypt(bytes) ?: run {
+                    // Tag failure or a key that no longer exists (restored
+                    // backup, keystore reset). The file can never be read
+                    // again, so drop it rather than retry on every launch.
+                    file.delete()
+                    null
+                }
+            } else {
+                // Written by a build from before cache encryption. Hand the
+                // content back, then immediately seal it so the plaintext
+                // stops existing on disk.
+                val legacy = bytes.toString(Charsets.UTF_8)
+                save(key, legacy)
+                legacy
+            }
         } catch (_: Exception) {
             null
         }

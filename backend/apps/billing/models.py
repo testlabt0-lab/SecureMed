@@ -79,7 +79,7 @@ class Invoice (models .Model ):
         if self .status in ['PAID','CANCELLED']:
             return False ,"الفاتورة مدفوعة مسبقاً أو ملغاة."
 
-            # Comment_176
+            # Simulate connecting to a payment gateway API
         gateway_response ={
         "status":"success",
         "transaction_id":f"TXN-{uuid .uuid4 ().hex [:8 ].upper ()}",
@@ -104,3 +104,56 @@ class InvoiceItem (models .Model ):
     def save (self ,*args ,**kwargs ):
         self .total_price =self .quantity *self .unit_price 
         super ().save (*args ,**kwargs )
+
+class InsuranceClaim(models.Model):
+    """Claim submitted to an insurance provider."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    invoice = models.OneToOneField(Invoice, on_delete=models.CASCADE, related_name='insurance_claim')
+    policy = models.ForeignKey(PatientInsurance, on_delete=models.CASCADE)
+    
+    claim_amount = models.DecimalField(_('المبلغ المطالب به'), max_digits=12, decimal_places=2)
+    approved_amount = models.DecimalField(_('المبلغ الموافق عليه'), max_digits=12, decimal_places=2, default=0.00)
+    
+    status = models.CharField(_('حالة المطالبة'), max_length=50, choices=[
+        ('PENDING', _('قيد الانتظار')),
+        ('APPROVED', _('موافق عليها')),
+        ('REJECTED', _('مرفوضة')),
+        ('PARTIAL', _('موافق عليها جزئياً')),
+    ], default='PENDING')
+    
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(_('سبب الرفض'), blank=True)
+    
+    class Meta:
+        verbose_name = _('مطالبة تأمين')
+        verbose_name_plural = _('مطالبات التأمين')
+        
+    def __str__(self):
+        return f"Claim for {self.invoice.id} - {self.status}"
+
+class PaymentTransaction(models.Model):
+    """Record of actual payment (Stripe/Moyasar)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='transactions')
+    
+    transaction_id = models.CharField(_('رقم العملية'), max_length=255, unique=True)
+    gateway = models.CharField(_('بوابة الدفع'), max_length=50, default='STRIPE')
+    amount = models.DecimalField(_('المبلغ المدفوع'), max_digits=12, decimal_places=2)
+    currency = models.CharField(_('العملة'), max_length=10, default='SAR')
+    
+    status = models.CharField(_('حالة الدفع'), max_length=50, choices=[
+        ('SUCCESS', _('ناجح')),
+        ('FAILED', _('فاشل')),
+        ('PENDING', _('معلق')),
+    ], default='PENDING')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    
+    class Meta:
+        verbose_name = _('عملية دفع')
+        verbose_name_plural = _('عمليات الدفع')
+        
+    def __str__(self):
+        return f"{self.gateway} - {self.transaction_id} ({self.status})"

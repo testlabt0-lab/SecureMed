@@ -144,6 +144,18 @@ export default function ChannelDetail() {
     !members.find((m: any) => m.user.id === u.id)
   );
 
+  /**
+   * Who sees the owner-only controls (add/remove member, close the channel).
+   *
+   * Deliberately NOT ADMIN_ROLES, even though every other admin check in the app
+   * now uses that group. The server-side counterpart is IsChannelOwnerOrAdmin
+   * (backend/apps/security/permissions.py:87-95), whose admin bypass lists
+   * SUPER_ADMIN and HOSPITAL_ADMIN only — CENTER_ADMIN was added to User.Role
+   * later and never reached that list. Client and server therefore agree today;
+   * adding CENTER_ADMIN here alone would render controls whose requests come back
+   * 403. If centre admins should have channel-admin rights, widen the permission
+   * class first and this line second.
+   */
   const isOwner = channel?.current_user_role === 'OWNER' ||
     user?.role === 'SUPER_ADMIN' || user?.role === 'HOSPITAL_ADMIN';
 

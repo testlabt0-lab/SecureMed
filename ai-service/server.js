@@ -1,19 +1,34 @@
 /**
- * SecureMed Smart Assistant Service
- * ----------------------------------
- * GLM-powered assistant (via z-ai-web-dev-sdk).
+ * SecureMed Smart Assistant Service — RETIRED SIDECAR
+ * ---------------------------------------------------
+ * Superseded by `backend/apps/ai/` (Django views under /api/v1/ai/, Gemini
+ * in-process). Nothing in the platform calls this service any more: Django's
+ * AI_SERVICE_URL is gone, `apps/patients/views.py::ai_summary` builds its
+ * summary in-process, `docker-compose.yml` and `render.yaml` define no service
+ * for it, and the Vite dev proxy no longer forwards /ai here.
  *
- * Endpoints:
+ * It is kept only as reference for the GLM (z-ai-web-dev-sdk) integration, and
+ * it now refuses to start unless you opt in explicitly. That gate exists because
+ * of what this file is: five endpoints that accept patient data and relay it to
+ * a third-party model, with no authentication, no rate limiting and no audit
+ * trail. Django's replacements sit behind JWT, per-role permission checks,
+ * module gating (`ensure_module_enabled`) and `anonymize_patient_data`. Publishing
+ * this one on a public port — which the old deploy guide told you to do — hands
+ * anyone who finds it a free model endpoint and a PHI sink outside the audit log.
+ *
+ * Endpoints (all POST except /health, all require the bearer token):
  *   POST /ask           { question, context?, history? }        → { answer }
  *   POST /case-summary  { patient, records, channels, meta? }   → { summary, generated_at }
+ *   POST /analyze-image { imageBase64, prompt? }                → { analysis }
+ *   POST /structure-note{ text }                                → { structuredNote }
+ *   POST /triage        { patient?, symptoms?, vitals?, … }     → { triageResult }
  *   GET  /health                                                → { status }
  *
- * Runs on port 8100 (proxied by the Vite dev server at /ai).
- * The /case-summary endpoint is called server-side by Django
- * (backend/apps/patients/views.py → ai_summary action) AFTER it has
- * verified the requester's permissions — the AI never sees data the
- * requester is not allowed to view.
+ * To run it anyway:
+ *   AI_SERVICE_TOKEN=<32+ random chars> node server.js     # binds 127.0.0.1:8100
+ *   HOST=0.0.0.0 …                                          # only behind a proxy
  */
+import crypto from 'node:crypto';
 import express from 'express';
 import ZAI from 'z-ai-web-dev-sdk';
 
@@ -21,6 +36,33 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 
 const PORT = process.env.PORT || 8100;
+// Loopback by default. The previous version listened on every interface, so on
+// any machine with a routable address the endpoints below were reachable from
+// the network the moment the process started.
+const HOST = process.env.HOST || '127.0.0.1';
+const TOKEN = process.env.AI_SERVICE_TOKEN || '';
+
+if (TOKEN.length < 32) {
+  console.error(
+    '[ai-service] refusing to start: AI_SERVICE_TOKEN must be set to at least ' +
+    '32 random characters.\n' +
+    '[ai-service] this sidecar is retired — the supported AI endpoints are ' +
+    'Django views under /api/v1/ai/ (backend/apps/ai/).'
+  );
+  process.exit(1);
+}
+
+/** Constant-time bearer check; /health stays open for container probes. */
+function requireToken(req, res, next) {
+  const header = req.get('authorization') || '';
+  const presented = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const a = Buffer.from(presented);
+  const b = Buffer.from(TOKEN);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'غير مصرح' });
+  }
+  return next();
+}
 
 let zaiInstance = null;
 async function getZAI() {
@@ -42,8 +84,12 @@ const SYSTEM_PROMPT = `أنت «المساعد الذكي» في منصة Secure
 7. اجعل الإجابة مركزة: من 2 إلى 8 أسطر كحد أقصى عدا طلب شرح مفصل.`;
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'healthy', service: 'SecureMed AI Assistant' });
+  res.json({ status: 'healthy', service: 'SecureMed AI Assistant (retired sidecar)' });
 });
+
+// Registered after /health, so the container probe still works while every
+// route below — and every unknown path — needs the bearer token.
+app.use(requireToken);
 
 // ============================================================
 // Clinical case summary (called by Django backend, server-to-server)
@@ -282,6 +328,6 @@ app.post('/triage', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`[ai-service] SecureMed Smart Assistant listening on :${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`[ai-service] retired sidecar listening on ${HOST}:${PORT} (bearer token required)`);
 });

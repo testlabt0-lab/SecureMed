@@ -1,12 +1,26 @@
 # ============================================================
-# SecureMed AI microservice — GLM assistant & case summaries
+# SecureMed AI microservice — RETIRED (see server.js header)
+#
+# Superseded by backend/apps/ai/ (Django + Gemini, behind JWT and per-role
+# permission checks). Kept as reference only; no compose file or Render
+# blueprint builds it any more.
+#
 #   docker build -t securemed-ai ./ai-service
-#   docker run -p 8100:8100 -e ZAI_API_KEY=... securemed-ai
+#   docker run -p 127.0.0.1:8100:8100 \
+#     -e AI_SERVICE_TOKEN=<32+ random chars> -e ZAI_API_KEY=... securemed-ai
+#
+# Publish it to a public interface and you have an unauthenticated-by-design
+# relay of patient data to a third-party model, outside the platform's audit
+# trail — the bearer token is the only thing standing in the way.
 # ============================================================
 FROM node:20-alpine
 
+# HOST=0.0.0.0 is safe *inside* a container (its own network namespace); what
+# the host exposes is decided by -p above. server.js defaults to loopback for
+# the bare-metal case.
 ENV NODE_ENV=production \
-    PORT=8100
+    PORT=8100 \
+    HOST=0.0.0.0
 
 WORKDIR /srv
 

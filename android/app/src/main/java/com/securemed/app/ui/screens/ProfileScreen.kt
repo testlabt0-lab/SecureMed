@@ -1,16 +1,18 @@
 package com.securemed.app.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,23 +22,57 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.securemed.app.auth.BiometricManager
 import com.securemed.app.data.local.SecurePreferences
+import com.securemed.app.ui.AuthUiState
+import com.securemed.app.ui.AuthViewModel
 import com.securemed.app.ui.theme.ThemeController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     onLogout: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val biometricManager = remember { BiometricManager(context) }
     val isBiometricAvailable = remember { biometricManager.isBiometricAvailable() }
     var showEnrollDialog by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * Enrollment state as this screen sees it. It has to be Compose state:
+     * reading `SecurePreferences.biometricEnabled` directly, as every branch below
+     * used to, gives a value Compose cannot observe, so the row kept saying
+     * "اضغط للتفعيل" after a successful enrollment until something else forced a
+     * recomposition.
+     */
+    var biometricEnabled by remember { mutableStateOf(SecurePreferences.biometricEnabled) }
+
+    val authState by authViewModel.uiState.collectAsState()
+    val authError by authViewModel.errorMessage.collectAsState()
+
+    // The server is the only authority on whether this device is enrolled, so the
+    // outcome is reported from its answer — not from the prompt closing.
+    LaunchedEffect(authState) {
+        when (authState) {
+            is AuthUiState.BiometricEnrolled -> {
+                biometricEnabled = true
+                statusMessage = "✓ تم تسجيل البصمة على هذا الجهاز"
+                authViewModel.resetState()
+            }
+            is AuthUiState.Error -> {
+                statusMessage = "❌ فشل تسجيل البصمة: ${authError ?: "خطأ غير معروف"}"
+                authViewModel.resetState()
+            }
+            else -> Unit
+        }
+    }
 
     // Theme preference: null = follow the system
     val darkPreference by ThemeController.darkMode.collectAsState()
@@ -48,7 +84,14 @@ fun ProfileScreen(
                 title = { Text("الملف الشخصي") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "رجوع")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "رجوع")
+                    }
+                },
+                actions = {
+                    // The app's only way into the settings screen — it was
+                    // registered in the NavHost with nothing navigating to it.
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, "الإعدادات")
                     }
                 }
             )
@@ -123,7 +166,7 @@ fun ProfileScreen(
                     // Biometric toggle
                     Surface(
                         onClick = {
-                            if (isBiometricAvailable && !SecurePreferences.biometricEnabled) {
+                            if (isBiometricAvailable && !biometricEnabled) {
                                 showEnrollDialog = true
                             }
                         },
@@ -140,7 +183,7 @@ fun ProfileScreen(
                             Icon(
                                 Icons.Default.Fingerprint,
                                 null,
-                                tint = if (SecurePreferences.biometricEnabled)
+                                tint = if (biometricEnabled)
                                     MaterialTheme.colorScheme.secondary
                                 else MaterialTheme.colorScheme.outline
                             )
@@ -153,15 +196,15 @@ fun ProfileScreen(
                                 )
                                 Text(
                                     text = if (!isBiometricAvailable) "البصمة غير متاحة على هذا الجهاز"
-                                    else if (SecurePreferences.biometricEnabled) "✓ مفعلة"
+                                    else if (biometricEnabled) "✓ مفعلة"
                                     else "اضغط للتفعيل",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (SecurePreferences.biometricEnabled)
+                                    color = if (biometricEnabled)
                                         MaterialTheme.colorScheme.secondary
                                     else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (SecurePreferences.biometricEnabled) {
+                            if (biometricEnabled) {
                                 Text(
                                     "✓",
                                     color = MaterialTheme.colorScheme.secondary,
@@ -291,8 +334,8 @@ fun ProfileScreen(
             text = {
                 Column {
                     Text(
-                        "سيتم تسجيل بصمتك بشكل آمن. لن يتم تخزين البصمة الأصلية، " +
-                        "بل سيتم تخزين hash مشفر فقط (SHA-256 + salt)."
+                        "تُنشئ البصمة مفتاحاً خاصاً داخل مخزن مفاتيح الجهاز؛ " +
+                        "لا تُرسل بصمتك ولا أي صورة عنها إلى الخادم، بل المفتاح العام فقط."
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -307,16 +350,28 @@ fun ProfileScreen(
                     onClick = {
                         showEnrollDialog = false
                         val activity = context as? FragmentActivity
-                        activity?.let {
+                        if (activity == null) {
+                            statusMessage = "❌ تعذر عرض نافذة البصمة"
+                        } else {
                             biometricManager.authenticate(
-                                activity = it,
+                                activity = activity,
                                 title = "تسجيل البصمة",
                                 subtitle = "SecureMed",
                                 description = "ضع إصبعك على المستشعر لتسجيل بصمتك",
+                                // No CryptoObject: the key does not exist yet, and
+                                // this prompt is only a presence check. What the
+                                // server trusts at enrollment is the authenticated
+                                // session, and thereafter the fact that the key it
+                                // registered cannot sign without a finger.
                                 cryptoObject = null,
-                                onSuccess = { template ->
-                                    SecurePreferences.biometricEnabled = true
-                                    statusMessage = "✓ تم تسجيل البصمة بنجاح!"
+                                onSuccess = {
+                                    // This used to set `biometricEnabled = true`
+                                    // and report success without sending anything
+                                    // anywhere. The server never learned of the
+                                    // device, so the login screen then offered a
+                                    // fingerprint button that could not work.
+                                    statusMessage = "جارٍ تسجيل الجهاز…"
+                                    authViewModel.enrollBiometric(deviceLabel())
                                 },
                                 onError = { error ->
                                     statusMessage = "❌ فشل: $error"
@@ -337,6 +392,18 @@ fun ProfileScreen(
         )
     }
 }
+
+/**
+ * How this phone is labelled in the account's device list on the server.
+ *
+ * A name only, for the user's benefit when revoking a device. Identity is the
+ * `device_id` in [SecurePreferences], which is stable and survives logout.
+ */
+private fun deviceLabel(): String =
+    listOf(Build.MANUFACTURER, Build.MODEL)
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+        .ifBlank { "جهاز أندرويد" }
 
 @Composable
 private fun ProfileInfoItem(

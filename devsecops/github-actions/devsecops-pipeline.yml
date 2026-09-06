@@ -1,7 +1,46 @@
-# DevSecOps Pipeline for SecureMed
-# This workflow runs on every push and PR to ensure security at every stage
+# DevSecOps pipeline for SecureMed — REFERENCE DESIGN, NOT EXECUTED.
+#
+# GitHub Actions reads workflows from .github/workflows/ only. This file sits in
+# devsecops/github-actions/, so none of it has ever run: the daily 02:00 scan below has
+# never fired once, and no push or pull request has ever been gated by any of the seven
+# stages. The comment that used to be on this line — "runs on every push and PR to
+# ensure security at every stage" — was therefore the opposite of true, and it is the
+# kind of claim that gets read as evidence during an audit.
+#
+# It is kept here, and kept out of .github/workflows/, because most of it would either
+# fail immediately or pass dishonestly if it were activated as written:
+#
+#   Stage 1 (sast) — `returntocorp/semgrep-action@v1` is deprecated; the organisation
+#     renamed to `semgrep/`. Semgrep now runs as `semgrep scan` in
+#     .github/workflows/security-scan.yml. SonarQube needs a SONAR_TOKEN and a server
+#     that this project does not have.
+#   Stage 2 (backend-test) — cannot start. It sets DJANGO_SETTINGS_MODULE=config.settings
+#     with DEBUG: False and passes neither SECRET_KEY nor ENCRYPTION_KEY, and settings.py
+#     has no fallback for SECRET_KEY outside DEBUG, so `manage.py migrate` aborts with
+#     UndefinedValueError before any test is collected. There is also no redis service,
+#     while DEBUG=False selects django_redis with IGNORE_EXCEPTIONS: False. Both bandit
+#     invocations end in `|| true`. .github/workflows/tests.yml does this properly.
+#   Stage 3 (frontend-test) — eslint and npm audit both end in `|| true`, so neither can
+#     fail the build; the eslint step also assumes a config that the frontend does not
+#     currently ship.
+#   Stage 4 (android-build) — `mobSF/mobsf-action@v1` is not a maintained action and
+#     scanning a debug APK says little about the release build.
+#     .github/workflows/android.yml covers lint, unit tests and the APK.
+#   Stage 5 (container-scan) — the one stage worth keeping, now promoted to
+#     .github/workflows/container-scan.yml: without `exit-code: '0'` (which turned every
+#     finding into a pass) and without a mutable third-party action ref, for the reason
+#     documented in that file under CVE-2026-33634.
+#   Stage 6 (dast) — starts the container with no SECRET_KEY or DATABASE_URL, so the
+#     process exits at import and the `curl -f http://localhost:8000/health/` guard
+#     fails the job before ZAP is reached. ZAP itself carries `fail_action: false`.
+#   Stage 7 (deploy) — prints "All security checks passed!" and cuts a GitHub Release on
+#     every push to main. Every gate it depends on is `|| true`, `fail_action: false` or
+#     `exit-code: '0'`, so the message is unconditional, and the Release attaches a
+#     *debug* APK — unsigned, debuggable, and not what should ever be published.
+#
+# Reviving any stage means moving it into .github/workflows/ and fixing the above first.
 
-name: 🔒 DevSecOps Pipeline
+name: 🔒 DevSecOps Pipeline (reference design — not run by GitHub)
 
 on:
   push:

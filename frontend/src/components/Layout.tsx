@@ -13,21 +13,32 @@ import {
 import { useState, useEffect, useRef, Suspense } from 'react';
 import toast from 'react-hot-toast';
 import { notificationsApi } from '../api/extendedApis';
+import {
+  roleLabel, ADMIN_ROLES, CARE_TEAM_ROLES, OVERSIGHT_ROLES, REPORTING_ROLES,
+  REPORT_EXPORT_ROLES, PHARMACY_ROLES, BILLING_ROLES, LAB_ROLES, WARD_ROLES,
+  TELEMEDICINE_ROLES, PLATFORM_OWNER_ROLES,
+} from '../constants/roles';
 import GlobalSearch from './GlobalSearch';
 import AIAssistant from './AIAssistant';
+import { useRealtimeNotifications } from '../hooks/useRealtimeNotifications';
 
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'مدير النظام',
-  HOSPITAL_ADMIN: 'مدير المستشفى',
-  CENTER_ADMIN: 'مدير مركز',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع أمني',
-  PATIENT: 'مريض',
-  ACCOUNTANT: 'محاسب',
-  RECEPTIONIST: 'موظف استقبال',
+/**
+ * Which stored preference silences a pop-up for a given notification type.
+ *
+ * The server stores `push_*` but never reads them — the browser notification is
+ * decided here — so without this map the three toggles in الإعدادات ← الإشعارات
+ * would save and change nothing. The buckets deliberately mirror the email
+ * mapping in backend/apps/notifications/utils.py::send_notification so one label
+ * means the same thing on both channels. Types absent from the map (LOGIN_ALERT,
+ * BIOMETRIC_ENROLLED, CRITICAL_PATIENT, PERMISSION_*, SYSTEM_ANNOUNCEMENT) are
+ * always delivered, matching the backend, which leaves send_email untouched.
+ */
+const pushPrefByType: Record<string, string> = {
+  CHANNEL_INVITATION: 'push_channel_updates',
+  CHANNEL_UPDATE: 'push_channel_updates',
+  CHANNEL_CLOSED: 'push_channel_updates',
+  NEW_MEDICAL_RECORD: 'push_medical_records',
+  SECURITY_ALERT: 'push_security_alerts',
 };
 
 export default function Layout() {
@@ -53,20 +64,43 @@ export default function Layout() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Live push over ws/notifications/. It invalidates ['unread-count'] itself, so
+  // the query below only has to describe how to fetch the number.
+  const { connected: liveNotifications } = useRealtimeNotifications();
+
   // Fetch unread notifications count
   const { data: unreadData } = useQuery({
     queryKey: ['unread-count'],
     queryFn: () => notificationsApi.unreadCount(),
-    refetchInterval: 20000, // Refresh every 20 seconds
+    // Polling is the fallback, not the mechanism: a socket can be blocked by a
+    // corporate proxy or a browser extension, and the badge still has to be right
+    // in that case. Two minutes while the socket is up, 20 seconds without it.
+    refetchInterval: liveNotifications ? 120000 : 20000,
     enabled: !!user,
   });
 
   const unreadCount = unreadData?.data?.unread_count || 0;
 
+  // Pop-up preferences. Kept in a ref so the effect below can read the latest
+  // values without listing them as dependencies — re-running on a preference
+  // change would compare against a stale `lastUnread` and fire a spurious alert.
+  const { data: prefsData } = useQuery({
+    queryKey: ['notification-prefs'],
+    queryFn: () => notificationsApi.preferences(),
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  const pushPrefs = useRef<Record<string, any>>({});
+  pushPrefs.current = prefsData?.data || {};
+
   // Browser push notifications when new ones arrive
   useEffect(() => {
     if (lastUnread.current !== null && unreadCount > lastUnread.current) {
       const showBrowserNotification = async () => {
+        const prefs = pushPrefs.current;
+        // in_app_all is the master mute for pop-ups; the bell and the
+        // notifications page still show everything.
+        if (prefs.in_app_all === false) return;
         if (!('Notification' in window)) return;
         let permission = Notification.permission;
         if (permission === 'default') {
@@ -76,6 +110,8 @@ export default function Layout() {
           try {
             const { data: listData } = await notificationsApi.list({ page_size: 1 });
             const latest = listData?.results?.[0];
+            const prefKey = latest && pushPrefByType[latest.notification_type];
+            if (prefKey && prefs[prefKey] === false) return;
             const n = new Notification('SecureMed — إشعار جديد', {
               body: latest?.title || `لديك ${unreadCount} إشعارات غير مقروءة`,
               icon: '/favicon.svg',
@@ -122,26 +158,31 @@ export default function Layout() {
     }
   };
 
+  // Sidebar visibility uses the same capability groups as the route guards in
+  // App.tsx. They were two independent copies of the same arrays, which is how
+  // they drifted: a role dropped from a guard kept its menu entry and got a
+  // redirect to /dashboard on click. Items with no `roles` key are open to every
+  // authenticated user and match a role-free <Route>.
   const navItems = [
     { path: '/dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
-    { path: '/channels', label: 'القنوات والحالات', icon: FolderKanban, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'] },
-    { path: '/patients', label: 'المرضى', icon: Users, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'] },
+    { path: '/channels', label: 'القنوات والحالات', icon: FolderKanban, roles: CARE_TEAM_ROLES },
+    { path: '/patients', label: 'المرضى', icon: Users, roles: CARE_TEAM_ROLES },
     { path: '/appointments', label: 'المواعيد', icon: Calendar },
-    { path: '/telemedicine', label: 'العيادة الافتراضية', icon: MonitorSmartphone, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'DOCTOR'] },
-    { path: '/analytics', label: 'التحليلات', icon: BarChart3, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR', 'DOCTOR', 'ACCOUNTANT'] },
-    { path: '/reports', label: 'التقارير', icon: FileText, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR', 'DOCTOR', 'ACCOUNTANT'] },
-    { path: '/security', label: 'لوحة الأمان', icon: Shield, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR'] },
-    { path: '/security/devices', label: 'إدارة الأجهزة والحظر', icon: MonitorSmartphone, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR'] },
-    { path: '/security/login-history', label: 'سجل محاولات الدخول', icon: History, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR'] },
+    { path: '/telemedicine', label: 'العيادة الافتراضية', icon: MonitorSmartphone, roles: TELEMEDICINE_ROLES },
+    { path: '/analytics', label: 'التحليلات', icon: BarChart3, roles: REPORTING_ROLES },
+    { path: '/reports', label: 'التقارير', icon: FileText, roles: REPORT_EXPORT_ROLES },
+    { path: '/security', label: 'لوحة الأمان', icon: Shield, roles: OVERSIGHT_ROLES },
+    { path: '/security/devices', label: 'إدارة الأجهزة والحظر', icon: MonitorSmartphone, roles: OVERSIGHT_ROLES },
+    { path: '/security/login-history', label: 'سجل محاولات الدخول', icon: History, roles: OVERSIGHT_ROLES },
     { path: '/security/settings', label: 'إعدادات الأمان', icon: KeyRound },
-    { path: '/audit', label: 'سجلات التدقيق', icon: ScrollText, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR'] },
-    { path: '/users', label: 'المستخدمون', icon: Users, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN'] },
-    { path: '/pharmacy', label: 'الصيدلية', icon: Pill, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'PHARMACIST', 'DOCTOR'] },
-    { path: '/billing', label: 'الفواتير والتأمين', icon: CreditCard, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'AUDITOR', 'ACCOUNTANT', 'RECEPTIONIST'] },
-    { path: '/lab', label: 'المختبر والتحاليل', icon: FileText, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'LAB_TECH', 'DOCTOR'] },
-    { path: '/wards', label: 'إدارة الأسرّة', icon: Building2, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'NURSE', 'DOCTOR'] },
-    { path: '/basins', label: 'الأحواز الصحية', icon: Building2, roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN'] },
-    { path: '/backups', label: 'النسخ الاحتياطي', icon: DatabaseBackup, roles: ['SUPER_ADMIN'] },
+    { path: '/audit', label: 'سجلات التدقيق', icon: ScrollText, roles: OVERSIGHT_ROLES },
+    { path: '/users', label: 'المستخدمون', icon: Users, roles: ADMIN_ROLES },
+    { path: '/pharmacy', label: 'الصيدلية', icon: Pill, roles: PHARMACY_ROLES },
+    { path: '/billing', label: 'الفواتير والتأمين', icon: CreditCard, roles: BILLING_ROLES },
+    { path: '/lab', label: 'المختبر والتحاليل', icon: FileText, roles: LAB_ROLES },
+    { path: '/wards', label: 'إدارة الأسرّة', icon: Building2, roles: WARD_ROLES },
+    { path: '/basins', label: 'الأحواز الصحية', icon: Building2, roles: ADMIN_ROLES },
+    { path: '/backups', label: 'النسخ الاحتياطي', icon: DatabaseBackup, roles: PLATFORM_OWNER_ROLES },
     { path: '/notifications', label: 'الإشعارات', icon: Bell, badge: unreadCount },
     { path: '/profile', label: 'الملف الشخصي', icon: UserIcon },
     { path: '/settings', label: 'الإعدادات', icon: Settings },
@@ -290,7 +331,7 @@ export default function Layout() {
               {user?.full_name}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {user ? roleLabels[user.role] : ''}
+              {roleLabel(user?.role)}
             </p>
           </div>
           <motion.button

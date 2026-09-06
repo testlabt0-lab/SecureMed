@@ -4,7 +4,7 @@
 #
 #  أوضاع التشغيل:
 #    1. عرض سريع (SQLite + بدون Redis):
-#         docker compose up backend ai
+#         docker compose up backend
 #
 #    2. مع PostgreSQL:
 #         docker compose --profile db up
@@ -13,6 +13,9 @@
 #         docker compose --profile db --profile full up
 #
 #  متغيرات البيئة: backend/.env (راجع backend/.env.example)
+#
+#  المساعد الذكي يعمل داخل Django نفسه عبر GEMINI_API_KEY — لم تبقَ خدمة `ai`
+#  منفصلة (كانت خدمة Node على المنفذ 8100 ولم يعد أحد ينادِيها).
 # =============================================================================
 
 services:
@@ -81,57 +84,44 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ─────────────────────────────────────────────────── AI Service ──────────────
-  ai:
-    build:
-      context: ./ai-service
-    environment:
-      - ZAI_API_KEY=${ZAI_API_KEY:-}
-      - PORT=8100
-    expose:
-      - "8100"
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "node", "-e",
-             "fetch('http://127.0.0.1:8100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
   # ─────────────────────────────────────────────────── Backend ─────────────────
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     env_file:
       - path: backend/.env
         required: false
     environment:
-      AI_SERVICE_URL: http://ai:8100
-      ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,${DOMAIN:-}"
-      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:8000}"
-      DATABASE_URL: "${DATABASE_URL:-}"
-      DB_HOST: "${DB_HOST:-}"
-      REDIS_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
-      CELERY_BROKER_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
-      USE_S3_STORAGE: "${USE_S3_STORAGE:-0}"
-      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
-      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
-      AWS_STORAGE_BUCKET_NAME: "${AWS_STORAGE_BUCKET_NAME:-}"
-      AWS_S3_REGION_NAME: "${AWS_S3_REGION_NAME:-us-east-1}"
+      # Compose owns these: they describe the topology inside the network and are
+      # meant to win over backend/.env.
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,${DOMAIN:-}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8000}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
+      # Pass-through only. Written as `- NAME` rather than `NAME: "${NAME:-}"`
+      # because the mapping form *always* sets the variable: with the shell value
+      # absent it set it to the empty string, which takes precedence over env_file
+      # and so silently blanked whatever backend/.env said. DATABASE_URL was the
+      # painful one — configuring the database in .env appeared to do nothing.
+      - GEMINI_API_KEY
+      - DATABASE_URL
+      - DB_HOST
+      - USE_S3_STORAGE
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_STORAGE_BUCKET_NAME
+      - AWS_S3_REGION_NAME
+    # The `ai` sidecar this used to wait on is gone, and with it a startup gate on
+    # a service nothing called: `docker compose up backend` could not start until a
+    # Node container answered a health check. Redis is only in the `full` profile,
+    # hence required: false — the dependency applies when it is actually running.
     depends_on:
-      ai:
+      redis:
         condition: service_healthy
+        required: false
     security_opt:
       - no-new-privileges:true
     deploy:
@@ -149,12 +139,7 @@ services:
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
-             gunicorn config.wsgi:application
-               --bind 0.0.0.0:8000
-               --workers 3
-               --timeout 120
-               --keep-alive 5
-               --access-logfile -"
+             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
     restart: unless-stopped
     volumes:
       - media:/app/backend/media
@@ -165,22 +150,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
     profiles: ["full"]
     env_file:
       - path: backend/.env
         required: false
     environment:
-      AI_SERVICE_URL: http://ai:8100
-      DATABASE_URL: "${DATABASE_URL:-}"
-      DB_HOST: "${DB_HOST:-}"
-      REDIS_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
-      CELERY_BROKER_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
-      USE_S3_STORAGE: "${USE_S3_STORAGE:-0}"
-      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
-      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
-      AWS_STORAGE_BUCKET_NAME: "${AWS_STORAGE_BUCKET_NAME:-}"
-      AWS_S3_REGION_NAME: "${AWS_S3_REGION_NAME:-us-east-1}"
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
+      # Pass-through — see the note on the backend service.
+      - GEMINI_API_KEY
+      - DATABASE_URL
+      - DB_HOST
+      - USE_S3_STORAGE
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_STORAGE_BUCKET_NAME
+      - AWS_S3_REGION_NAME
     depends_on:
       backend:
         condition: service_healthy
@@ -208,22 +193,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
     profiles: ["full"]
     env_file:
       - path: backend/.env
         required: false
     environment:
-      AI_SERVICE_URL: http://ai:8100
-      DATABASE_URL: "${DATABASE_URL:-}"
-      DB_HOST: "${DB_HOST:-}"
-      REDIS_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
-      CELERY_BROKER_URL: "redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0"
-      USE_S3_STORAGE: "${USE_S3_STORAGE:-0}"
-      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
-      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
-      AWS_STORAGE_BUCKET_NAME: "${AWS_STORAGE_BUCKET_NAME:-}"
-      AWS_S3_REGION_NAME: "${AWS_S3_REGION_NAME:-us-east-1}"
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
+      # Pass-through — see the note on the backend service.
+      - GEMINI_API_KEY
+      - DATABASE_URL
+      - DB_HOST
+      - USE_S3_STORAGE
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_STORAGE_BUCKET_NAME
+      - AWS_S3_REGION_NAME
     depends_on:
       backend:
         condition: service_healthy

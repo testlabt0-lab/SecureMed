@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { basinsAPI } from '../api/client';
 import { useAuthStore } from '../store/authStore';
+import { ADMIN_ROLES } from '../constants/roles';
 import toast from 'react-hot-toast';
 
 const typeLabels: Record<string, string> = {
@@ -30,7 +31,27 @@ const typeColors: Record<string, string> = {
 
 export default function Basins() {
   const user = useAuthStore(state => state.user);
-  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'HOSPITAL_ADMIN';
+
+  /**
+   * Who sees the system-wide overview cards.
+   *
+   * Same set as the route guard on /basins (ADMIN_ROLES in App.tsx), because the
+   * `overview` action is a GET and BasinViewSet's IsSuperAdmin lets any
+   * authenticated user read. The literal here was SUPER_ADMIN || HOSPITAL_ADMIN,
+   * written before CENTER_ADMIN existed, so a centre admin reached this page
+   * through the guard and then found the stats row missing.
+   */
+  const canReadOverview = user != null && ADMIN_ROLES.includes(user.role);
+
+  /**
+   * Who may create, edit, delete or toggle modules.
+   *
+   * Deliberately NOT ADMIN_ROLES. Every write on BasinViewSet is gated by
+   * IsSuperAdmin (backend/apps/basins/views.py:18-27), which checks
+   * role == 'SUPER_ADMIN' and nothing else — a basin is the tenant boundary, so
+   * a hospital or centre admin cannot mint or retire one. Widening this to the
+   * shared admin group would render buttons whose requests come back 403.
+   */
   const isSuper = user?.role === 'SUPER_ADMIN';
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -44,7 +65,7 @@ export default function Basins() {
   const { data: overviewData } = useQuery({
     queryKey: ['basins-overview'],
     queryFn: () => basinsAPI.overview(),
-    enabled: isAdmin,
+    enabled: canReadOverview,
   });
 
   const toggleModule = useMutation({

@@ -22,24 +22,41 @@ jobs:
         
     - name: Install security tools
       run: |
-        pip install bandit semgrep safety
-        
+        pip install "bandit>=1.7,<2" "semgrep>=1.60,<2" "safety>=3,<4"
+
+    # `|| true` was appended to all three scans, so the job was green whatever they
+    # found — the badge said "Security Scans passed" while nobody looked at the
+    # artifacts. Bandit now gates the build: it analyses our own code, is offline and
+    # deterministic, so a non-zero exit is a real finding and not infrastructure
+    # noise. It also gets `-c` now; without it the .bandit.yml profile was never
+    # loaded and bandit silently ran its own defaults instead.
     - name: Run Bandit (Python SAST)
       run: |
-        bandit -r backend/apps/ -ll -ii -f json -o bandit-results.json || true
-        
-    - name: Run Semgrep
-      run: |
-        semgrep scan --config auto --json -o semgrep-results.json || true
-        
-    - name: Run Safety (Dependency Vulnerabilities)
-      run: |
-        safety check -r backend/requirements.txt --json > safety-results.json || true
+        bandit -c backend/.bandit.yml -r backend/apps/ -ll -ii -f json -o bandit-results.json
 
+    # Semgrep `--config auto` and Safety both fetch rules/advisories at run time, so
+    # they can fail for reasons unrelated to this commit (rule-set changes, rate
+    # limits, Safety's authentication requirement). `continue-on-error` keeps them
+    # from blocking a merge while still showing up as a failed step in the UI —
+    # unlike `|| true`, which reported success.
+    - name: Run Semgrep
+      continue-on-error: true
+      run: |
+        semgrep scan --config auto --json -o semgrep-results.json
+
+    - name: Run Safety (Dependency Vulnerabilities)
+      continue-on-error: true
+      run: |
+        safety check -r backend/requirements.txt --json > safety-results.json
+
+    # Must be `always()`: now that Bandit can fail the job, the default behaviour
+    # would skip this step and throw away the very report needed to triage it.
     - name: Upload Scan Results
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: security-scan-results
+        if-no-files-found: warn
         path: |
           bandit-results.json
           semgrep-results.json

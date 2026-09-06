@@ -163,15 +163,19 @@ export const appointmentsAPI = {
 
 // ============== Settings API ==============
 export const settingsAPI = {
-  totpStatus: () => api.get('/auth/2fa/status/'),
-  totpSetup: () => api.post('/auth/2fa/setup/'),
-  totpVerify: (code: string) => api.post('/auth/2fa/verify/', { code }),
-  totpDisable: (code: string) => api.post('/auth/2fa/disable/', { code }),
+  // The 2FA endpoints live in `mfaApi` above; these are aliases kept because the
+  // settings screens import them under these names. They delegate rather than
+  // repeat the URLs — the previous copy meant moving an endpoint fixed one caller
+  // and silently broke the other.
+  totpStatus: mfaApi.status,
+  totpSetup: mfaApi.setup,
+  totpVerify: mfaApi.verify,
+  totpDisable: mfaApi.disable,
   sessions: () => api.get('/auth/sessions/'),
   revokeSession: (sessionId: string) => api.post(`/auth/sessions/${sessionId}/revoke/`),
   revokeAllSessions: () => api.post('/auth/sessions/revoke_all/'),
-  notificationPrefs: () => api.get('/notifications/preferences/'),
-  updateNotificationPrefs: (data: any) => api.patch('/notifications/preferences/', data),
+  notificationPrefs: notificationsApi.preferences,
+  updateNotificationPrefs: notificationsApi.updatePreferences,
 };
 
 // ============== Pharmacy API ==============

@@ -51,7 +51,7 @@ class Channel (models .Model ):
     verbose_name =_ ('مالك القناة')
     )
 
-    # Comment_179
+    # Patient reference
     patient =models .ForeignKey (
     'patients.Patient',
     on_delete =models .CASCADE ,
@@ -59,7 +59,7 @@ class Channel (models .Model ):
     verbose_name =_ ('المريض')
     )
 
-    # Comment_180
+    # Basin linkage (plan requirement: cases are linked to a health basin)
     basin =models .ForeignKey (
     'basins.Basin',on_delete =models .PROTECT ,
     null =True ,blank =True ,
@@ -71,7 +71,7 @@ class Channel (models .Model ):
     choices =Status .choices ,default =Status .ACTIVE 
     )
 
-    # Comment_181
+    # Metadata
     is_encrypted =models .BooleanField (default =True )
     priority =models .CharField (
     _ ('الأولوية'),max_length =10 ,
@@ -146,7 +146,7 @@ class ChannelMembership (models .Model ):
         CONTRIBUTOR ='CONTRIBUTOR',_ ('مساهم')
         VIEWER ='VIEWER',_ ('مشاهد')
 
-        # Comment_182
+        # Permission definitions per role
     ROLE_PERMISSIONS ={
     Role .OWNER :['view','edit','delete','manage_members','manage_permissions','close'],
     Role .MODERATOR :['view','edit','manage_content'],
@@ -190,7 +190,7 @@ class ChannelMembership (models .Model ):
     class Meta :
         verbose_name =_ ('عضوية')
         verbose_name_plural =_ ('العضويات')
-        # Comment_183
+        # DV: ONE role per user per channel
         unique_together =['channel','user']
         ordering =['-created_at']
         indexes =[
@@ -332,7 +332,7 @@ class ChannelInvitation (models .Model ):
         self .status =self .Status .ACCEPTED 
         self .save (update_fields =['status'])
 
-        # Comment_184
+        # Create membership
         membership ,created =ChannelMembership .objects .get_or_create (
         channel =self .channel ,
         user =self .invitee ,

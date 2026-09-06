@@ -62,7 +62,7 @@ class User (AbstractUser ):
         RECEPTIONIST = 'RECEPTIONIST', _('موظف استقبال')
 
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
-    username =None # Comment_4
+    username =None # Use email instead
     email =models .EmailField (_ ('البريد الإلكتروني'),unique =True ,db_index =True )
     full_name =models .CharField (_ ('الاسم الكامل'),max_length =255 ,db_index =True )
     phone =models .CharField (_ ('الهاتف'),max_length =20 ,blank =True )
@@ -75,14 +75,14 @@ class User (AbstractUser ):
     department =models .CharField (_ ('القسم'),max_length =100 ,blank =True )
     specialization =models .CharField (_ ('التخصص'),max_length =100 ,blank =True )
 
-    # Comment_5
+    # Basin linkage (plan requirement: the system must be linked to basins)
     basin =models .ForeignKey (
     'basins.Basin',on_delete =models .PROTECT ,
     null =True ,blank =True ,
     related_name ='users',verbose_name =_ ('الحوض الصحي'),
     )
 
-    # Comment_6
+    # Security fields
     is_biometric_enabled =models .BooleanField (
     _ ('المصادقة البيومترية مفعلة'),default =False 
     )
@@ -90,13 +90,13 @@ class User (AbstractUser ):
     last_login_ip =models .GenericIPAddressField (null =True ,blank =True )
     failed_login_attempts =models .PositiveIntegerField (default =0 )
     locked_until =models .DateTimeField (null =True ,blank =True )
-    mfa_secret =models .CharField (max_length =255 ,blank =True )# Comment_7
+    mfa_secret =models .CharField (max_length =255 ,blank =True )# Encrypted
 
-    # Comment_8
+    # Two-factor authentication (TOTP)
     mfa_enabled =models .BooleanField (_ ('التحقق بخطوتين مفعل'),default =False )
     mfa_created_at =models .DateTimeField (null =True ,blank =True )
 
-    # Comment_9
+    # Audit fields
     created_at =models .DateTimeField (auto_now_add =True )
     updated_at =models .DateTimeField (auto_now =True )
 
@@ -129,10 +129,10 @@ class User (AbstractUser ):
     def lock_account (self ,minutes =None ):
         """Lock the account using exponential backoff based on failed attempts or explicit minutes."""
         if minutes is None :
-        # Comment_10
+        # Base lock time is 5 minutes, doubling each time after the 3rd attempt
             power =max (0 ,self .failed_login_attempts -3 )
             minutes =5 *(2 **power )
-            # Comment_11
+            # Max lock out time of 24 hours
             minutes =min (minutes ,1440 )
 
         self .locked_until =timezone .now ()+timezone .timedelta (minutes =minutes )
@@ -146,14 +146,23 @@ class User (AbstractUser ):
 
 
 class BiometricProfile (models .Model ):
-    """
-    Stores biometric authentication data.
+    """One public-key credential, enrolled on one device.
 
     Security requirement #4: تسجيل الدخول بالبصمة + الاعتماد على البصمة
-    Implements secure biometric authentication using:
-    - Salted hash of fingerprint template (never store raw biometric data)
-    - Challenge-response mechanism
-    - Per-device binding
+
+    The server stores only the **public** key. Logging in means signing a
+    server-issued, single-use challenge with a private key that lives in the
+    device's secure hardware (Android Keystore / Secure Enclave / platform
+    authenticator) and is released only after the biometric prompt succeeds.
+    Verification happens in ``apps.security.crypto``.
+
+    Until this was rebuilt, the model instead stored ``biometric_hash``: a salted
+    hash of a "biometric template" string the client sent on *every* login. That
+    made the template a shared secret — a password that the user cannot ever
+    change — and it meant the server could not distinguish a real fingerprint
+    from any client that had once seen the string. ``biometric_hash``, ``salt``
+    and ``private_key_encrypted`` are retained so that existing rows migrate
+    cleanly, but nothing in the authentication path reads or writes them.
     """
 
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
@@ -169,13 +178,26 @@ class BiometricProfile (models .Model ):
     choices =[('ANDROID','Android'),('IOS','iOS'),('WEB','Web')]
     )
 
-    # Comment_12
-    biometric_hash =models .TextField (_ ('الهاش البيوميتري المشفر'))
-    salt =models .CharField (_ ('الملح'),max_length =64 )
+    # Deprecated by the WebAuthn rebuild — see the class docstring. Kept nullable
+    # so old rows survive; new enrollments leave both empty.
+    biometric_hash =models .TextField (_ ('الهاش البيوميتري المشفر'),blank =True ,default ='')
+    salt =models .CharField (_ ('الملح'),max_length =64 ,blank =True ,default ='')
 
-    # Comment_13
+    # SPKI PEM of the enrolled public key. The matching private key never leaves
+    # the device. `private_key_encrypted` is a leftover from the old design and
+    # must stay empty: a relying party that holds the private key has given up
+    # the only property that makes this stronger than a password.
     public_key =models .TextField (_ ('المفتاح العام'),blank =True )
     private_key_encrypted =models .TextField (_ ('المفتاح الخاص المشفر'),blank =True )
+
+    # PublicKeyCredential.rawId, base64url. Set for WEB (WebAuthn) credentials and
+    # returned in allowCredentials so the browser knows which key to use; empty on
+    # native platforms, where device_id identifies the credential on its own.
+    credential_id =models .TextField (_ ('معرف بيانات الاعتماد'),blank =True ,default ='')
+
+    # authenticatorData signature counter, used for cloned-credential detection.
+    # Platform authenticators usually report 0 forever, so a 0 here is normal.
+    sign_count =models .PositiveBigIntegerField (_ ('عدّاد التوقيع'),default =0 )
 
     is_active =models .BooleanField (_ ('نشط'),default =True )
     last_used =models .DateTimeField (null =True ,blank =True )
@@ -198,9 +220,12 @@ class BiometricProfile (models .Model ):
 
 
 class BiometricChallenge (models .Model ):
-    """
-    One-time challenge for biometric authentication.
-    Prevents replay attacks by using challenge-response mechanism.
+    """A single-use, short-lived nonce for one biometric login attempt.
+
+    `challenge` is 32 random bytes, base64url. The server keeps no "expected
+    response": the proof is a signature over these bytes, checked against the
+    public key on `profile`. `expected_response` is a leftover from the previous
+    design and stays empty.
     """
 
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
@@ -208,8 +233,16 @@ class BiometricChallenge (models .Model ):
     User ,on_delete =models .CASCADE ,
     related_name ='biometric_challenges'
     )
+    # Bound to the device that asked for it. Without this the challenge was bound
+    # to the user only, so a credential enrolled on device A could answer a
+    # challenge issued for device B — the "per-device binding" the old docstring
+    # claimed did not exist anywhere in the flow.
+    profile =models .ForeignKey (
+    'accounts.BiometricProfile',on_delete =models .CASCADE ,
+    related_name ='challenges',null =True ,blank =True
+    )
     challenge =models .TextField (_ ('التحدي'))
-    expected_response =models .TextField (_ ('الرد المتوقع المشفر'))
+    expected_response =models .TextField (_ ('الرد المتوقع المشفر'),blank =True ,default ='')
     expires_at =models .DateTimeField (_ ('تنتهي في'))
     used =models .BooleanField (default =False )
     created_at =models .DateTimeField (auto_now_add =True )
@@ -218,13 +251,29 @@ class BiometricChallenge (models .Model ):
         ordering =['-created_at']
         indexes =[models .Index (fields =['user','used','expires_at'])]
 
-    @property 
+    @property
     def is_valid (self ):
         return (
-        not self .used and 
+        not self .used and
         self .expires_at >timezone .now ()
         )
 
+    def claim (self ):
+        """Consume the challenge, or return False if someone else already did.
+
+        A single UPDATE ... WHERE used = false decides the winner in the database,
+        so two requests replaying the same challenge_id concurrently cannot both
+        get past it. Reading `is_valid` and then calling `mark_used()` — what the
+        login path used to do — leaves exactly that window open.
+        """
+        claimed =type (self ).objects .filter (
+        pk =self .pk ,used =False ,expires_at__gt =timezone .now ()
+        ).update (used =True )
+        if claimed :
+            self .used =True
+        return bool (claimed )
+
     def mark_used (self ):
-        self .used =True 
+        self .used =True
         self .save (update_fields =['used'])
+

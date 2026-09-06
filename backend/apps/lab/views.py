@@ -106,7 +106,7 @@ class LabResultViewSet (viewsets .ModelViewSet ):
 
     def perform_create (self ,serializer ):
         result =serializer .save ()
-        # Comment_199
+        # Update order status to COMPLETED
         order =result .order 
         order .status ='COMPLETED'
         order .save (update_fields =['status'])
@@ -118,7 +118,7 @@ class LabResultViewSet (viewsets .ModelViewSet ):
         result .validated_by =request .user 
         result .validated_at =timezone .now ()
         result .save (update_fields =['validated_by','validated_at'])
-        # Comment_200
+        # Update order status
         result .order .status ='VALIDATED'
         result .order .save (update_fields =['status'])
         return Response (LabResultSerializer (result ).data )

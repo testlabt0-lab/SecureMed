@@ -12,20 +12,124 @@ from django .utils import timezone
 from apps .security .crypto import encrypt_field ,decrypt_field 
 
 
+VALID_UPLOAD_EXTENSIONS =['.jpg','.jpeg','.png','.gif','.pdf','.dicom','.dcm']
+
+# Magic-byte signatures, keyed by the extension family they are allowed to appear
+# under: (offset, prefix). A file must match one signature for its own extension.
+#
+# An extension is a claim made by the uploader, and this field is served back to
+# clinicians. `evil.html` renamed to `evil.png` passed the old extension-only check,
+# was stored, and then came back through the media endpoint with a MIME type guessed
+# *from the same filename* — so the only thing standing between a stored-XSS payload
+# and a doctor's session was the browser choosing not to sniff. The download path now
+# forces `attachment` for anything outside a small inline allow-list, and this check
+# keeps such a file from being accepted at all.
+_UPLOAD_SIGNATURES ={
+'.jpg':[(0 ,b'\xff\xd8\xff')],
+'.jpeg':[(0 ,b'\xff\xd8\xff')],
+'.png':[(0 ,b'\x89PNG\r\n\x1a\n')],
+'.gif':[(0 ,b'GIF87a'),(0 ,b'GIF89a')],
+'.pdf':[(0 ,b'%PDF-')],
+# DICOM part-10 files carry 'DICM' after a 128-byte preamble. Raw datasets written
+# without a preamble are common in exports from older modalities, and those begin
+# with a group-0002 (file meta) or group-0008 (identifying) tag in little-endian,
+# which is narrow enough to still reject '<html', '<svg', '<?xml', 'MZ' and 'PK'.
+'.dcm':[(128 ,b'DICM'),(0 ,b'\x02\x00'),(0 ,b'\x08\x00')],
+'.dicom':[(128 ,b'DICM'),(0 ,b'\x02\x00'),(0 ,b'\x08\x00')],
+}
+
+# Longest offset+prefix above, so one read covers every signature.
+_SIGNATURE_READ_LEN =132 +8
+
+
 def validate_file_extension (value ):
-    """Validate uploaded file extension."""
-    import os 
+    """Validate an upload by extension *and* by actual content.
+
+    Kept under its original name on purpose: the name is recorded in migration
+    ``patients.0001_initial`` as part of the ``file`` field definition, so extending
+    the body adds content validation without making the model state diverge from the
+    migrations — no ``makemigrations`` run is needed.
+    """
     ext =os .path .splitext (value .name )[1 ].lower ()
-    valid_extensions =['.jpg','.jpeg','.png','.gif','.pdf','.dicom','.dcm']
-    if ext not in valid_extensions :
+    if ext not in VALID_UPLOAD_EXTENSIONS :
         raise ValidationError (
-        f'نوع الملف غير مدعوم. الأنواع المدعومة: {", ".join (valid_extensions )}'
+        f'نوع الملف غير مدعوم. الأنواع المدعومة: {", ".join (VALID_UPLOAD_EXTENSIONS )}'
         )
+
+    # An already-stored file, revalidated by a plain full_clean() on an existing
+    # row. Re-reading it would cost a full decrypt to check bytes that were checked
+    # when they were uploaded. A freshly assigned UploadedFile has no _committed
+    # attribute at all, and a FieldFile holding a new upload has it set to False —
+    # both of which fall through to the content check below.
+    if getattr (value ,'_committed',False ):
+        return
+
+    head =_read_head (value )
+    if head is None :
+        return
+    for offset ,prefix in _UPLOAD_SIGNATURES [ext ]:
+        if head [offset :offset +len (prefix )]==prefix :
+            return
+    raise ValidationError (
+    f'محتوى الملف لا يطابق امتداده ({ext }). قد يكون الملف تالفاً أو من نوع آخر.'
+    )
+
+
+def _read_head (value ):
+    """First bytes of an upload, leaving the file positioned back at the start.
+
+    Returns None when the object cannot be read here — a storage-backed file the
+    caller has closed, for instance. Failing open is deliberate: this validator
+    protects against mislabelled content, and it is not the size or permission
+    check, so it must not turn an unreadable handle into a rejected upload.
+    """
+    try :
+        if hasattr (value ,'seek'):
+            value .seek (0 )
+        head =value .read (_SIGNATURE_READ_LEN )
+    except (OSError ,ValueError ):
+        return None
+    finally :
+        try :
+            if hasattr (value ,'seek'):
+                value .seek (0 )
+        except (OSError ,ValueError ):
+            pass
+    if isinstance (head ,str ):
+        head =head .encode ('utf-8','replace')
+    return head or None
+
+
+def sniff_mime_type (value ):
+    """MIME type from content, falling back to the extension.
+
+    ``MedicalFile.save()`` used ``mimetypes.guess_type(self.file.name)``, i.e. the
+    uploader's own filename, to fill the ``Content-Type`` that clients later act on.
+    Signature detection comes first now; the extension is only consulted for DICOM,
+    which has no signature that distinguishes the raw-dataset variants.
+    """
+    head =_read_head (value )
+    if head :
+        if head .startswith (b'\xff\xd8\xff'):
+            return 'image/jpeg'
+        if head .startswith (b'\x89PNG\r\n\x1a\n'):
+            return 'image/png'
+        if head .startswith ((b'GIF87a',b'GIF89a')):
+            return 'image/gif'
+        if head .startswith (b'%PDF-'):
+            return 'application/pdf'
+        if head [128 :132 ]==b'DICM':
+            return 'application/dicom'
+    ext =os .path .splitext (value .name or '')[1 ].lower ()
+    if ext in ('.dcm','.dicom'):
+        return 'application/dicom'
+    import mimetypes
+    return mimetypes .guess_type (value .name or '')[0 ]or 'application/octet-stream'
 
 
 def validate_file_size (value ):
     """Validate uploaded file size (max 20MB)."""
-    limit =20 *1024 *1024 # Comment_229
+    limit =20 *1024 *1024 # 20MB
     if value .size >limit :
         raise ValidationError (f'حجم الملف كبير جداً. الحد الأقصى: 20 ميجابايت')
 
@@ -60,13 +164,13 @@ class Patient (models .Model ):
 
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
 
-    # Comment_230
+    # Encrypted PII fields (AES-256)
     _full_name =models .TextField (_ ('الاسم الكامل المشفر'),db_column ='full_name')
     _national_id =models .TextField (_ ('رقم الهوية المشفر'),db_column ='national_id',blank =True )
     _phone =models .TextField (_ ('الهاتف المشفر'),db_column ='phone',blank =True )
     _address =models .TextField (_ ('العنوان المشفر'),db_column ='address',blank =True )
 
-    # Comment_231
+    # Non-encrypted fields
     date_of_birth =models .DateField (_ ('تاريخ الميلاد'))
     gender =models .CharField (_ ('الجنس'),max_length =1 ,choices =Gender .choices )
     blood_type =models .CharField (
@@ -76,17 +180,17 @@ class Patient (models .Model ):
     height =models .PositiveIntegerField (_ ('الطول (سم)'),null =True ,blank =True )
     weight =models .PositiveIntegerField (_ ('الوزن (كجم)'),null =True ,blank =True )
 
-    # Comment_232
+    # Medical info
     allergies =models .TextField (_ ('الحساسية'),blank =True )
     chronic_conditions =models .TextField (_ ('الأمراض المزمنة'),blank =True )
     current_medications =models .TextField (_ ('الأدوية الحالية'),blank =True )
 
-    # Comment_233
+    # Emergency contact (encrypted)
     _emergency_contact =models .TextField (
     _ ('جهة الاتصال الطارئة المشفرة'),db_column ='emergency_contact',blank =True 
     )
 
-    # Comment_234
+    # Basin linkage (plan requirement: patients belong to a health basin)
     basin =models .ForeignKey (
     'basins.Basin',on_delete =models .PROTECT ,
     null =True ,blank =True ,
@@ -215,7 +319,7 @@ class MedicalRecord (models .Model ):
     )
     title =models .CharField (_ ('العنوان'),max_length =255 )
 
-    # Comment_235
+    # Encrypted content (medical data is highly sensitive)
     _content =models .TextField (_ ('المحتوى المشفر'),db_column ='content')
 
     created_by =models .ForeignKey (
@@ -224,7 +328,7 @@ class MedicalRecord (models .Model ):
     verbose_name =_ ('أنشئ بواسطة')
     )
 
-    # Comment_236
+    # Vital signs (if record_type == VITALS)
     blood_pressure_systolic =models .PositiveIntegerField (null =True ,blank =True )
     blood_pressure_diastolic =models .PositiveIntegerField (null =True ,blank =True )
     heart_rate =models .PositiveIntegerField (null =True ,blank =True )
@@ -329,10 +433,14 @@ class MedicalFile (models .Model ):
 
     def save (self ,*args ,**kwargs ):
         if self .file :
-            self .file_size =self .file .size 
+            # Read before super().save(): once the FileField commits, self.file.size
+            # is whatever storage reports, and the file may be encrypted on disk.
+            self .file_size =self .file .size
             if not self .mime_type :
-                import mimetypes 
-                self .mime_type =mimetypes .guess_type (self .file .name )[0 ]or 'application/octet-stream'
+                # From the file's own bytes, not from the name the uploader chose —
+                # a mislabelled upload should not get to dictate the Content-Type
+                # that a clinician's browser then acts on.
+                self .mime_type =sniff_mime_type (self .file )
         super ().save (*args ,**kwargs )
 
     def record_access (self ,user ):

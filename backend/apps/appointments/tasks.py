@@ -31,7 +31,7 @@ def send_appointment_reminders (self ,hours_before :int =24 ):
 
         count =0 
         for appt in appointments :
-        # Comment_105
+        # Notify doctor
             create_notification (
             user =appt .doctor ,
             title =f'تذكير: موعد خلال {hours_before } ساعة',

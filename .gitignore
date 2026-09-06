@@ -19,11 +19,20 @@ backend/venv/
 .env
 **/.env
 *.env
+*.env.*
 .env.production
 !.env.example
 !.env.production.example
 .z-ai-config
 **/.z-ai-config
+# NOT a blanket `*.txt`: that pattern silently swallowed requirements.txt and any
+# future text file that belongs in the repo. Secrets are already covered by the
+# .env rules above, so a broad text-file ignore buys nothing and only risks a
+# missing dependency manifest on a fresh clone.
+*.pptx
+*.pdf
+comments_mapping.json
+extract_comments.py
 certs/*.pem
 backend/certs/*.pem
 

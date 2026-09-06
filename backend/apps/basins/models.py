@@ -34,9 +34,9 @@ class Basin (models .Model ):
         DIALYSIS_CENTER ='DIALYSIS_CENTER',_ ('مركز غسيل كلوي')
         SPECIALIZED_CLINIC ='SPECIALIZED_CLINIC',_ ('مركز/عيادة تخصصية')
 
-        # Comment_155
-        # Comment_156
-        # Comment_157
+        # ------------------------------------------------------------------
+        # System modules that can be toggled per basin
+        # ------------------------------------------------------------------
     MODULE_PATIENTS ='patients'
     MODULE_CHANNELS ='channels'
     MODULE_MEDICAL_FILES ='medical_files'
@@ -68,10 +68,10 @@ class Basin (models .Model ):
     MODULE_ANALYTICS :_ ('التحليلات'),
     }
 
-    # Comment_158
-    # Comment_159
-    # Comment_160
-    # Comment_161
+    # ------------------------------------------------------------------
+    # Module activation by basin type (the core plan requirement):
+    # bigger facilities get everything, small units get the essentials.
+    # ------------------------------------------------------------------
     DEFAULT_MODULES_BY_TYPE ={
     BasinType .GENERAL_HOSPITAL :ALL_MODULES ,
     BasinType .SPECIALIZED_HOSPITAL :[
@@ -121,8 +121,8 @@ class Basin (models .Model ):
     )
     bed_capacity =models .PositiveIntegerField (_ ('الطاقة الاستيعابية (أسرّة)'),null =True ,blank =True )
 
-    # Comment_162
-    # Comment_163
+    # Active modules — initialised from DEFAULT_MODULES_BY_TYPE and
+    # customisable afterwards by a SUPER_ADMIN.
     enabled_modules =models .JSONField (
     _ ('الوحدات المفعّلة'),default =list ,blank =True ,
     help_text =_ ('قائمة الوحدات المفعّلة في هذا الحوض'),
@@ -144,9 +144,9 @@ class Basin (models .Model ):
     def __str__ (self ):
         return f'{self .name } ({self .get_basin_type_display ()})'
 
-        # Comment_164
-        # Comment_165
-        # Comment_166
+        # ------------------------------------------------------------------
+        # Module activation engine
+        # ------------------------------------------------------------------
     def apply_default_modules (self ,save =True ):
         """Activate modules according to the basin TYPE (plan requirement)."""
         self .enabled_modules =list (
@@ -173,16 +173,16 @@ class Basin (models .Model ):
             self .save (update_fields =['enabled_modules','updated_at'])
 
     def save (self ,*args ,**kwargs ):
-    # Comment_167
+    # First save (or type change without custom modules) → apply defaults.
         if not self .enabled_modules :
             self .enabled_modules =list (
             self .DEFAULT_MODULES_BY_TYPE .get (self .basin_type ,[])
             )
         super ().save (*args ,**kwargs )
 
-        # Comment_168
-        # Comment_169
-        # Comment_170
+        # ------------------------------------------------------------------
+        # Statistics for the basin dashboard
+        # ------------------------------------------------------------------
     def stats (self )->dict :
         from apps .accounts .models import User 
         from apps .patients .models import Patient 

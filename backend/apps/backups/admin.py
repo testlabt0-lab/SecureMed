@@ -25,5 +25,5 @@ class BackupRecordAdmin (admin .ModelAdmin ):
         return round (obj .size_bytes /1024 ,1 )
 
     def has_add_permission (self ,request ):
-    # Comment_142
+    # Backups are created via the command/API only.
         return False 

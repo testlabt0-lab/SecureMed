@@ -1,6 +1,9 @@
 package com.securemed.app.data
 
+import android.content.Context
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.api.SecureMedApi
+import com.securemed.app.data.api.TwoFactorExpiredException
 import com.securemed.app.data.local.LocalCache
 import com.securemed.app.data.local.MedicationStore
 import com.securemed.app.data.local.SecurePreferences
@@ -8,6 +11,9 @@ import com.securemed.app.data.model.*
 import com.securemed.app.data.local.room.SecureMedDao
 import com.securemed.app.data.local.room.PatientEntity
 import com.securemed.app.data.local.room.MedicalRecordEntity
+import com.securemed.app.reminders.ReminderScheduler
+import com.securemed.app.security.BiometricHelper
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -26,7 +32,8 @@ import javax.inject.Singleton
 @Singleton
 class SecureMedRepository @Inject constructor(
     private val api: SecureMedApi,
-    private val dao: SecureMedDao
+    private val dao: SecureMedDao,
+    @ApplicationContext private val context: Context
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
@@ -83,67 +90,191 @@ class SecureMedRepository @Inject constructor(
     }
 
     // ===== AUTH =====
+    /**
+     * Password sign-in. May come back with a 2FA challenge instead of a
+     * session — that response is returned as a success so the caller can act
+     * on it; only a complete response opens a session here.
+     */
     suspend fun login(email: String, password: String): Result<LoginResponse> = try {
         val response = api.login(LoginRequest(email, password))
+        if (response.isAuthenticated) {
+            storeSession(response)
+        }
+        Result.success(response)
+    } catch (e: Exception) {
+        // Same translation as mfaLogin: a locked account, a throttled address and
+        // a wrong password each have their own Arabic message from the server, and
+        // all three reached the user as "HTTP 400 Bad Request" before this.
+        Result.failure(Exception(ApiErrors.messageFor(e, "فشل تسجيل الدخول"), e))
+    }
+
+    /**
+     * Completes a `requires_2fa` login with the code the user typed.
+     *
+     * Failures are translated here rather than in the UI: the server's own
+     * Arabic message ("رمز التحقق غير صحيح") is the only thing that tells the
+     * user which of the several ways this can fail actually happened, and
+     * Retrofit would otherwise surface "HTTP 400 Bad Request".
+     *
+     * A 401 becomes [TwoFactorExpiredException] because it is the one failure
+     * the user cannot retry from the code screen — the `mfa_token` is gone and
+     * a new one only comes from `auth/login/`.
+     */
+    suspend fun mfaLogin(
+        mfaToken: String,
+        code: String,
+        trustDevice: Boolean = false
+    ): Result<LoginResponse> = try {
+        val response = api.mfaLogin(MfaLoginRequest(mfaToken, code, trustDevice))
+        // Same reasoning as biometricLogin: this endpoint has no second-factor
+        // branch left to take, so a 200 without tokens is not a session.
+        if (!response.isAuthenticated) error("تعذر إكمال التحقق بخطوتين")
         storeSession(response)
         Result.success(response)
     } catch (e: Exception) {
-        Result.failure(e)
+        // messageFor reads the error body once, so it is called once and the
+        // result reused. A wrong code carries the server's "رمز التحقق غير صحيح";
+        // e.message alone would be Retrofit's "HTTP 400 Bad Request".
+        val message = ApiErrors.messageFor(e, "تعذر التحقق من الرمز")
+        Result.failure(
+            if (ApiErrors.statusOf(e) == ApiErrors.UNAUTHORIZED) {
+                TwoFactorExpiredException(message)
+            } else {
+                Exception(message, e)
+            }
+        )
     }
 
-    suspend fun biometricLogin(
-        email: String,
-        biometricTemplate: String
-    ): Result<LoginResponse> = try {
-        val challenge = api.getBiometricChallenge(
-            BiometricChallengeRequest(email, SecurePreferences.deviceId)
-        )
-        val response = api.biometricLogin(
-            BiometricLoginRequest(
-                challengeId = challenge.challengeId,
-                biometricResponse = "android-response-${challenge.challengeId}",
-                biometricTemplate = biometricTemplate
+    /**
+     * Step one of a biometric login: ask the server for something to sign.
+     *
+     * Split from [biometricLogin] because the biometric prompt has to run
+     * between the two, and the prompt needs an Activity. Nothing here is secret:
+     * an unknown account gets a decoy challenge that no signature can satisfy.
+     */
+    suspend fun getBiometricChallenge(email: String): Result<BiometricChallengeResponse> = try {
+        Result.success(
+            api.getBiometricChallenge(
+                BiometricChallengeRequest(email, SecurePreferences.deviceId)
             )
         )
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Step two: present the signature the unlocked Keystore key produced.
+     *
+     * The old single-call version asked for a challenge and then answered it with
+     * `biometricResponse = "android-response-${challenge.challengeId}"` — the id
+     * the server had just sent, echoed back. Anyone able to request a challenge
+     * could produce that, with no key and no finger.
+     */
+    suspend fun biometricLogin(
+        challengeId: String,
+        signature: String
+    ): Result<LoginResponse> = try {
+        val response = api.biometricLogin(BiometricLoginRequest(challengeId, signature))
+        // This endpoint has no second-factor branch: a 200 without tokens is
+        // not a session, so it must not be reported as a successful login.
+        if (!response.isAuthenticated) error("تعذر إكمال الدخول بالبصمة")
         storeSession(response)
         Result.success(response)
     } catch (e: Exception) {
         Result.failure(e)
     }
 
+    /** Writes the session. No-op for a response that carries none. */
     private fun storeSession(response: LoginResponse) {
-        SecurePreferences.accessToken = response.tokens.access
-        SecurePreferences.refreshToken = response.tokens.refresh
-        SecurePreferences.userId = response.user.id
-        SecurePreferences.userEmail = response.user.email
-        SecurePreferences.userName = response.user.fullName
-        SecurePreferences.userRole = response.user.role
+        val tokens = response.tokens ?: return
+        val user = response.user ?: return
+        SecurePreferences.accessToken = tokens.access
+        SecurePreferences.refreshToken = tokens.refresh
+        SecurePreferences.userId = user.id
+        SecurePreferences.userEmail = user.email
+        SecurePreferences.userName = user.fullName
+        SecurePreferences.userRole = user.role
     }
 
-    suspend fun enrollBiometric(deviceName: String, biometricTemplate: String): Result<Unit> = try {
+    /**
+     * Register this device's public key against the signed-in account.
+     *
+     * The key pair is minted locally and only the public half is sent; the
+     * private half stays in the Keystore, unusable until a fingerprint unlocks
+     * it. If the request fails the local key is dropped again, so the device is
+     * never left holding a private key the server has no counterpart for —
+     * enrolling again simply mints a fresh pair.
+     */
+    suspend fun enrollBiometric(deviceName: String): Result<Unit> = try {
+        val publicKey = BiometricHelper.createSigningKey()
+            ?: error("تعذر إنشاء مفتاح البصمة على هذا الجهاز")
         api.enrollBiometric(
             BiometricEnrollRequest(
                 deviceId = SecurePreferences.deviceId,
                 deviceName = deviceName,
                 platform = "ANDROID",
-                biometricTemplate = biometricTemplate
+                publicKey = publicKey
             )
         )
         SecurePreferences.biometricEnabled = true
         Result.success(Unit)
     } catch (e: Exception) {
+        BiometricHelper.deleteKey()
         Result.failure(e)
     }
 
-    suspend fun logout() {
-        // Patient data must not survive a session — wipe tokens and the
-        // offline cache (medication plans + dose logs included).
-        try {
-            api.logout(mapOf("refresh" to (SecurePreferences.refreshToken ?: "")))
-        } catch (_: Exception) {
-            // Server-side invalidation is best-effort; local wipe always runs.
+    /**
+     * Ends the session and wipes everything it left on the device.
+     *
+     * [allDevices] decides what the server is asked to do, and the difference is
+     * carried by the *presence* of the `refresh` field: with a token the backend
+     * ends only the session presenting it, and with the field absent it reads the
+     * request as "end all of them" and denies every token the account holds
+     * (`LogoutView`, `backend/apps/accounts/views.py:309-315`).
+     *
+     * That is also why a blank token is never sent. The call used to pass
+     * `"refresh" to (refreshToken ?: "")`, and an empty string is falsy on the
+     * server — so signing out on a phone whose refresh token had already been
+     * dropped (a 401 that failed to refresh clears it) silently signed the user
+     * out of every other device, including the workstation they were working on.
+     */
+    suspend fun logout(allDevices: Boolean = false) {
+        // Patient data must not survive a session — wipe tokens, the offline
+        // cache (medication plans + dose logs) and the Room PHI cache.
+        val refresh = SecurePreferences.refreshToken
+        val body: Map<String, String>? = when {
+            allDevices -> emptyMap()
+            !refresh.isNullOrBlank() -> mapOf("refresh" to refresh)
+            // Nothing identifies this session to the server, and asking without a
+            // token would end the account's other sessions too. The access token
+            // expires on its own within 15 minutes.
+            else -> null
         }
-        SecurePreferences.clear()
+        if (body != null) {
+            try {
+                api.logout(body)
+            } catch (_: Exception) {
+                // Server-side invalidation is best-effort; local wipe always runs.
+            }
+        }
+
+        // Order matters: alarms are keyed by plan id, so they have to be
+        // dropped while the plans are still readable. Left armed, they keep
+        // firing after sign-out and put the patient name and prescription on
+        // the lock screen of a device with no session.
+        try {
+            ReminderScheduler(context).cancelAll()
+        } catch (_: Exception) {
+            // Never let alarm teardown block the credential wipe.
+        }
+
+        try {
+            dao.clearAll()
+        } catch (_: Exception) {
+            // Same: a Room failure must not leave the tokens behind.
+        }
+
+        SecurePreferences.clearSession()
         LocalCache.clear()
     }
 

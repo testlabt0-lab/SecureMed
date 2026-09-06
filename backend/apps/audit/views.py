@@ -4,8 +4,9 @@ Serializers and Views for audit log.
 from rest_framework import serializers ,viewsets ,permissions ,filters 
 from django_filters import rest_framework as django_filters 
 
-from apps .audit .models import AuditLog 
-from apps .security .permissions import IsAdmin ,IsAuditor 
+from apps .audit .models import AuditLog
+from apps .security .permissions import IsAdmin ,IsAuditor
+from apps .core .net import get_client_ip
 
 
 from rest_framework .decorators import action 
@@ -72,12 +73,16 @@ class AuditLogViewSet (viewsets .ReadOnlyModelViewSet ):
         )
         response ['Content-Disposition']='attachment; filename="audit_logs_export.json"'
 
-        # Comment_141
+        # The export itself is an auditable event: someone just pulled the whole
+        # trail out of the system. get_client_ip, not REMOTE_ADDR — behind the
+        # production proxy REMOTE_ADDR is the proxy's own address, so every export
+        # was attributed to the load balancer and the row said nothing about who
+        # took the data. AuditLog.save() signs this row like any other.
         AuditLog .objects .create (
         user =request .user ,
         event_type =AuditLog .EventType .DATA_EXPORT ,
         severity =AuditLog .Severity .INFO ,
-        ip_address =request .META .get ('REMOTE_ADDR'),
-        details ={'exported_count':queryset .count (),'format':'json'}
+        ip_address =get_client_ip (request ),
+        details ={'exported_count':len (serializer .data ),'format':'json'}
         )
         return response 

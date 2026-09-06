@@ -1,19 +1,26 @@
 """
 Serializers for accounts app.
 """
-import secrets 
-import hashlib 
-from rest_framework import serializers 
-from django .contrib .auth import authenticate ,password_validation 
-from django .core .exceptions import ValidationError 
-from django .utils import timezone 
-from django .utils .translation import gettext_lazy as _ 
+import logging
+import uuid
+from rest_framework import serializers
+from django .conf import settings
+from django .contrib .auth import password_validation
+from django .core .cache import cache
+from django .core .exceptions import ValidationError
+from django .db .models import F
+from django .utils import timezone
+from django .utils .translation import gettext_lazy as _
 
-from apps .accounts .models import User ,BiometricProfile ,BiometricChallenge 
+from apps .accounts .models import User ,BiometricProfile ,BiometricChallenge
 from apps .security .crypto import (
-encrypt_field ,decrypt_field ,hash_biometric ,
-generate_challenge ,verify_challenge 
+WebAuthnError ,COSE_ES256 ,COSE_RS256 ,
+b64url_decode ,b64url_encode ,generate_auth_challenge ,
+load_public_key ,public_key_to_pem ,
+verify_webauthn_registration ,verify_webauthn_assertion ,verify_native_assertion ,
 )
+
+logger =logging .getLogger ('security')
 
 
 class UserSerializer (serializers .ModelSerializer ):
@@ -40,7 +47,7 @@ class UserSerializer (serializers .ModelSerializer ):
         'is_biometric_enabled','mfa_enabled','created_at',
         'permissions', 'groups'
         ]
-        read_only_fields =['id','created_at','mfa_enabled', 'permissions', 'groups']
+        read_only_fields =['id','created_at','mfa_enabled', 'permissions', 'groups', 'role', 'is_active', 'basin']
 
 
 class UserCreateSerializer (serializers .ModelSerializer ):
@@ -96,7 +103,7 @@ class LoginSerializer (serializers .Serializer ):
                 )
 
             if user .is_locked :
-            # Comment_14
+            # Provide user-friendly localized time format or time remaining
                 import humanize 
                 import datetime 
                 from django .utils import timezone 
@@ -109,7 +116,7 @@ class LoginSerializer (serializers .Serializer ):
                     {'detail':f'تم قفل الحساب مؤقتًا لدواع أمنية. يرجى المحاولة بعد {minutes } دقيقة.'}
                     )
                 else :
-                # Comment_15
+                # Lock has expired, reset it
                     user .reset_failed_attempts ()
 
             if not user.check_password(password):
@@ -140,151 +147,339 @@ class LoginSerializer (serializers .Serializer ):
         )
 
 
-class BiometricEnrollSerializer (serializers .Serializer ):
+def _registration_cache_key (user ):
+    return f'webauthn:reg:{user .pk }'
+
+
+def build_registration_options (user ):
+    """Creation options for navigator.credentials.create(), challenge kept server-side.
+
+    The browser used to invent this challenge itself — `webauthn.ts` said so in a
+    comment — and a challenge the client chooses proves nothing, because the whole
+    ceremony can then be assembled offline. Here the random bytes are cached under
+    the user's id and the enrollment request is only accepted if the clientDataJSON
+    it returns carries them back.
     """
-    Serializer for enrolling biometric authentication.
+    _raw ,challenge_b64 =generate_auth_challenge ()
+    ttl =settings .BIOMETRIC_SETTINGS ['CHALLENGE_TTL_SECONDS']
+    cache .set (_registration_cache_key (user ),challenge_b64 ,timeout =ttl )
+
+    already_enrolled =list (
+    BiometricProfile .objects .filter (user =user ,is_active =True )
+    .exclude (credential_id ='')
+    .values_list ('credential_id',flat =True )
+    )
+    return {
+    'rp':{'id':settings .WEBAUTHN_RP_ID ,'name':settings .WEBAUTHN_RP_NAME },
+    'user':{
+    'id':b64url_encode (str (user .id ).encode ('utf-8')),
+    'name':user .email ,
+    'displayName':user .full_name or user .email ,
+    },
+    'challenge':challenge_b64 ,
+    'pubKeyCredParams':[
+    {'type':'public-key','alg':COSE_ES256 },
+    {'type':'public-key','alg':COSE_RS256 },
+    ],
+    'timeout':ttl *1000 ,
+    'attestation':'none',
+    'authenticatorSelection':{
+    'authenticatorAttachment':'platform',
+    'residentKey':'preferred',
+    'userVerification':'required',
+    },
+    'excludeCredentials':[
+    {'type':'public-key','id':cid ,'transports':['internal']}
+    for cid in already_enrolled
+    ],
+    }
+
+
+class BiometricEnrollSerializer (serializers .Serializer ):
+    """Enroll one device's public-key credential.
+
     Security requirement #4: تسجيل الدخول بالبصمة
+
+    What arrives here is a *public* key, never a fingerprint. The previous version
+    accepted `biometric_template`: an arbitrary client-chosen string that the server
+    hashed and then compared on every later login, which made it a password the user
+    can never change — and one that any client which had ever seen the string could
+    present. The web client passed `JSON.stringify(credential)` as that string, so a
+    later login would have had to reproduce a byte-identical WebAuthn credential
+    object; since every ceremony carries a fresh signature, browser biometric login
+    could not have succeeded even once.
     """
     device_id =serializers .CharField (max_length =255 )
-    device_name =serializers .CharField (max_length =255 ,required =False )
+    device_name =serializers .CharField (max_length =255 ,required =False ,allow_blank =True )
     platform =serializers .ChoiceField (choices =['ANDROID','IOS','WEB'])
-    biometric_template =serializers .CharField (write_only =True )
+    public_key =serializers .CharField (write_only =True )
+    credential_id =serializers .CharField (required =False ,allow_blank =True )
+    client_data_json =serializers .CharField (
+    required =False ,allow_blank =True ,write_only =True )
+
+    def validate (self ,attrs ):
+        user =self .context ['request'].user
+
+        if attrs ['platform']=='WEB':
+            attrs ['public_key_pem']=self ._verify_web (user ,attrs )
+        else :
+        # Native platforms have no clientDataJSON to bind. The trust here comes
+        # from the request being authenticated: the session already proves who is
+        # enrolling, which is also why attestation is not parsed.
+            try :
+                attrs ['public_key_pem']=public_key_to_pem (
+                load_public_key (attrs ['public_key']))
+            except (WebAuthnError ,ValueError )as exc :
+                logger .warning ('Biometric enrollment rejected for %s: %s',user .pk ,exc )
+                raise serializers .ValidationError (
+                {'detail':'المفتاح العام غير صالح'})
+        return attrs
+
+    def _verify_web (self ,user ,attrs ):
+        """Check the WebAuthn create() response, return the key as SPKI PEM."""
+        client_data =attrs .get ('client_data_json')or ''
+        if not client_data or not (attrs .get ('credential_id')or ''):
+            raise serializers .ValidationError (
+            {'detail':'تسجيل WebAuthn يتطلب credential_id و client_data_json'})
+
+        expected =cache .get (_registration_cache_key (user ))
+        if not expected :
+            raise serializers .ValidationError (
+            {'detail':'انتهت صلاحية طلب التسجيل، أعد المحاولة'})
+
+        try :
+            key =verify_webauthn_registration (
+            client_data_json =b64url_decode (client_data ),
+            public_key_material =attrs ['public_key'],
+            expected_challenge_b64 =expected ,
+            allowed_origins =settings .WEBAUTHN_ALLOWED_ORIGINS ,
+            )
+        except (WebAuthnError ,ValueError )as exc :
+        # The precise failure goes to the log only. Telling the caller that the
+        # origin — rather than the challenge — was wrong hands a forger the next
+        # thing to fix.
+            logger .warning ('WebAuthn registration rejected for %s: %s',user .pk ,exc )
+            raise serializers .ValidationError (
+            {'detail':'فشل التحقق من بيانات الاعتماد البيومترية'})
+
+        cache .delete (_registration_cache_key (user ))
+        return public_key_to_pem (key )
 
     def create (self ,validated_data ):
-        user =self .context ['request'].user 
-        salt =secrets .token_hex (32 )
-        biometric_hash =hash_biometric (validated_data ['biometric_template'],salt )
-
-        # Comment_16
-        challenge ,expected_response =generate_challenge ()
-
-        profile ,created =BiometricProfile .objects .update_or_create (
+        user =self .context ['request'].user
+        profile ,_created =BiometricProfile .objects .update_or_create (
         user =user ,
         device_id =validated_data ['device_id'],
         defaults ={
-        'device_name':validated_data .get ('device_name',''),
+        'device_name':validated_data .get ('device_name','')or '',
         'platform':validated_data ['platform'],
-        'biometric_hash':encrypt_field (biometric_hash ),
-        'salt':salt ,
+        'public_key':validated_data ['public_key_pem'],
+        'credential_id':validated_data .get ('credential_id','')or '',
+        'sign_count':0 ,
+        'failed_attempts':0 ,
         'is_active':True ,
+        # Deliberately blanked: the template hash and its salt belong to the old
+        # shared-secret scheme, and private_key_encrypted must stay empty because a
+        # server that holds the private key has thrown away the one property that
+        # makes this stronger than a password.
+        'biometric_hash':'',
+        'salt':'',
+        'private_key_encrypted':'',
         }
         )
 
-        user .is_biometric_enabled =True 
+        user .is_biometric_enabled =True
         user .biometric_enrolled_at =timezone .now ()
-        user .save ()
-
-        return profile 
+        user .save (update_fields =['is_biometric_enabled','biometric_enrolled_at'])
+        logger .info ('Biometric credential enrolled: user=%s device=%s platform=%s',
+        user .pk ,profile .device_id ,profile .platform )
+        return profile
 
 
 class BiometricChallengeSerializer (serializers .Serializer ):
-    """Request a biometric challenge for login."""
+    """Issue a single-use challenge for a biometric login.
+
+    This endpoint is anonymous, so it answers identically whether or not the
+    account exists. The previous version returned three distinguishable errors —
+    «المستخدم غير موجود», «المصادقة البيومترية غير مفعلة», «الجهاز غير مسجل» —
+    which made it an oracle for who holds an account, who has enrolled a device,
+    and which device ids are registered. In a hospital system the first of those
+    alone discloses that a named person is a patient here.
+    """
 
     email =serializers .EmailField ()
     device_id =serializers .CharField (max_length =255 )
 
     def validate (self ,attrs ):
-        try :
-            user =User .objects .get (email =attrs ['email'])
-        except User .DoesNotExist :
-            raise serializers .ValidationError ({'detail':'المستخدم غير موجود'})
+        profile =(
+        BiometricProfile .objects
+        .filter (
+        user__email__iexact =attrs ['email'],
+        device_id =attrs ['device_id'],
+        is_active =True ,
+        user__is_active =True ,
+        user__is_biometric_enabled =True ,
+        )
+        .exclude (public_key ='')
+        .select_related ('user')
+        .first ()
+        )
+        # A locked account is treated exactly like a missing one: any difference
+        # here would confirm the account exists.
+        if profile is not None and profile .user .is_locked :
+            logger .warning ('Biometric challenge refused, account locked: %s',
+            profile .user .pk )
+            profile =None
 
-        if not user .is_biometric_enabled :
-            raise serializers .ValidationError (
-            {'detail':'المصادقة البيومترية غير مفعلة لهذا الحساب'}
-            )
-
-        try :
-            profile =BiometricProfile .objects .get (
-            user =user ,device_id =attrs ['device_id'],is_active =True 
-            )
-        except BiometricProfile .DoesNotExist :
-            raise serializers .ValidationError (
-            {'detail':'الجهاز غير مسجل للمصادقة البيومترية'}
-            )
-
-        if user .is_locked :
-            raise serializers .ValidationError (
-            {'detail':f'الحساب مقفل حتى {user .locked_until }'}
-            )
-
-        attrs ['user']=user 
-        attrs ['profile']=profile 
-        return attrs 
+        attrs ['profile']=profile
+        attrs ['user']=profile .user if profile is not None else None
+        return attrs
 
     def create (self ,validated_data ):
-        user =validated_data ['user']
-        challenge ,expected_response =generate_challenge ()
-
-        from django .conf import settings 
+        profile =validated_data ['profile']
+        _raw ,challenge_b64 =generate_auth_challenge ()
         ttl =settings .BIOMETRIC_SETTINGS ['CHALLENGE_TTL_SECONDS']
 
-        biometric_challenge =BiometricChallenge .objects .create (
-        user =user ,
-        challenge =challenge ,
-        expected_response =encrypt_field (expected_response ),
+        payload ={
+        'challenge':challenge_b64 ,
+        'rp_id':settings .WEBAUTHN_RP_ID ,
+        'timeout':ttl *1000 ,
+        'user_verification':(
+        'required'if settings .WEBAUTHN_REQUIRE_USER_VERIFICATION else 'preferred'),
+        'allow_credentials':[],
+        }
+
+        if profile is None :
+        # Decoy. Shaped exactly like a real response but backed by no database
+        # row, so it can never be answered: the login step looks the challenge id
+        # up and finds nothing. The caller learns only that it got a challenge.
+            payload ['challenge_id']=str (uuid .uuid4 ())
+            return payload
+
+        challenge =BiometricChallenge .objects .create (
+        user =profile .user ,
+        profile =profile ,
+        challenge =challenge_b64 ,
         expires_at =timezone .now ()+timezone .timedelta (seconds =ttl ),
         )
-        return {
-        'challenge_id':str (biometric_challenge .id ),
-        'challenge':challenge ,
-        }
+        payload ['challenge_id']=str (challenge .id )
+        if profile .credential_id :
+        # allowCredentials tells the browser which enrolled key to use. Native
+        # clients identify the credential by device_id and send nothing here.
+            payload ['allow_credentials']=[{
+            'type':'public-key',
+            'id':profile .credential_id ,
+            'transports':['internal'],
+            }]
+        return payload
 
 
 class BiometricLoginSerializer (serializers .Serializer ):
-    """
-    Verify biometric login response.
-    Returns JWT tokens on success.
+    """Verify a signature over the challenge we issued; the view mints the tokens.
+
+    Every rejection returns the same sentence. The reason is written to the security
+    log instead, because «rpIdHash mismatch» or «counter did not advance» tells a
+    forger exactly which part of the forgery to fix next.
     """
     challenge_id =serializers .UUIDField ()
-    biometric_response =serializers .CharField (write_only =True )
-    biometric_template =serializers .CharField (write_only =True )
+    signature =serializers .CharField (write_only =True )
+    # WebAuthn only. Native assertions sign the raw challenge bytes, so there is no
+    # clientDataJSON and no authenticatorData to send.
+    client_data_json =serializers .CharField (
+    required =False ,allow_blank =True ,write_only =True )
+    authenticator_data =serializers .CharField (
+    required =False ,allow_blank =True ,write_only =True )
+
+    GENERIC_ERROR ='فشل التحقق من المصادقة البيومترية'
+
+    def _reject (self ,reason ,user =None ):
+        logger .warning ('Biometric login rejected (user=%s): %s',
+        getattr (user ,'pk',None ),reason )
+        raise serializers .ValidationError ({'detail':self .GENERIC_ERROR })
 
     def validate (self ,attrs ):
+        challenge =(
+        BiometricChallenge .objects
+        .select_related ('profile','profile__user','user')
+        .filter (id =attrs ['challenge_id'])
+        .first ()
+        )
+        if challenge is None :
+        # Includes every decoy challenge handed out for an unknown account.
+            self ._reject ('unknown challenge id')
+
+        # Burn the nonce *before* verifying. A single UPDATE ... WHERE used = false
+        # picks the winner inside the database, so two requests replaying the same
+        # id concurrently cannot both proceed, and a wrong signature cannot be
+        # retried against the same challenge. The old code read `is_valid` and only
+        # called `mark_used()` after a successful verification, which left both
+        # windows open.
+        if not challenge .claim ():
+            self ._reject ('challenge already used or expired',challenge .user )
+
+        profile =challenge .profile
+        if profile is None or not profile .is_active or not profile .public_key :
+            self ._reject ('challenge has no active credential attached',challenge .user )
+
+        user =profile .user
+        if not user .is_active or user .is_locked :
+            self ._reject ('account inactive or locked',user )
+
         try :
-            challenge =BiometricChallenge .objects .get (id =attrs ['challenge_id'])
-        except BiometricChallenge .DoesNotExist :
-            raise serializers .ValidationError ({'detail':'التحدي غير صالح'})
+            sign_count =self ._verify (profile ,challenge ,attrs )
+        except (WebAuthnError ,ValueError )as exc :
+            self ._count_failure (profile ,user )
+            self ._reject (str (exc ),user )
 
-        if not challenge .is_valid :
-            raise serializers .ValidationError ({'detail':'انتهت صلاحية التحدي'})
-
-        user =challenge .user 
-
-        # Comment_17
-        try :
-            profile =BiometricProfile .objects .get (
-            user =user ,is_active =True 
-            )
-        except BiometricProfile .DoesNotExist :
-            raise serializers .ValidationError ({'detail':'الملف البيوميتري غير موجود'})
-
-            # Comment_18
-        stored_hash =decrypt_field (profile .biometric_hash )
-        provided_hash =hash_biometric (attrs ['biometric_template'],profile .salt )
-
-        if not secrets .compare_digest (stored_hash ,provided_hash ):
-            profile .failed_attempts +=1 
-            profile .save ()
-            user .failed_login_attempts +=1 
-            if user .failed_login_attempts >=5 :
-                user .lock_account ()
-            user .save ()
-            raise serializers .ValidationError ({'detail':'البصمة غير مطابقة'})
-
-            # Comment_19
-        expected =decrypt_field (challenge .expected_response )
-        if not verify_challenge (expected ,attrs ['biometric_response']):
-            raise serializers .ValidationError ({'detail':'فشل التحقق من الاستجابة'})
-
-        challenge .mark_used ()
         profile .last_used =timezone .now ()
-        profile .failed_attempts =0 
-        profile .save ()
+        profile .failed_attempts =0
+        if sign_count >profile .sign_count :
+            profile .sign_count =sign_count
+        profile .save (update_fields =['last_used','failed_attempts','sign_count'])
         user .reset_failed_attempts ()
 
-        attrs ['user']=user 
-        return attrs 
+        attrs ['user']=user
+        attrs ['profile']=profile
+        return attrs
+
+    def _verify (self ,profile ,challenge ,attrs ):
+        """Return the authenticator's signature counter, or raise WebAuthnError."""
+        public_key =load_public_key (profile .public_key )
+        signature =b64url_decode (attrs ['signature'])
+
+        if profile .platform =='WEB':
+            if not (attrs .get ('client_data_json')and attrs .get ('authenticator_data')):
+                raise WebAuthnError (
+                'WEB credential requires clientDataJSON and authenticatorData')
+            return verify_webauthn_assertion (
+            public_key =public_key ,
+            client_data_json =b64url_decode (attrs ['client_data_json']),
+            authenticator_data =b64url_decode (attrs ['authenticator_data']),
+            signature =signature ,
+            expected_challenge_b64 =challenge .challenge ,
+            rp_id =settings .WEBAUTHN_RP_ID ,
+            allowed_origins =settings .WEBAUTHN_ALLOWED_ORIGINS ,
+            require_user_verification =settings .WEBAUTHN_REQUIRE_USER_VERIFICATION ,
+            stored_sign_count =profile .sign_count ,
+            )
+
+        return verify_native_assertion (
+        public_key =public_key ,
+        challenge =b64url_decode (challenge .challenge ),
+        signature =signature ,
+        )
+
+    def _count_failure (self ,profile ,user ):
+        """Charge one failed attempt against both the credential and the account."""
+        max_attempts =settings .BIOMETRIC_SETTINGS .get ('MAX_FAILED_ATTEMPTS',5 )
+        BiometricProfile .objects .filter (pk =profile .pk ).update (
+        failed_attempts =F ('failed_attempts')+1 )
+        user .failed_login_attempts +=1
+        if user .failed_login_attempts >=max_attempts :
+        # lock_account() persists locked_until and failed_login_attempts together.
+            user .lock_account ()
+        else :
+            user .save (update_fields =['failed_login_attempts'])
 
 
 class ChangePasswordSerializer (serializers .Serializer ):
@@ -315,9 +510,9 @@ class ChangePasswordSerializer (serializers .Serializer ):
         return user 
 
 
-        # Comment_20
-        # Comment_21
-        # Comment_22
+        # ---------------------------------------------------------------------------
+        # Password reset (forgot password) — anonymous flow, see accounts/views.py
+        # ---------------------------------------------------------------------------
 class PasswordResetRequestSerializer (serializers .Serializer ):
     """Email body for POST /auth/password/reset/ (anonymous)."""
     email =serializers .EmailField ()

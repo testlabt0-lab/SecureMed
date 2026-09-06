@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 
 @Dao
 interface SecureMedDao {
@@ -29,4 +30,22 @@ interface SecureMedDao {
 
     @Query("DELETE FROM medical_records")
     suspend fun clearRecords()
+
+    // Appointments
+    @Query("DELETE FROM appointments")
+    suspend fun clearAppointments()
+
+    /**
+     * Wipes every cached PHI table — used on logout, where the session's
+     * patient data must not outlive the session. One transaction, so a
+     * failure part-way through cannot leave half the cache behind, and
+     * every table in the schema is covered: a wipe that skips one is a
+     * silent data-retention bug.
+     */
+    @Transaction
+    suspend fun clearAll() {
+        clearPatients()
+        clearRecords()
+        clearAppointments()
+    }
 }

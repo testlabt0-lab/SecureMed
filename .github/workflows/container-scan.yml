@@ -1,0 +1,137 @@
+name: Container Scan
+
+# The image Render actually deploys is built from the root Dockerfile, and nothing
+# scanned it. The stage this replaces lived in
+# devsecops/github-actions/devsecops-pipeline.yml — a file GitHub never executes, since
+# only .github/workflows is read — and it could not have gated anything in any case: it
+# ran with `exit-code: '0'`, so every finding was reported as a pass.
+#
+# That stage used `aquasecurity/trivy-action@master`. This one deliberately uses no
+# third-party action at all. On 2026-03-19 a threat actor with stolen credentials
+# force-pushed 76 of 77 version tags in aquasecurity/trivy-action — and all 7 tags in
+# aquasecurity/setup-trivy — onto commits containing a credential stealer that dumped
+# Runner.Worker process memory and exfiltrated CI secrets
+# (GHSA-69fq-xp46-6x23 / CVE-2026-33634). The tags have since been restored, but a
+# mutable ref in a workflow is a standing grant of arbitrary code execution over every
+# secret in the job, and a scanner is a poor thing to grant it to.
+#
+# One thing left for the operator: pin the scanner by digest instead of by tag.
+#   docker pull aquasec/trivy:latest
+#   docker inspect --format='{{index .RepoDigests 0}}' aquasec/trivy:latest
+# then set TRIVY_IMAGE below to aquasec/trivy@sha256:<digest>.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'Dockerfile'
+      - 'devsecops/docker/**'
+      - 'backend/requirements.txt'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/container-scan.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'Dockerfile'
+      - 'devsecops/docker/**'
+      - 'backend/requirements.txt'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/container-scan.yml'
+  # New CVEs are published against a base image that has not changed, so a scan tied
+  # only to pushes goes stale while continuing to report green.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:latest
+  IMAGE_TAG: securemed-backend:ci
+
+jobs:
+  scan:
+    name: Build image and scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the deployed artifact, not an approximation of it. No secrets are
+      # needed: the Dockerfile passes build-layer-only values to collectstatic.
+      - name: Build production image
+        run: docker build -t "$IMAGE_TAG" -f Dockerfile .
+
+      - name: Fetch scanner
+        run: docker pull "$TRIVY_IMAGE"
+
+      # Report everything from MEDIUM up, block nothing. The vulnerability database
+      # is written to a workspace-local cache so the gate step below can reuse it
+      # with --skip-db-update instead of downloading it a second time.
+      - name: Vulnerability report (non-blocking)
+        run: |
+          mkdir -p trivy-out .trivycache
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/trivy-out:/out" \
+            -v "$PWD/.trivycache:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image \
+              --scanners vuln,secret \
+              --severity MEDIUM,HIGH,CRITICAL \
+              --format sarif --output /out/trivy-image.sarif \
+              --exit-code 0 \
+              "$IMAGE_TAG"
+
+      # Dockerfiles, compose files and k8s manifests: missing USER, added
+      # capabilities, host networking, and so on. Advisory only — these findings are
+      # design review material, not a build break.
+      - name: Misconfiguration report (non-blocking)
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -v "$PWD/.trivycache:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" config \
+              --severity MEDIUM,HIGH,CRITICAL \
+              --exit-code 0 \
+              /src
+
+      # The one hard gate, and it is deliberately narrow: CRITICAL only, and only
+      # where a fixed version exists. A CRITICAL with no upstream fix would otherwise
+      # wedge every build in the repository on something no developer here can act on
+      # — which ends with someone adding `|| true` and the gate becoming decoration,
+      # exactly what this file was written to undo. Everything below CRITICAL, and
+      # every unfixed finding, is in the artifact.
+      - name: Gate on fixable CRITICAL vulnerabilities
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/.trivycache:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image \
+              --scanners vuln \
+              --severity CRITICAL \
+              --ignore-unfixed \
+              --format table \
+              --skip-db-update \
+              --exit-code 1 \
+              "$IMAGE_TAG"
+
+      # `always()`, because the run that fails the gate is the one whose report is
+      # worth reading.
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-container-report
+          if-no-files-found: warn
+          path: trivy-out/
+
+# SARIF can also be sent to GitHub code scanning, which annotates pull requests
+# directly. It is left off because it needs `security-events: write` on this job plus
+# either a public repository or GitHub Advanced Security — and where neither holds, the
+# step fails for a reason no one can fix from inside the repo. To enable:
+#
+#      - name: Upload SARIF to code scanning
+#        if: always()
+#        uses: github/codeql-action/upload-sarif@v3
+#        with:
+#          sarif_file: trivy-out/trivy-image.sarif

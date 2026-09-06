@@ -11,6 +11,7 @@ import Card from '../components/common/Card';
 import { billingAPI } from '../api/extendedApis';
 import CreateInvoiceModal from '../components/billing/CreateInvoiceModal';
 import { useAuthStore } from '../store/authStore';
+import { BILLING_WRITE_ROLES } from '../constants/roles';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface Invoice {
@@ -196,7 +197,7 @@ export default function BillingManagement() {
               <option value="CANCELLED">ملغاة</option>
               <option value="PENDING_INSURANCE">بانتظار التأمين</option>
             </select>
-            {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'ACCOUNTANT', 'RECEPTIONIST'].includes(user.role) && (
+            {user && BILLING_WRITE_ROLES.includes(user.role) && (
               <button 
                 onClick={() => setShowCreateModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
@@ -310,7 +311,7 @@ export default function BillingManagement() {
                             <Printer className="w-4 h-4 inline ml-1" />
                             طباعة الفاتورة
                           </button>
-                          {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'ACCOUNTANT', 'RECEPTIONIST'].includes(user.role) && (
+                          {user && BILLING_WRITE_ROLES.includes(user.role) && (
                             <>
                               {inv.status === 'UNPAID' && (
                                 <button

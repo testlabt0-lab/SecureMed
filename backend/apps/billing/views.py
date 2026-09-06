@@ -11,7 +11,8 @@ from rest_framework.response import Response
 
 from apps.audit.utils import log_security_event
 
-from .models import InsuranceProvider, PatientInsurance, Invoice, InvoiceItem
+from .models import InsuranceProvider, PatientInsurance, Invoice, InvoiceItem, InsuranceClaim, PaymentTransaction
+from .services import StripePaymentService, InsuranceService
 from .serializers import (
     InsuranceProviderSerializer,
     PatientInsuranceSerializer,
@@ -84,10 +85,32 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        payment_method = serializer.validated_data.get('payment_method', 'CASH')
-
-        invoice.status = 'PAID'
-        invoice.save(update_fields=['status'])
+        payment_method = serializer.validated_data.get('payment_method', 'CREDIT_CARD')
+        
+        if payment_method == 'CREDIT_CARD':
+            # Mock Stripe Payment Intent
+            intent = StripePaymentService.create_payment_intent(invoice)
+            
+            # Record the pending transaction
+            PaymentTransaction.objects.create(
+                invoice=invoice,
+                transaction_id=intent['id'],
+                gateway='STRIPE',
+                amount=intent['amount'],
+                currency=intent['currency'],
+                status='SUCCESS' # Auto success for demo
+            )
+            
+            invoice.status = 'PAID'
+            invoice.save(update_fields=['status'])
+            
+            response_data = InvoiceSerializer(invoice).data
+            response_data['payment_intent'] = intent
+            return Response(response_data)
+            
+        else:
+            invoice.status = 'PAID'
+            invoice.save(update_fields=['status'])
 
         log_security_event(
             user=request.user,
@@ -101,6 +124,40 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
 
         return Response(InvoiceSerializer(invoice).data)
+
+    @action(detail=True, methods=['post'])
+    def submit_insurance_claim(self, request, pk=None):
+        """Submit the invoice to the patient's insurance provider."""
+        invoice = self.get_object()
+        
+        if invoice.status != 'PENDING_INSURANCE' and invoice.status != 'DRAFT':
+            return Response({"detail": "الفاتورة ليست في حالة تسمح بتقديم مطالبة تأمين."}, status=400)
+            
+        # Find active policy
+        policy = PatientInsurance.objects.filter(patient=invoice.patient, is_valid=True).first()
+        if not policy:
+            return Response({"detail": "المريض لا يملك بوليصة تأمين نشطة."}, status=400)
+            
+        # Create claim if not exists
+        claim, created = InsuranceClaim.objects.get_or_create(
+            invoice=invoice,
+            defaults={
+                'policy': policy,
+                'claim_amount': invoice.total_amount - invoice.discount
+            }
+        )
+        
+        # Call mock insurance service
+        claim = InsuranceService.submit_claim(claim)
+        
+        # Refresh invoice to get new status/amounts
+        invoice.refresh_from_db()
+        return Response({
+            "claim_status": claim.status,
+            "approved_amount": claim.approved_amount,
+            "rejection_reason": claim.rejection_reason,
+            "invoice": InvoiceSerializer(invoice).data
+        })
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):

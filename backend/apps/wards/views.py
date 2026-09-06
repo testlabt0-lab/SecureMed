@@ -97,7 +97,7 @@ class BedAssignmentViewSet (viewsets .ModelViewSet ):
         assignment .discharge_date =timezone .now ()
         assignment .save (update_fields =['is_active','discharge_date'])
 
-        # Comment_423
+        # Free the bed (or mark for cleaning)
         bed =assignment .bed 
         bed .status ='CLEANING'
         bed .save (update_fields =['status'])

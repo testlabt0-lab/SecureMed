@@ -3,17 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, User, FolderKanban, HeartPulse, Loader2, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { searchApi } from '../api/extendedApis';
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'مدير النظام',
-  HOSPITAL_ADMIN: 'مدير المستشفى',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع أمني',
-  PATIENT: 'مريض',
-};
+import { roleLabel } from '../constants/roles';
 
 const channelTypes: Record<string, string> = {
   EMERGENCY: 'حالة طارئة',
@@ -165,7 +155,7 @@ export default function GlobalSearch({ open, onClose }: { open: boolean; onClose
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{u.full_name}</p>
-                      <p className="text-xs text-gray-400 truncate">{u.email} — {roleLabels[u.role] || u.role}</p>
+                      <p className="text-xs text-gray-400 truncate">{u.email} — {roleLabel(u.role)}</p>
                     </div>
                   </button>
                 ))}

@@ -9,7 +9,7 @@ from bidi .algorithm import get_display
 from reportlab .pdfbase import pdfmetrics 
 from reportlab .pdfbase .ttfonts import TTFont 
 
-# Comment_282
+# DejaVu covers the Arabic block and is present on this system
 if os .name =='nt':
     FONT_DIR ='C:\\Windows\\Fonts'
     FONT_NORMAL_FILE ='tahoma.ttf'
@@ -34,7 +34,7 @@ def register_fonts ():
     normal_path =os .path .join (FONT_DIR ,FONT_NORMAL_FILE )
     bold_path =os .path .join (FONT_DIR ,FONT_BOLD_FILE )
 
-    # Comment_283
+    # Fallback to avoid crashes in tests if font doesn't exist
     if not os .path .exists (normal_path ):
         import reportlab .rl_config 
         reportlab .rl_config .warnOnMissingFontGlyphs =0 

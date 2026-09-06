@@ -42,20 +42,32 @@
             </intent-filter>
         </activity>
 
-        <!-- Re-schedules medication alarms after device reboot -->
+        <!--
+            Re-schedules medication alarms after device reboot.
+
+            LOCKED_BOOT_COMPLETED is deliberately absent: re-arming reads the
+            plans from LocalCache (context.filesDir, credential-encrypted), so
+            it cannot run before the user unlocks. Claiming that action without
+            android:directBootAware="true" only registers a filter the system
+            never delivers to.
+        -->
         <receiver
             android:name=".reminders.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
-        
-        <!-- Handles alarm triggers -->
+
+        <!--
+            Handles alarm triggers. The class name must stay in sync with
+            ReminderScheduler, which targets it explicitly: an unregistered
+            receiver means the alarm fires and is dropped, so reminders go
+            missing with no error anywhere.
+        -->
         <receiver
-            android:name=".reminders.AlarmReceiver"
+            android:name=".reminders.ReminderReceiver"
             android:exported="false" />
     </application>
 </manifest>

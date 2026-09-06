@@ -1,56 +1,50 @@
 package com.securemed.app.security
 
-import android.os.Build
-import io.mockk.every
-import io.mockk.mockkStatic
-import io.mockk.unmockkAll
-import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
-import java.io.File
 
 /**
- * Unit tests for SecurityUtils to ensure root detection works as expected.
+ * Unit tests for [SecurityUtils] root detection.
+ *
+ * These used to drive `Build.TAGS` through `mockkStatic(Build::class)`. That can
+ * never work: `TAGS` is a static *field*, and MockK intercepts static methods
+ * only — both tests failed with MockKException before reaching the code under
+ * test. The tags check now takes its input as a parameter, so it is tested as
+ * the pure string check it always was.
  */
 class SecurityUtilsTest {
 
-    @Before
-    fun setUp() {
-        // Mock static Android classes
-        mockkStatic(Build::class)
-    }
-
-    @After
-    fun tearDown() {
-        unmockkAll()
+    @Test
+    fun `hasTestKeys is true when the build signature contains test-keys`() {
+        assertTrue(SecurityUtils.hasTestKeys("release-keys,test-keys"))
+        assertTrue(SecurityUtils.hasTestKeys("test-keys"))
     }
 
     @Test
-    fun `isDeviceRooted returns true when test-keys are present`() {
-        // Arrange: Mock the Build.TAGS to simulate a rooted device with test-keys
-        every { Build.TAGS } returns "release-keys,test-keys"
-
-        // Act
-        val isRooted = SecurityUtils.isDeviceRooted()
-
-        // Assert
-        assertTrue("Device should be considered rooted when test-keys are present", isRooted)
+    fun `hasTestKeys is false for a production signature`() {
+        assertFalse(SecurityUtils.hasTestKeys("release-keys"))
     }
 
+    /**
+     * `Build.TAGS` is null off-device, so an absent signature must not read as
+     * rooted — otherwise the release build's root gate would trip on any
+     * device that reports no tags at all.
+     */
     @Test
-    fun `isDeviceRooted returns false when test-keys are absent and no su files exist`() {
-        // Arrange: Mock the Build.TAGS to simulate a non-rooted device
-        every { Build.TAGS } returns "release-keys"
+    fun `hasTestKeys is false when the build reports no tags`() {
+        assertFalse(SecurityUtils.hasTestKeys(null))
+        assertFalse(SecurityUtils.hasTestKeys(""))
+    }
 
-        // Act
-        // Note: For a true unit test, we should also mock File.exists(), but on a standard 
-        // development machine, these files usually do not exist natively.
-        val isRooted = SecurityUtils.isDeviceRooted()
-
-        // Assert
-        // This will only pass if the developer's machine does not coincidentally have /system/xbin/su
-        assertFalse("Device should not be considered rooted on standard environment", isRooted)
+    /**
+     * A JVM test host carries none of the su binaries the file check looks for
+     * and no `which`, so the whole gate must come out false here. This is what
+     * keeps the release-only check in MainActivity from being a self-inflicted
+     * outage.
+     */
+    @Test
+    fun `isDeviceRooted is false on a plain JVM host`() {
+        assertFalse(SecurityUtils.isDeviceRooted())
     }
 }

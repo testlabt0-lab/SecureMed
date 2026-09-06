@@ -38,10 +38,12 @@ sealed class Route(val route: String) {
     data object Settings : Route("settings")
 
     // ===== Channel sub-screens =====
+    /**
+     * Reserved for the channel chat screen (roadmap Phase 4). Declared but
+     * not yet registered in the NavHost — navigating to it would throw, so
+     * it must stay unused until ChannelChatScreen exists.
+     */
     data object ChannelChat : Route("channel/{id}/chat") {
         fun createRoute(id: String) = "channel/$id/chat"
     }
-
-    // ===== Splash =====
-    data object Splash : Route("splash")
 }

@@ -8,7 +8,7 @@ from apps .analytics .views import (
 DashboardAnalyticsView ,UserActivityViewSet ,SystemMetricViewSet ,
 )
 
-# Comment_74
+# Map HTTP methods to action methods
 analytics_view_overview =DashboardAnalyticsView .as_view ({'get':'overview'})
 analytics_view_security =DashboardAnalyticsView .as_view ({'get':'security'})
 analytics_view_activity_feed =DashboardAnalyticsView .as_view ({'get':'activity_feed'})

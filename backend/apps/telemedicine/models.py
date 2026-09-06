@@ -24,7 +24,7 @@ class Consultation (models .Model ):
     scheduled_time =models .DateTimeField (_ ('وقت الجلسة المجدول'),default =timezone .now )
     status =models .CharField (_ ('الحالة'),max_length =20 ,choices =Status .choices ,default =Status .SCHEDULED )
 
-    # Comment_414
+    # WebRTC / Video Room Info
     room_id =models .CharField (_ ('معرف الغرفة'),max_length =100 ,unique =True ,default =uuid .uuid4 )
     join_url =models .URLField (_ ('رابط الانضمام'),blank =True )
 

@@ -2,6 +2,17 @@
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 
+# Readable release crash traces. Without these, R8 strips line numbers and
+# every production stack trace arrives as a list of obfuscated frames with no
+# way to map it back to source.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
+
+# Note: no explicit -keep is needed for the receivers in reminders/ —
+# AGP synthesises keep rules for every component declared in the merged
+# manifest, so ReminderReceiver and BootReceiver survive shrinking as long
+# as their <receiver> entries stay there.
+
 # Retrofit
 -dontwarn retrofit2.**
 -keep class retrofit2.** { *; }

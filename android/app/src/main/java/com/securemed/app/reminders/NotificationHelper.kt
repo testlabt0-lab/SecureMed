@@ -1,5 +1,6 @@
 package com.securemed.app.reminders
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -24,8 +25,19 @@ object NotificationHelper {
     /** Intent extra that makes MainActivity open the medications screen. */
     const val EXTRA_OPEN_MEDICATIONS = "open_medications"
 
+    /**
+     * Lock-screen stand-ins. A dose reminder names the drug, the dose and the
+     * patient — PHI that must not be readable by whoever picks the phone up,
+     * especially in an app that sets FLAG_SECURE on its own screens. These
+     * carry no clinical detail.
+     */
+    private const val PUBLIC_TITLE = "⏰ تذكير بموعد دواء"
+    private const val PUBLIC_TEXT = "افتح التطبيق لعرض التفاصيل"
+
+    // No SDK_INT guard: minSdk is 26 (O), so notification channels are always
+    // available. The guard that used to sit here could never be true, and lint
+    // flagged it as ObsoleteSdkInt.
     fun ensureChannels(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         val medications = NotificationChannel(
@@ -35,6 +47,9 @@ object NotificationHelper {
         ).apply {
             description = "تنبيهات مواعيد تناول الدواء"
             enableVibration(true)
+            // On O+ the channel governs what a locked screen may render;
+            // per-notification visibility alone is not enough.
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         }
         manager.createNotificationChannel(medications)
     }
@@ -85,6 +100,19 @@ object NotificationHelper {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .setContentIntent(openApp)
+            // Full text only once the device is unlocked; the public version
+            // is what a locked screen shows instead.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(context, CHANNEL_MEDICATIONS)
+                    .setSmallIcon(R.drawable.ic_medication)
+                    .setContentTitle(PUBLIC_TITLE)
+                    .setContentText(PUBLIC_TEXT)
+                    .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                    .setAutoCancel(true)
+                    .setContentIntent(openApp)
+                    .build()
+            )
             .build()
 
         try {

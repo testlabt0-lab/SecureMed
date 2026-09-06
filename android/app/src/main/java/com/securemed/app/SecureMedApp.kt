@@ -5,6 +5,7 @@ import com.securemed.app.data.ConnectivityObserver
 import com.securemed.app.data.local.LocalCache
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.reminders.NotificationHelper
+import com.securemed.app.security.AppLock
 import com.securemed.app.ui.theme.ThemeController
 import dagger.hilt.android.HiltAndroidApp
 
@@ -30,6 +31,10 @@ class SecureMedApp : Application() {
         super.onCreate()
         instance = this
         SecurePreferences.init(this)
+        // After SecurePreferences: the idle timeout is stored there. Before any
+        // screen exists, because MainActivity checks the lock in onResume and a
+        // process that was killed while locked must come back locked.
+        AppLock.init()
         LocalCache.init(this)
         NotificationHelper.ensureChannels(this)
         ThemeController.init(SecurePreferences.darkMode)

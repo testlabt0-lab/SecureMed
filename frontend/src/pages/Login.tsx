@@ -14,8 +14,7 @@ import AnimatedBackground from '../components/fx/AnimatedBackground';
 import ECGLine from '../components/fx/ECGLine';
 import {
   isWebAuthnAvailable, isBiometricAvailable,
-  enrollBiometric, loginWithBiometric,
-  getCredentialByEmail,
+  loginWithBiometric, isEnrolledOnThisDevice,
 } from '../utils/webauthn';
 import { getDeviceFingerprint, DeviceInfo } from '../utils/deviceFingerprint';
 
@@ -103,53 +102,31 @@ export default function Login() {
 
     setLoading(true);
     try {
-      // Check if biometric is available on this device
       const available = await isBiometricAvailable();
       if (!available) {
         toast.error('البصمة غير متاحة على هذا الجهاز. استخدم جهازاً به بصمة (Windows Hello / Touch ID)');
-        setLoading(false);
         return;
       }
 
-      // Check if user has registered biometric
-      const stored = getCredentialByEmail(email);
-      if (!stored) {
-        toast.error('البصمة غير مسجلة لهذا المستخدم. سجل الدخول بكلمة المرور ثم فعّل البصمة من الملف الشخصي');
-        setLoading(false);
+      // Only a UI hint: the server is the one that decides, and it answers an
+      // unknown account with an indistinguishable decoy challenge on purpose.
+      if (!isEnrolledOnThisDevice(email)) {
+        toast.error('البصمة غير مسجلة لهذا المستخدم على هذا الجهاز. سجل الدخول بكلمة المرور ثم فعّل البصمة من الملف الشخصي');
         return;
       }
 
-      // Use WebAuthn for biometric authentication
+      // One call, three round trips: challenge → get() → signature. Nothing about
+      // the ceremony is decided here any more, and the signature — which the old
+      // code dropped in favour of `assertion.id` — is what the server verifies.
       const result = await loginWithBiometric(email);
       if (!result.success) {
         toast.error(result.error || 'فشل المصادقة البيومترية');
-        setLoading(false);
         return;
       }
 
-      // Get a challenge from the server (or generate locally for demo)
-      try {
-        const challengeData = await authAPI.biometricChallenge(email, `web-${navigator.userAgent.slice(0, 30)}`);
-        // Send the WebAuthn assertion to the server for verification
-        // In production, the server verifies the assertion cryptographically
-        // For demo, we use the assertion as the biometric response
-        const biometricResponse = result.assertion?.id || `webauthn-${Date.now()}`;
-        const biometricTemplate = `webauthn-template-${result.assertion?.id || ''}`;
-
-        const { data: loginData } = await authAPI.biometricLogin({
-          challenge_id: challengeData.data.challenge_id,
-          biometric_response: biometricResponse,
-          biometric_template: biometricTemplate,
-        });
-
-        setAuth(loginData.user, loginData.tokens);
-        toast.success(`مرحباً ${loginData.user.full_name} (بصمة WebAuthn)`);
-        navigate('/dashboard');
-      } catch (apiErr: any) {
-        // Fallback: if server biometric API fails, try direct login with WebAuthn result
-        // This allows demo without a fully configured backend biometric profile
-        toast.error(apiErr.response?.data?.detail || 'فشل التحقق من الخادم');
-      }
+      setAuth(result.user, result.tokens);
+      toast.success(`مرحباً ${result.user.full_name} (بصمة WebAuthn)`);
+      navigate('/dashboard');
     } catch (err: any) {
       toast.error(err.message || 'فشل المصادقة البيومترية');
     } finally {

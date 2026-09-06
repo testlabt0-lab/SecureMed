@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
@@ -10,8 +11,10 @@ import {
 import toast from 'react-hot-toast';
 import { authAPI, usersAPI } from '../api/client';
 import { settingsAPI } from '../api/extendedApis';
+import { enrollBiometric, isBiometricAvailable } from '../utils/webauthn';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
+import { roleLabel } from '../constants/roles';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -61,7 +64,10 @@ function AccountTab() {
         <div>
           <p className="font-semibold text-white">{user?.full_name}</p>
           <p className="text-sm text-gray-400">{user?.email}</p>
-          <p className="text-xs text-primary-400 mt-0.5">{user?.role}</p>
+          {/* roleLabel, not user.role: this rendered the raw backend code, so the
+              account card read 'LAB_TECH' while the sidebar under it read
+              'فني مختبر' for the same person. */}
+          <p className="text-xs text-primary-400 mt-0.5">{roleLabel(user?.role)}</p>
         </div>
       </div>
 
@@ -102,7 +108,8 @@ function AccountTab() {
 // ─── Security Tab ─────────────────────────────────────────────────────────────
 
 function SecurityTab() {
-  const user = useAuthStore(state => state.user);
+  const { user, updateUser } = useAuthStore();
+  const queryClient = useQueryClient();
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [pwForm, setPwForm] = useState({ old_password: '', new_password: '', confirm_password: '' });
@@ -125,18 +132,72 @@ function SecurityTab() {
   });
   const totpEnabled = totpRes?.data?.mfa_enabled || (user as any)?.mfa_enabled || (user as any)?.two_factor_enabled;
 
+  // /auth/2fa/setup/ generates and stores a fresh secret server-side, so firing it
+  // without ever showing the QR left the user with a rotated secret, no way to scan
+  // it and a button that did nothing visible. Hold the response and render it.
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth_url: string; qr_image: string } | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+
   const setupTotpMutation = useMutation({
     mutationFn: () => settingsAPI.totpSetup(),
     onSuccess: (res) => {
+      setTotpSetup(res.data);
+      setTotpCode('');
       toast.success('افتح تطبيق المصادقة وامسح الرمز');
     },
-    onError: () => toast.error('فشل إعداد المصادقة الثنائية'),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'فشل إعداد المصادقة الثنائية'),
   });
+
+  const verifyTotpMutation = useMutation({
+    mutationFn: (code: string) => settingsAPI.totpVerify(code),
+    onSuccess: () => {
+      setTotpSetup(null);
+      setTotpCode('');
+      queryClient.invalidateQueries({ queryKey: ['totp-status'] });
+      toast.success('تم تفعيل التحقق بخطوتين');
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'الرمز غير صحيح'),
+  });
+
+  // Previously declared and never rendered, so this panel could turn 2FA on but not
+  // off — the user had to find a different page to disable it. The server requires a
+  // valid TOTP code to disable, hence the same six-digit input as the enable step.
+  const [showTotpDisable, setShowTotpDisable] = useState(false);
 
   const disableTotpMutation = useMutation({
     mutationFn: (code: string) => settingsAPI.totpDisable(code),
-    onSuccess: () => toast.success('تم تعطيل التحقق بخطوتين'),
-    onError: () => toast.error('الرمز غير صحيح'),
+    onSuccess: () => {
+      setShowTotpDisable(false);
+      setTotpCode('');
+      queryClient.invalidateQueries({ queryKey: ['totp-status'] });
+      toast.success('تم تعطيل التحقق بخطوتين');
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'الرمز غير صحيح'),
+  });
+
+  // Biometrics. This section used to be a paragraph telling the user to go to the
+  // profile page to enrol — the only screen that could actually run the ceremony
+  // was /security/settings, so two of the three security panels were dead ends.
+  // enrollBiometric() owns the whole WebAuthn ceremony, so calling it here adds no
+  // duplicate protocol code.
+  const [webauthnSupported, setWebauthnSupported] = useState<boolean | null>(null);
+  useEffect(() => {
+    isBiometricAvailable().then(setWebauthnSupported).catch(() => setWebauthnSupported(false));
+  }, []);
+
+  const enrollMutation = useMutation({
+    mutationFn: async () => {
+      const result = await enrollBiometric();
+      if (!result.success) throw new Error(result.error || 'فشل تسجيل البصمة');
+    },
+    onSuccess: () => {
+      // is_biometric_enabled comes from the user serializer, so the badge above
+      // stays stale until the store is updated — SecuritySettings never did this
+      // and left the page claiming "غير مفعّلة" right after a successful enrolment.
+      updateUser({ is_biometric_enabled: true });
+      toast.success('تم تسجيل البصمة على هذا الجهاز');
+    },
+    onError: (err: any) => toast.error(err?.message || 'فشل تسجيل البصمة'),
   });
 
   return (
@@ -197,34 +258,145 @@ function SecurityTab() {
         </div>
 
         {!totpEnabled ? (
-          <button
-            onClick={() => setupTotpMutation.mutate()}
-            disabled={setupTotpMutation.isPending}
-            className="flex items-center gap-2 bg-emerald-600/80 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            <QrCode className="w-4 h-4" />
-            تفعيل التحقق بخطوتين
-          </button>
+          totpSetup ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-400">
+                امسح الرمز بتطبيق المصادقة ثم أدخل الرمز المؤقت لتأكيد التفعيل.
+              </p>
+              {/* qr_image is a data: URI rendered by the server. The provisioning URI
+                  carries the shared secret, so it must never be handed to an external
+                  QR service. */}
+              <div className="flex justify-center bg-white p-4 rounded-xl w-fit mx-auto">
+                <img src={totpSetup.qr_image} alt="رمز QR للمصادقة الثنائية" className="w-44 h-44" />
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-center tracking-wider text-gray-200 select-all">
+                  {totpSetup.secret}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => { navigator.clipboard.writeText(totpSetup.secret); toast.success('تم النسخ'); }}
+                  className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-300 transition-colors"
+                  title="نسخ الرمز السري"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={totpCode}
+                  onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  placeholder="000000"
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white text-center tracking-[0.4em] focus:outline-none focus:border-emerald-500 transition-colors"
+                />
+                <button
+                  onClick={() => verifyTotpMutation.mutate(totpCode)}
+                  disabled={totpCode.length !== 6 || verifyTotpMutation.isPending}
+                  className="bg-emerald-600/80 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  تأكيد
+                </button>
+              </div>
+              <button
+                onClick={() => { setTotpSetup(null); setTotpCode(''); }}
+                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setupTotpMutation.mutate()}
+              disabled={setupTotpMutation.isPending}
+              className="flex items-center gap-2 bg-emerald-600/80 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              <QrCode className="w-4 h-4" />
+              تفعيل التحقق بخطوتين
+            </button>
+          )
         ) : (
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            التحقق بخطوتين مفعّل ويحمي حسابك.
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              التحقق بخطوتين مفعّل ويحمي حسابك.
+            </div>
+
+            {!showTotpDisable ? (
+              <button
+                onClick={() => { setShowTotpDisable(true); setTotpCode(''); }}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              >
+                تعطيل التحقق بخطوتين
+              </button>
+            ) : (
+              <div className="space-y-2 pt-1 border-t border-white/10">
+                <p className="text-xs text-amber-400 pt-2">
+                  التعطيل يُضعف حماية حسابك. أدخل رمزاً حالياً من تطبيق المصادقة للتأكيد.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={totpCode}
+                    onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode="numeric"
+                    placeholder="000000"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white text-center tracking-[0.4em] focus:outline-none focus:border-red-500 transition-colors"
+                  />
+                  <button
+                    onClick={() => disableTotpMutation.mutate(totpCode)}
+                    disabled={totpCode.length !== 6 || disableTotpMutation.isPending}
+                    className="bg-red-600/80 hover:bg-red-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    تعطيل
+                  </button>
+                </div>
+                <button
+                  onClick={() => { setShowTotpDisable(false); setTotpCode(''); }}
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  إلغاء
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>
 
       {/* Biometric */}
       <section className="bg-white/5 border border-white/10 rounded-2xl p-5">
-        <div className="flex items-center gap-2 mb-2">
-          <Shield className="w-5 h-5 text-purple-400" />
-          <h3 className="font-semibold text-white">المصادقة البيومترية</h3>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-purple-400" />
+            <h3 className="font-semibold text-white">المصادقة البيومترية</h3>
+          </div>
+          <span className={`text-xs px-2 py-1 rounded-full ${user?.is_biometric_enabled ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-500/20 text-gray-400'}`}>
+            {user?.is_biometric_enabled ? 'مفعّلة' : 'معطّلة'}
+          </span>
         </div>
         <p className="text-sm text-gray-400 mb-3">
-          تسجيل الدخول بالبصمة أو Face ID أو Windows Hello
+          تسجيل الدخول بالبصمة أو Face ID أو Windows Hello. التسجيل يخص هذا الجهاز
+          والمتصفح الحالي فقط، ويلزم تكراره على كل جهاز تريد الدخول منه.
         </p>
-        <div className={`text-xs px-3 py-2 rounded-lg ${user?.is_biometric_enabled ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-500/10 text-gray-400'}`}>
-          {user?.is_biometric_enabled ? '✓ البصمة مسجّلة على هذا الجهاز' : 'البصمة غير مسجّلة — يمكنك تسجيلها من صفحة الدخول'}
-        </div>
+
+        {webauthnSupported === false ? (
+          <div className="text-xs px-3 py-2 rounded-lg bg-gray-500/10 text-gray-400">
+            هذا المتصفح أو الجهاز لا يدعم المصادقة البيومترية (WebAuthn).
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => enrollMutation.mutate()}
+              disabled={enrollMutation.isPending || webauthnSupported === null}
+              className="flex items-center gap-2 bg-purple-600/80 hover:bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              <Smartphone className="w-4 h-4" />
+              {enrollMutation.isPending ? 'جاري التسجيل...' : 'تسجيل هذا الجهاز'}
+            </button>
+            <Link to="/profile" className="text-xs text-gray-400 hover:text-gray-200 transition-colors">
+              إدارة الأجهزة المسجّلة وسحب صلاحياتها
+            </Link>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -232,26 +404,119 @@ function SecurityTab() {
 
 // ─── Notifications Tab ────────────────────────────────────────────────────────
 
+/**
+ * The nine toggles this tab used to show (email_critical, push_high,
+ * weekly_digest, ...) do not exist on the server: NotificationPreference stores
+ * per-category flags, not per-severity ones. Nothing was ever loaded, and "حفظ
+ * التفضيلات" only fired a success toast — a user who turned security alerts off
+ * was told it saved while the server kept mailing them. These are the real
+ * fields, from backend/apps/notifications/serializers.py.
+ *
+ * Who enforces what (backend/apps/notifications/utils.py::send_notification):
+ *  - email_*      → the server checks these before sending mail.
+ *  - quiet_hours_* → the server suppresses mail inside the window. There was no
+ *                    way to set them from the UI at all, so the feature was dead.
+ *  - push_* / in_app_all → the server stores them and never reads them; the row
+ *                    is always created and the browser notification is decided
+ *                    client-side in components/Layout.tsx, which now honours
+ *                    these two so the toggles are not decoration.
+ */
+type PrefKey =
+  | 'email_channel_updates' | 'email_security_alerts' | 'email_medical_records'
+  | 'push_channel_updates' | 'push_security_alerts' | 'push_medical_records'
+  | 'in_app_all';
+
+type NotificationPrefs = Record<PrefKey, boolean>;
+
+/** Mirrors the model defaults so the first paint matches a fresh server row. */
+const defaultPrefs: NotificationPrefs = {
+  email_channel_updates: true,
+  email_security_alerts: true,
+  email_medical_records: false,
+  push_channel_updates: true,
+  push_security_alerts: true,
+  push_medical_records: true,
+  in_app_all: true,
+};
+
+const PREF_KEYS = Object.keys(defaultPrefs) as PrefKey[];
+
+const emailPrefRows: { key: PrefKey; label: string; sub?: string }[] = [
+  { key: 'email_channel_updates', label: 'تحديثات القنوات', sub: 'الدعوات والتحديثات والإغلاق' },
+  { key: 'email_security_alerts', label: 'تنبيهات الأمان', sub: 'محاولات دخول مشبوهة وأحداث أمنية' },
+  { key: 'email_medical_records', label: 'السجلات الطبية', sub: 'إضافة سجل طبي جديد لمريض' },
+];
+
+const pushPrefRows: { key: PrefKey; label: string; sub?: string }[] = [
+  { key: 'push_channel_updates', label: 'تحديثات القنوات' },
+  { key: 'push_security_alerts', label: 'تنبيهات الأمان' },
+  { key: 'push_medical_records', label: 'السجلات الطبية' },
+];
+
 function NotificationsTab() {
-  const [prefs, setPrefs] = useState({
-    email_critical: true, email_high: true, email_medium: false,
-    push_critical: true, push_high: true, push_medium: true,
-    appointment_reminders: true, security_alerts: true,
-    weekly_digest: true,
+  const qc = useQueryClient();
+  const [prefs, setPrefs] = useState<NotificationPrefs>(defaultPrefs);
+  // TimeField serialises as 'HH:MM:SS' and accepts 'HH:MM'; '' means "no window",
+  // which has to go to the server as null, not as an empty string.
+  const [quietStart, setQuietStart] = useState('');
+  const [quietEnd, setQuietEnd] = useState('');
+  const [dirty, setDirty] = useState(false);
+
+  const { data: prefsRes, isLoading } = useQuery({
+    queryKey: ['notification-prefs'],
+    queryFn: () => settingsAPI.notificationPrefs(),
   });
 
-  const toggle = (key: keyof typeof prefs) =>
-    setPrefs(p => ({ ...p, [key]: !p[key] }));
+  // Server values win until the user touches a control; without the `dirty`
+  // guard a background refetch would revert edits mid-session.
+  useEffect(() => {
+    const d = prefsRes?.data;
+    if (!d || dirty) return;
+    const next = { ...defaultPrefs };
+    // Copy only the keys this tab owns, so `id`/`user` never ride along into the
+    // PATCH body and an added server field cannot leak in untyped.
+    PREF_KEYS.forEach(k => { if (typeof d[k] === 'boolean') next[k] = d[k]; });
+    setPrefs(next);
+    setQuietStart((d.quiet_hours_start || '').slice(0, 5));
+    setQuietEnd((d.quiet_hours_end || '').slice(0, 5));
+  }, [prefsRes, dirty]);
 
-  const ToggleSwitch = ({ k }: { k: keyof typeof prefs }) => (
-    <button onClick={() => toggle(k)} className="flex-shrink-0">
+  const toggle = (key: PrefKey) => {
+    setPrefs(p => ({ ...p, [key]: !p[key] }));
+    setDirty(true);
+  };
+
+  const quietIncomplete = (!!quietStart) !== (!!quietEnd);
+
+  const saveMutation = useMutation({
+    mutationFn: () => settingsAPI.updateNotificationPrefs({
+      ...prefs,
+      quiet_hours_start: quietStart || null,
+      quiet_hours_end: quietEnd || null,
+    }),
+    onSuccess: () => {
+      setDirty(false);
+      qc.invalidateQueries({ queryKey: ['notification-prefs'] });
+      toast.success('تم حفظ تفضيلات الإشعارات');
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail || 'فشل حفظ التفضيلات'),
+  });
+
+  const ToggleSwitch = ({ k }: { k: PrefKey }) => (
+    <button
+      onClick={() => toggle(k)}
+      disabled={isLoading}
+      className="flex-shrink-0 disabled:opacity-40"
+      aria-pressed={prefs[k]}
+    >
       {prefs[k]
         ? <ToggleRight className="w-8 h-8 text-primary-500" />
         : <ToggleLeft className="w-8 h-8 text-gray-600" />}
     </button>
   );
 
-  const Row = ({ label, sub, k }: { label: string; sub?: string; k: keyof typeof prefs }) => (
+  const Row = ({ label, sub, k }: { label: string; sub?: string; k: PrefKey }) => (
     <div className="flex items-center justify-between py-3 border-b border-white/5 last:border-0">
       <div>
         <p className="text-sm text-white">{label}</p>
@@ -264,35 +529,73 @@ function NotificationsTab() {
   return (
     <div className="space-y-5">
       <section className="bg-white/5 border border-white/10 rounded-2xl p-5">
-        <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
+        <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
           <Bell className="w-4 h-4 text-primary-400" /> إشعارات البريد الإلكتروني
         </h3>
-        <Row label="أحداث حرجة (CRITICAL)" sub="تُرسل فوراً" k="email_critical" />
-        <Row label="أحداث عالية (HIGH)" sub="تُرسل خلال 5 دقائق" k="email_high" />
-        <Row label="أحداث متوسطة (MEDIUM)" k="email_medium" />
+        <p className="text-xs text-gray-500 mb-2">يطبّقها الخادم قبل إرسال أي رسالة.</p>
+        {emailPrefRows.map(r => (
+          <Row key={r.key} label={r.label} sub={r.sub} k={r.key} />
+        ))}
       </section>
 
       <section className="bg-white/5 border border-white/10 rounded-2xl p-5">
-        <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
-          <Monitor className="w-4 h-4 text-emerald-400" /> إشعارات المتصفح (Push)
+        <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-amber-400" /> ساعات الهدوء
         </h3>
-        <Row label="حرجة" k="push_critical" />
-        <Row label="عالية" k="push_high" />
-        <Row label="متوسطة" k="push_medium" />
+        <p className="text-xs text-gray-500 mb-3">
+          لا تُرسل رسائل البريد داخل هذه الفترة. اتركها فارغة لتعطيلها.
+        </p>
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-gray-400">
+            من
+            <input
+              type="time"
+              value={quietStart}
+              onChange={e => { setQuietStart(e.target.value); setDirty(true); }}
+              className="block mt-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+            />
+          </label>
+          <label className="text-xs text-gray-400">
+            إلى
+            <input
+              type="time"
+              value={quietEnd}
+              onChange={e => { setQuietEnd(e.target.value); setDirty(true); }}
+              className="block mt-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+            />
+          </label>
+        </div>
+        {quietIncomplete && (
+          <p className="text-xs text-amber-400 mt-2">
+            الفترة تحتاج وقت بداية ونهاية معاً، وإلا تُهمل.
+          </p>
+        )}
       </section>
 
       <section className="bg-white/5 border border-white/10 rounded-2xl p-5">
-        <h3 className="font-semibold text-white mb-3">إعدادات متقدمة</h3>
-        <Row label="تذكيرات المواعيد" sub="24 ساعة و1 ساعة قبل الموعد" k="appointment_reminders" />
-        <Row label="تنبيهات الأمان" sub="محاولات دخول مشبوهة وهجمات" k="security_alerts" />
-        <Row label="الملخص الأسبوعي" sub="كل أحد الساعة 8 صباحاً" k="weekly_digest" />
+        <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
+          <Monitor className="w-4 h-4 text-emerald-400" /> تنبيهات المتصفح
+        </h3>
+        <p className="text-xs text-gray-500 mb-2">
+          تُطبَّق في هذا المتصفح على التنبيهات المنبثقة فقط؛ سجل الإشعارات يبقى كاملاً.
+        </p>
+        {pushPrefRows.map(r => (
+          <Row key={r.key} label={r.label} sub={r.sub} k={r.key} />
+        ))}
+        <Row
+          label="إيقاف كل التنبيهات المنبثقة"
+          sub="تعطيل هذا الخيار يكتم المنبثقات كلها مهما كانت الخيارات أعلاه"
+          k="in_app_all"
+        />
       </section>
 
       <button
-        onClick={() => toast.success('تم حفظ تفضيلات الإشعارات')}
-        className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
+        onClick={() => saveMutation.mutate()}
+        disabled={!dirty || saveMutation.isPending}
+        className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
       >
-        <Save className="w-4 h-4" /> حفظ التفضيلات
+        <Save className="w-4 h-4" />
+        {saveMutation.isPending ? 'يتم الحفظ...' : 'حفظ التفضيلات'}
       </button>
     </div>
   );

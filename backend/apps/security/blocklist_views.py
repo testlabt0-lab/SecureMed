@@ -62,7 +62,7 @@ class DeviceRegistryViewSet (viewsets .ReadOnlyModelViewSet ):
             status =status .HTTP_400_BAD_REQUEST ,
             )
 
-            # Comment_310
+            # Module activation tracking
         from apps .basins .utils import ensure_module_enabled 
         ensure_module_enabled (request .user ,f'device_{module }')
 

@@ -10,12 +10,12 @@ import ipaddress
 import logging 
 from concurrent .futures import ThreadPoolExecutor ,as_completed 
 from dataclasses import dataclass ,asdict 
-from typing import List ,Dict ,Optional 
-from datetime import datetime 
+from typing import List ,Dict ,Optional
+from django .utils import timezone
 
 logger =logging .getLogger ('security')
 
-# Comment_350
+# Common service ports to scan
 COMMON_PORTS ={
 20 :'FTP-Data',
 21 :'FTP',
@@ -49,7 +49,7 @@ COMMON_PORTS ={
 27017 :'MongoDB',
 }
 
-# Comment_351
+# High-risk ports that should never be exposed
 HIGH_RISK_PORTS =[23 ,445 ,1433 ,3389 ,5900 ,6379 ,27017 ]
 
 
@@ -57,8 +57,8 @@ HIGH_RISK_PORTS =[23 ,445 ,1433 ,3389 ,5900 ,6379 ,27017 ]
 class PortResult :
     port :int 
     service :str 
-    state :str # Comment_352
-    risk_level :str # Comment_353
+    state :str # 'open', 'closed', 'filtered'
+    risk_level :str # 'critical', 'high', 'medium', 'low', 'info'
     banner :Optional [str ]=None 
 
 
@@ -96,7 +96,7 @@ class PortScanner :
             result =sock .connect_ex ((host ,port ))
 
             if result ==0 :
-            # Comment_354
+            # Port is open, try to grab banner
                 banner =self ._grab_banner (sock ,port )
                 return PortResult (
                 port =port ,service =service ,
@@ -127,7 +127,7 @@ class PortScanner :
 
     def scan_host (self ,host :str ,ports :Optional [List [int ]]=None )->ScanResult :
         """Scan multiple ports on a host in parallel."""
-        # Comment_355
+        # Validate host (security: only allow localhost or private IPs for demo)
         if not self ._is_scan_allowed (host ):
             raise ValueError (f"غير مسموح بمسح المضيف: {host }")
 
@@ -145,10 +145,10 @@ class PortScanner :
             for future in as_completed (future_to_port ):
                 results .append (future .result ())
 
-                # Comment_356
+                # Sort by port number
         results .sort (key =lambda r :r .port )
 
-        # Comment_357
+        # Build summary
         open_ports =[r for r in results if r .state =='open']
         high_risk_open =[r for r in open_ports if r .port in HIGH_RISK_PORTS ]
 
@@ -158,7 +158,7 @@ class PortScanner :
 
         return ScanResult (
         target =host ,
-        scan_time =datetime .utcnow ().isoformat ()+'Z',
+        scan_time =timezone .now ().isoformat ().replace ('+00:00','Z'),
         duration_seconds =round (duration ,2 ),
         ports_scanned =len (results ),
         open_ports =len (open_ports ),
@@ -201,10 +201,10 @@ class PortScanner :
         """Check if scanning this host is allowed (security)."""
         try :
             ip =ipaddress .ip_address (host )
-            # Comment_358
+            # Allow only private IPs and loopback
             return ip .is_private or ip .is_loopback 
         except ValueError :
-        # Comment_359
+        # Hostname - allow localhost only
             return host in ['localhost','127.0.0.1','0.0.0.0']  # nosec B104
 
     def _generate_risk_assessment (self ,open_ports ,high_risk_open )->str :
@@ -232,7 +232,7 @@ class PortScanner :
         return ' '.join (assessment_parts )
 
 
-        # Comment_360
+        # Convenience function
 def scan_host_ports (host :str ='localhost',ports :Optional [List [int ]]=None )->Dict :
     """Run a port scan and return results as dict."""
     scanner =PortScanner ()

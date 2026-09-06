@@ -1,82 +1,136 @@
-import { useEffect, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { notificationsApi } from '../api/extendedApis';
+import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '../store/authStore';
+
+/**
+ * Live notification socket.
+ *
+ * This hook was dead code and would not have worked if it had been wired up: it
+ * read the access token from `localStorage`, where this app has never kept it
+ * (Zustand persists to `sessionStorage`), so the socket connected anonymously. The
+ * backend answered in kind — `NotificationConsumer` accepted anonymous handshakes
+ * and joined no group — so the connection stayed open and silent forever. Both
+ * halves are fixed: the token comes from the store, and the consumer now closes
+ * anonymous handshakes with 4001.
+ *
+ * The token travels as a WebSocket subprotocol rather than `?token=`, because query
+ * strings are written to proxy access logs and a logged access token is a
+ * credential at rest. `Sec-WebSocket-Protocol` is the only client-controlled
+ * request header the browser WebSocket API exposes.
+ *
+ * The hook owns the socket only. The unread count itself stays a React Query cache
+ * entry owned by whoever displays it — this just invalidates it on push, so the
+ * badge updates from one code path whether the number arrived by socket or by the
+ * fallback poll.
+ */
+
+/** Server-sent close code meaning "the token was refused"; see the consumer. */
+const CLOSE_UNAUTHENTICATED = 4001;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+/** Idle sockets are dropped by many reverse proxies at 60s. */
+const PING_INTERVAL_MS = 30000;
+
+export type SocketState = 'idle' | 'connecting' | 'open' | 'closed' | 'unauthorised';
 
 export function useRealtimeNotifications() {
   const queryClient = useQueryClient();
-  const wsRef = useRef<WebSocket | null>(null);
+  const accessToken = useAuthStore((s) => s.tokens?.access);
+  const [state, setState] = useState<SocketState>('idle');
 
-  // Initial fetch for count
-  const { data } = useQuery({
-    queryKey: ['unread-count'],
-    queryFn: () => notificationsApi.unreadCount(),
-    refetchOnWindowFocus: true,
-  });
+  const socketRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef(0);
+  const timersRef = useRef<{ reconnect?: number; ping?: number }>({});
 
   useEffect(() => {
-    // Determine WS protocol
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Use window.location.host, but fallback to localhost:8000 for local dev if needed
-    const host = window.location.host;
-    
-    // Check if token exists to pass (if using token-based WS auth, but channels might use session)
-    const token = localStorage.getItem('access_token');
-    // Using a query param for token if backend supports it, otherwise standard connection
-    const wsUrl = `${protocol}//${host}/ws/notifications/${token ? `?token=${token}` : ''}`;
+    if (!accessToken) {
+      setState('idle');
+      return;
+    }
 
-    const connectWs = () => {
-      const ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        console.log('Connected to real-time notifications');
-      };
+    let disposed = false;
 
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'notification') {
-            // Invalidate queries so UI updates instantly
-            queryClient.invalidateQueries({ queryKey: ['unread-count'] });
-            queryClient.invalidateQueries({ queryKey: ['recent-notifications'] });
-          }
-        } catch (e) {
-          console.error('Error parsing WS message', e);
-        }
-      };
-
-      ws.onclose = () => {
-        console.log('Disconnected from real-time notifications. Reconnecting in 5s...');
-        setTimeout(connectWs, 5000);
-      };
-      
-      wsRef.current = ws;
+    const clearTimers = () => {
+      if (timersRef.current.reconnect) window.clearTimeout(timersRef.current.reconnect);
+      if (timersRef.current.ping) window.clearInterval(timersRef.current.ping);
+      timersRef.current = {};
     };
 
-    connectWs();
+    const connect = () => {
+      if (disposed) return;
+
+      const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      setState('connecting');
+
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(
+          `${scheme}//${window.location.host}/ws/notifications/`,
+          ['access_token', accessToken],
+        );
+      } catch {
+        setState('closed');
+        return;
+      }
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        if (disposed) return;
+        retryRef.current = 0;
+        setState('open');
+        timersRef.current.ping = window.setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ action: 'ping' }));
+          }
+        }, PING_INTERVAL_MS);
+      };
+
+      socket.onmessage = (event) => {
+        let message: any;
+        try {
+          message = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        if (message?.type !== 'notification') return;
+        queryClient.invalidateQueries({ queryKey: ['unread-count'] });
+        queryClient.invalidateQueries({ queryKey: ['recent-notifications'] });
+        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      };
+
+      socket.onclose = (event) => {
+        if (timersRef.current.ping) window.clearInterval(timersRef.current.ping);
+        if (disposed) return;
+
+        // A refused token will be refused again on every retry, so reconnecting is
+        // a hot loop against the auth path. The axios interceptor refreshes the
+        // token on the next API call; that changes `accessToken`, which re-runs
+        // this effect — the only thing that should reopen the socket.
+        if (event.code === CLOSE_UNAUTHENTICATED) {
+          setState('unauthorised');
+          return;
+        }
+
+        setState('closed');
+        const delay = Math.min(RECONNECT_BASE_MS * 2 ** retryRef.current, RECONNECT_MAX_MS);
+        retryRef.current += 1;
+        timersRef.current.reconnect = window.setTimeout(connect, delay);
+      };
+    };
+
+    connect();
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.onclose = null; // prevent reconnect on unmount
-        wsRef.current.close();
+      disposed = true;
+      clearTimers();
+      const socket = socketRef.current;
+      socketRef.current = null;
+      if (socket) {
+        socket.onclose = null; // our own teardown must not schedule a reconnect
+        socket.close();
       }
     };
-  }, [queryClient]);
+  }, [accessToken, queryClient]);
 
-  return {
-    unreadCount: data?.data?.unread_count || 0,
-  };
-}
-
-/**
- * Hook for recent notifications.
- */
-export function useRecentNotifications(limit = 5) {
-  return useQuery({
-    queryKey: ['recent-notifications', limit],
-    queryFn: () => notificationsApi.list({ page_size: limit }),
-    select: (data) => {
-      const results = data.data?.results || data.data || [];
-      return results.slice(0, limit);
-    },
-  });
+  return { state, connected: state === 'open' };
 }

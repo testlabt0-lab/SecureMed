@@ -45,24 +45,22 @@ def _check_redis ():
 
 
 def _check_ai_service ():
-    """Verify AI service reachability."""
-    import requests 
-    ai_url =getattr (settings ,'AI_SERVICE_URL','http://localhost:8100')
-    t0 =time .monotonic ()
-    try :
-        resp = requests.get(
-            f'{ai_url}/health',
-            headers={'User-Agent': 'SecureMed-HealthCheck/1.0'},
-            timeout=3
-        )
-        latency_ms =round ((time .monotonic ()-t0 )*1000 ,2 )
-        return {
-        'status':'ok'if resp .status_code ==200 else 'degraded',
-        'latency_ms':latency_ms ,
-        'http_status':resp .status_code ,
-        }
-    except Exception as exc :
-        return {'status':'degraded','detail':str (exc )}
+    """Report whether the AI module can answer.
+
+    This used to open an HTTP connection to AI_SERVICE_URL/health — a Node
+    microservice that no longer exists: the AI endpoints call Gemini in-process
+    (apps.ai.views). The probe therefore reported 'degraded' forever in every
+    deployment and spent up to 3 seconds per readiness check waiting for a
+    connection to 127.0.0.1:8100 to be refused. What a caller actually needs to
+    know is whether the module is configured, which is a settings lookup.
+    """
+    configured =bool (getattr (settings ,'GEMINI_API_KEY',''))
+    return {
+    'status':'ok'if configured else 'degraded',
+    'configured':configured ,
+    'provider':'google-generativeai (in-process)',
+    'detail':''if configured else 'GEMINI_API_KEY is not set — AI features are disabled',
+    }
 
 
 def _check_disk ():
@@ -118,6 +116,13 @@ def readiness (request ):
     Full readiness check.
     Returns 200 only when ALL critical dependencies are healthy.
     Used by: load balancers, Kubernetes readinessProbe.
+
+    The per-check detail is not public. `checks` carries database latency, disk
+    usage, worker counts and — via `str(exc)` — verbatim driver errors, which for a
+    connection failure include the database host, port and user. That is a free
+    infrastructure map for an unauthenticated caller. The status code still tells a
+    load balancer everything it needs (200 vs 503) without a body, so only a caller
+    that passes the same gate as /metrics gets the breakdown.
     """
     checks ={
     'database':_check_database (),
@@ -127,22 +132,32 @@ def readiness (request ):
     'celery':_check_celery (),
     }
 
-    # Comment_195
+    # Determine overall status
     statuses =[v ['status']for v in checks .values ()]
     if 'error'in statuses or 'critical'in statuses :
         overall ='unhealthy'
-        http_code =503 
+        http_code =503
     elif 'degraded'in statuses or 'warning'in statuses :
         overall ='degraded'
-        http_code =200 # Comment_196
+        http_code =200 # still serving traffic — just warn
     else :
         overall ='healthy'
-        http_code =200 
+        http_code =200
 
-    return JsonResponse ({
+    payload ={
     'status':overall ,
     'service':'SecureMed API',
     'version':'2.0.0',
-    'checks':checks ,
     'timestamp':time .strftime ('%Y-%m-%dT%H:%M:%SZ',time .gmtime ()),
-    },status =http_code )
+    }
+
+    from apps .core .metrics import internal_access_allowed
+    _user =getattr (request ,'user',None )
+    if internal_access_allowed (request )or getattr (_user ,'is_staff',False ):
+        payload ['checks']=checks
+    else :
+        # Which dependency is unhealthy is itself useful to an attacker, so the
+        # anonymous view is limited to the names of the checks that ran.
+        payload ['checked']=sorted (checks )
+
+    return JsonResponse (payload ,status =http_code )

@@ -6,7 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Videocam
@@ -34,7 +34,7 @@ fun TelemedicineScreen(
                 title = { Text("التطبيب عن بعد") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "رجوع")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                     }
                 }
             )
@@ -100,7 +100,10 @@ fun TelemedicineSessionCard(session: TelemedicineSession) {
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "رقم الموعد: ${session.appointment}",
+                    // The appointment id is optional (a consultation can be
+                    // opened without one) and means nothing to a reader, so
+                    // the patient is the heading.
+                    text = session.patientName ?: "مريض غير معروف",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -109,6 +112,13 @@ fun TelemedicineSessionCard(session: TelemedicineSession) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (session.scheduledTime != null) {
+                    Text(
+                        text = "الموعد: ${session.scheduledTime}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (session.startedAt != null) {
                     Text(
                         text = "وقت البدء: ${session.startedAt}",

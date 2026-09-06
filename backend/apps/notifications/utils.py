@@ -33,10 +33,10 @@ send_email =True ,
         related_object_id: UUID of related object
         send_email: Whether to send email (default True, respects preferences)
     """
-    # Comment_217
+    # Check user preferences
     prefs =getattr (recipient ,'notification_preferences',None )
 
-    # Comment_218
+    # Create notification
     notification =Notification .objects .create (
     recipient =recipient ,
     sender =sender ,
@@ -49,7 +49,7 @@ send_email =True ,
     related_object_id =related_object_id ,
     )
 
-    # Comment_219
+    # Check if email should be sent
     if send_email and prefs :
         if notification_type ==Notification .Type .SECURITY_ALERT :
             send_email =prefs .email_security_alerts 
@@ -62,20 +62,20 @@ send_email =True ,
         elif notification_type ==Notification .Type .NEW_MEDICAL_RECORD :
             send_email =prefs .email_medical_records 
 
-            # Comment_220
+            # Check quiet hours
         if prefs .quiet_hours_start and prefs .quiet_hours_end :
             now =timezone .now ().time ()
             if prefs .quiet_hours_start <=now <=prefs .quiet_hours_end :
-                send_email =False # Comment_221
+                send_email =False # Don't send during quiet hours
 
     if send_email :
-    # Comment_222
-    # Comment_223
-    # Comment_224
+    # Real email delivery via the central email service (branded HTML,
+    # SMTP in production / .eml files in dev). Fail-safe: delivery
+    # problems are logged and reflected on the notification record.
         from utils .email_service import send_notification_email 
         try :
             delivered =send_notification_email (recipient ,notification )
-        except Exception :# Comment_225
+        except Exception :# extra safety — never break the caller
             delivered =False 
         notification .is_email_sent =delivered 
         notification .email_sent_at =timezone .now ()if delivered else None 

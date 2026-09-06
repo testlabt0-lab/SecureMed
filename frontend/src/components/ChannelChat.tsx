@@ -3,18 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MessagesSquare, SendHorizonal, Loader2 } from 'lucide-react';
 import { chatApi } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
+import { roleLabel } from '../constants/roles';
 import toast from 'react-hot-toast';
 
-const roleBadge: Record<string, string> = {
-  SUPER_ADMIN: 'مدير نظام',
-  HOSPITAL_ADMIN: 'مدير مستشفى',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع',
-};
-
+// Only the chip colour lives here — the wording comes from constants/roles.ts.
+// This file used to carry its own shorter labels ('مراجع', 'مدير نظام'), so the
+// same person read as 'مراجع' in a chat bubble and 'مراجع أمني' everywhere else,
+// and the four roles added later (CENTER_ADMIN, PATIENT, ACCOUNTANT,
+// RECEPTIONIST) fell through to the raw English code.
 const roleChipColor: Record<string, string> = {
   DOCTOR: 'bg-blue-100 text-blue-700',
   NURSE: 'bg-teal-100 text-teal-700',
@@ -117,7 +113,7 @@ export default function ChannelChat({ channelId }: { channelId: string }) {
                       {isMine ? 'أنت' : m.sender_name}
                     </span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${roleChipColor[m.sender_role] || 'bg-gray-100 text-gray-500'}`}>
-                      {roleBadge[m.sender_role] || m.sender_role}
+                      {roleLabel(m.sender_role)}
                     </span>
                     <span className="text-[10px] text-gray-400">
                       {new Date(m.created_at).toLocaleTimeString('ar', {

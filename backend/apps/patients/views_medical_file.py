@@ -1,12 +1,14 @@
 """
 Medical File serializer and views.
 """
-import os 
-from rest_framework import serializers ,viewsets ,permissions ,status 
-from rest_framework .decorators import action 
-from rest_framework .response import Response 
-from django .http import FileResponse 
-from django .core .exceptions import PermissionDenied 
+import os
+from rest_framework import serializers ,viewsets ,permissions ,status
+from rest_framework .decorators import action
+from rest_framework .response import Response
+from django .db .models import Q
+from django .http import FileResponse
+from django .core .exceptions import PermissionDenied
+from django .urls import reverse
 
 from apps .patients .models import MedicalFile 
 from apps .audit .utils import log_security_event 
@@ -33,13 +35,34 @@ class MedicalFileSerializer (serializers .ModelSerializer ):
         'id','uploaded_by','file_size','mime_type',
         'access_count','last_accessed','created_at','updated_at',
         ]
+        # Accepted on upload, never echoed back: a ModelSerializer FileField renders
+        # as obj.file.url, which would put the raw /media/ path in the response right
+        # next to the file_url that exists precisely to avoid it. Done with
+        # extra_kwargs rather than by redeclaring the field, so DRF still builds it
+        # from the model and keeps validate_file_extension / validate_file_size —
+        # redeclaring it as serializers.FileField() would silently drop both.
+        # Validation errors stay keyed 'file', which is what the upload form in
+        # ChannelDetail.tsx reads.
+        extra_kwargs ={'file':{'write_only':True }}
 
     def get_file_url (self ,obj ):
-        """Get file URL (only if user has access)."""
+        """URL of the authenticated download endpoint — never a raw /media/ path.
+
+        This used to return ``request.build_absolute_uri(obj.file.url)``, i.e. a
+        ``/media/medical_files/<channel>/<uuid>.pdf`` URL, and that value is what the
+        SPA renders into links and image tags. Two problems: whether that URL is
+        authorised at all depends on how ``config/urls.py`` happens to be routing
+        MEDIA_URL, and the raw path leaks into browser history, referrers and server
+        logs. Pointing at the DRF action instead means every read goes through
+        permission checks and lands in the audit trail, and it keeps working
+        unchanged if media later moves to S3.
+        """
         request =self .context .get ('request')
-        if request and obj .channel .can_view (request .user ):
-            return request .build_absolute_uri (obj .file .url )if obj .file else None 
-        return None 
+        if not (request and obj .file and obj .channel .can_view (request .user )):
+            return None
+        return request .build_absolute_uri (
+        reverse ('medical-file-download',kwargs ={'pk':obj .pk })
+        )
 
 
 class MedicalFileViewSet (viewsets .ModelViewSet ):
@@ -72,12 +95,12 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
         if not channel .can_view (self .request .user ):
             raise PermissionDenied ('غير مصرح لك برفع ملفات في هذه القناة')
 
-            # Comment_261
+            # Check if user has upload permission (EDITOR or higher)
         role =channel .get_user_role (self .request .user )
         if role not in ['OWNER','MODERATOR','EDITOR','CONTRIBUTOR']:
             raise PermissionDenied ('دورك لا يسمح برفع الملفات')
 
-            # Comment_262
+            # Get original filename
         file =serializer .validated_data .get ('file')
         original_filename =file .name if file else serializer .validated_data .get ('original_filename','')
 
@@ -86,7 +109,7 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
         original_filename =original_filename ,
         )
 
-        # Comment_263
+        # Log the upload
         log_security_event (
         user =self .request .user ,
         event_type ='PATIENT_DATA_ACCESSED',
@@ -100,7 +123,7 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
         }
         )
 
-        # Comment_264
+        # Notify channel members
         notify_channel_members (
         channel =channel ,
         notification_type ='NEW_MEDICAL_RECORD',
@@ -114,14 +137,14 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
         """Retrieve file - record access."""
         instance =self .get_object ()
 
-        # Comment_265
+        # Check access permission
         if not instance .channel .can_view (request .user ):
             raise PermissionDenied ('غير مصرح لك بالوصول إلى هذا الملف')
 
-            # Comment_266
+            # Record access
         instance .record_access (request .user )
 
-        # Comment_267
+        # Log access
         log_security_event (
         user =request .user ,
         event_type ='PATIENT_DATA_ACCESSED',
@@ -140,14 +163,14 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
         """Download the medical file."""
         instance =self .get_object ()
 
-        # Comment_268
+        # Check access permission
         if not instance .channel .can_view (request .user ):
             raise PermissionDenied ('غير مصرح لك بتنزيل هذا الملف')
 
-            # Comment_269
+            # Record access
         instance .record_access (request .user )
 
-        # Comment_270
+        # Log download
         log_security_event (
         user =request .user ,
         event_type ='PATIENT_DATA_ACCESSED',
@@ -159,14 +182,27 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
         }
         )
 
-        # Comment_271
+        # Opened through the storage API, which decrypts transparently — see
+        # apps.core.storage. Content-Length is set by FileResponse from the decrypted
+        # stream, and EncryptedFileSystemStorage.size() reports the plaintext length,
+        # so neither is inflated by the ciphertext header.
+        #
+        # `filename=` rather than a hand-built Content-Disposition: the previous
+        # f'attachment; filename="{original_filename}"' interpolated a user-supplied
+        # name straight into a header — a quote in the name broke the header, and an
+        # Arabic name became either mojibake or a stripped-to-nothing filename.
+        # FileResponse emits RFC 5987 `filename*=utf-8''…` alongside an ASCII
+        # fallback, which is what actually makes Arabic filenames survive.
         response =FileResponse (
         instance .file .open ('rb'),
         content_type =instance .mime_type or 'application/octet-stream',
+        as_attachment =True ,
+        filename =instance .original_filename or os .path .basename (instance .file .name ),
         )
-        response ['Content-Disposition']=f'attachment; filename="{instance .original_filename }"'
-        return response 
-
-
-        # Comment_272
-from django .db .models import Q 
+        # This endpoint always downloads, so nothing here is rendered — but PHI must
+        # still stay out of shared caches, and nosniff keeps a browser from deciding
+        # for itself that a mislabelled payload is HTML.
+        response ['X-Content-Type-Options']='nosniff'
+        response ['Cache-Control']='private, no-store, max-age=0'
+        response ['Referrer-Policy']='no-referrer'
+        return response

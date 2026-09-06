@@ -16,11 +16,26 @@ interface SecureMedApi {
     @POST("auth/login/")
     suspend fun login(@Body request: LoginRequest): LoginResponse
 
+    /**
+     * Second leg of a `requires_2fa` login. Returns the same [LoginResponse]
+     * shape as `auth/login/`, but always with tokens — the server answers 400
+     * for a wrong code and 401 once the 5-minute `mfa_token` has expired.
+     */
+    @POST("auth/2fa/login/")
+    suspend fun mfaLogin(@Body request: MfaLoginRequest): LoginResponse
+
     @POST("auth/logout/")
     suspend fun logout(@Body body: Map<String, String>): Unit
 
+    /**
+     * Unused: the refresh that keeps a session alive runs through OkHttp's
+     * Authenticator in [NetworkModule], which must not recurse back into this
+     * client. Kept declared so the endpoint is visible here, and typed as
+     * [RefreshResponse] rather than [TokenPair] so any future caller inherits the
+     * rotation-dependent shape instead of the bug it caused.
+     */
     @POST("auth/refresh/")
-    suspend fun refreshToken(@Body body: Map<String, String>): TokenPair
+    suspend fun refreshToken(@Body body: Map<String, String>): RefreshResponse
 
     @GET("auth/users/me/")
     suspend fun getCurrentUser(): User
@@ -92,7 +107,8 @@ interface SecureMedApi {
     suspend fun dispensePrescription(@Path("id") id: String, @Body body: Map<String, String> = emptyMap()): Prescription
 
     // ===== LAB =====
-    @GET("lab/requests/")
+    // Router basename is `orders` (apps/lab/urls.py); `lab/requests/` was a 404.
+    @GET("lab/orders/")
     suspend fun getLabRequests(@Query("page") page: Int = 1): PagedResponse<LabTestRequest>
 
     // ===== APPOINTMENTS =====
@@ -100,6 +116,7 @@ interface SecureMedApi {
     suspend fun getAppointments(@Query("page") page: Int = 1): PagedResponse<Appointment>
 
     // ===== TELEMEDICINE =====
-    @GET("telemedicine/sessions/")
+    // Router basename is `consultations`; `telemedicine/sessions/` was a 404.
+    @GET("telemedicine/consultations/")
     suspend fun getTelemedicineSessions(@Query("page") page: Int = 1): PagedResponse<TelemedicineSession>
 }

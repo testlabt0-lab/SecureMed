@@ -1,4 +1,4 @@
-# Comment_584
+#!/usr/bin/env python3
 """
 JWT Certificate Generator for SecureMed.
 Generates RSA-256 key pair for JWT signing/verification.

@@ -20,10 +20,17 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('full_name', 'phone', 'role', 'license_number',
                       'department', 'specialization')
         }),
+        # `mfa_secret` used to be an editable field here. Reading it is pointless
+        # (it is stored encrypted) but writing it is not: an admin could plant a TOTP
+        # seed they control and quietly own a user's second factor, with no audit
+        # event, since the API endpoints that log MFA_ENABLED/MFA_DISABLED are
+        # bypassed entirely. What an operator actually needs is whether MFA is on and
+        # since when, so that is what is shown — read only. Unlocking an account
+        # (failed_login_attempts / locked_until) stays editable on purpose.
         ('الأمان', {
             'fields': ('is_biometric_enabled', 'biometric_enrolled_at',
                       'last_login_ip', 'failed_login_attempts', 'locked_until',
-                      'mfa_secret')
+                      'mfa_enabled', 'mfa_created_at')
         }),
         ('الصلاحيات', {
             'fields': ('is_active', 'is_staff', 'is_superuser',
@@ -37,7 +44,8 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('email', 'full_name', 'role', 'password1', 'password2'),
         }),
     )
-    readonly_fields = ('last_login', 'date_joined', 'biometric_enrolled_at')
+    readonly_fields = ('last_login', 'date_joined', 'biometric_enrolled_at',
+                       'mfa_enabled', 'mfa_created_at', 'last_login_ip')
 
 
 @admin.register(BiometricProfile)

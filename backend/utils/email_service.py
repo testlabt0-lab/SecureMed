@@ -24,9 +24,9 @@ from django .core .mail import EmailMultiAlternatives
 logger =logging .getLogger ('security')
 
 
-# Comment_601
-# Comment_602
-# Comment_603
+# ---------------------------------------------------------------
+# Branded HTML wrapper (Arabic RTL, SecureMed look & feel)
+# ---------------------------------------------------------------
 def render_email_html (title :str ,body_html :str ,footer_note :str ='')->str :
     """Wrap email content in the SecureMed branded RTL template."""
     year =datetime .now ().year 
@@ -90,9 +90,9 @@ def render_kpi_table (rows :list [tuple [str ,str ]])->str :
     )
 
 
-    # Comment_604
-    # Comment_605
-    # Comment_606
+    # ---------------------------------------------------------------
+    # Core sender
+    # ---------------------------------------------------------------
 def send_securemed_email (
 to_email :str |list [str ],
 subject :str ,
@@ -111,13 +111,13 @@ footer_note :str ='',
         return False 
 
     html =render_email_html (title ,body_html ,footer_note )
-    # Comment_607
+    # crude text fallback: strip tags
     import re 
     text =re .sub (r'<[^>]+>',' ',html )
     text =re .sub (r'\s+',' ',text ).strip ()
 
     try :
-    # Comment_608
+    # filebased backend: make sure the target directory exists
         backend =getattr (settings ,'EMAIL_BACKEND','')
         file_path =getattr (settings ,'EMAIL_FILE_PATH',None )
         if 'filebased'in backend and file_path :
@@ -134,7 +134,7 @@ footer_note :str ='',
         sent =msg .send (fail_silently =False )
         logger .info ('EMAIL_SENT to=%s subject=%r sent=%s',to_email ,subject ,sent )
         return sent >0 
-    except Exception as exc :# Comment_609
+    except Exception as exc :# noqa: BLE001 — email must never break the request
         logger .error (
         'EMAIL_FAILED to=%s subject=%r error=%s\n%s',
         to_email ,subject ,exc ,traceback .format_exc (),

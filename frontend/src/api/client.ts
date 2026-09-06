@@ -117,12 +117,25 @@ export const authAPI = {
     api.post('/auth/password/reset/', { email }),
   confirmPasswordReset: (data: { uid: string; token: string; new_password: string; confirm_password: string }) =>
     api.post('/auth/password/reset/confirm/', data),
-  enrollBiometric: (data: { device_id: string; device_name: string; platform: string; biometric_template: string }) =>
-    api.post('/auth/biometric/enroll/', data),
+  // Biometric (WebAuthn). The server issues the challenge for both ceremonies;
+  // enrollment sends a public key and login sends a signature over that challenge.
+  biometricRegistrationOptions: () => api.get('/auth/biometric/enroll/'),
+  enrollBiometric: (data: {
+    device_id: string;
+    device_name: string;
+    platform: string;
+    public_key: string;
+    credential_id?: string;
+    client_data_json?: string;
+  }) => api.post('/auth/biometric/enroll/', data),
   biometricChallenge: (email: string, device_id: string) =>
     api.post('/auth/biometric/challenge/', { email, device_id }),
-  biometricLogin: (data: { challenge_id: string; biometric_response: string; biometric_template: string }) =>
-    api.post('/auth/biometric/login/', data),
+  biometricLogin: (data: {
+    challenge_id: string;
+    signature: string;
+    client_data_json?: string;
+    authenticator_data?: string;
+  }) => api.post('/auth/biometric/login/', data),
 };
 
 export const usersAPI = {

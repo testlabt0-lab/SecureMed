@@ -1,10 +1,11 @@
-# Comment_550
-# Comment_551
+# Test settings for SecureMed
+# Uses SQLite for fast test execution, disables SSL for dev
 import os 
 from datetime import timedelta 
-from .settings import *# Comment_552
+from .settings import *# noqa
 
-# Comment_553
+# Use SQLite for tests (faster, no PostgreSQL required)
+SECURE_SSL_REDIRECT = False
 DATABASES ={
 'default':{
 'ENGINE':'django.db.backends.sqlite3',
@@ -12,14 +13,18 @@ DATABASES ={
 }
 }
 
-# Comment_554
+# Disable SSL for tests
 for db in DATABASES .values ():
     db .get ('OPTIONS',{}).pop ('sslmode',None )
     db .get ('OPTIONS',{}).pop ('sslrootcert',None )
     db .get ('OPTIONS',{}).pop ('sslcert',None )
     db .get ('OPTIONS',{}).pop ('sslkey',None )
 
-    # Comment_555
+# The MOCK_SERVICES block that used to live here is gone — see the note in
+# config/dev_settings.py. Under test it was doubly wrong: the AI views are
+# exercised against their real code by patching apps.ai.views.get_gemini_model
+# (tests/test_phase6_deployment.py), and monkeypatching the view methods instead
+# would have made those tests assert the stub's behaviour, not the application's.
 CACHES ={
 'default':{
 'BACKEND':'django.core.cache.backends.locmem.LocMemCache',
@@ -27,29 +32,6 @@ CACHES ={
 }
 }
 
-# Comment_556
-MOCK_SERVICES =os .environ .get ('MOCK_SERVICES','false').lower ()=='true'
-if MOCK_SERVICES :
-# Comment_557
-    from mock_services .config import MOCK_SERVICES as _MS # Comment_558
-    # Comment_559
-    import mock_services 
-    mock_service =mock_services .patch_ai_service ()
-
-    # Comment_560
-    try :
-        import redis as _redis 
-        _redis_client =_redis .from_url (os .environ .get ('REDIS_URL','redis://localhost:6379/0'),decode_responses =True )
-        _redis_client .ping ()
-    except Exception :
-        import mock_services as _ms 
-        from unittest .mock import MagicMock 
-        _redis_client =MagicMock ()
-        _redis_client .get .return_value =None 
-        _redis_client .set .return_value =True 
-        _redis_client .exists .return_value =False 
-        _redis_client .flushdb .return_value =None 
-        # Comment_561
 REST_FRAMEWORK ['DEFAULT_THROTTLE_CLASSES']=[]
 REST_FRAMEWORK ['DEFAULT_THROTTLE_RATES']={
 'anon':'10000/hour',
@@ -58,3 +40,20 @@ REST_FRAMEWORK ['DEFAULT_THROTTLE_RATES']={
 'biometric':'10000/minute',
 'password_reset':'10000/hour',
 }
+
+# Use MD5 hasher for faster testing
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.MD5PasswordHasher',
+]
+
+# Disable Celery broker for tests
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
+# STORE_EAGER_RESULT = True made every eager task write its result to the
+# configured backend — redis://127.0.0.1:6379 — which is not running under test.
+# `.delay()` then raised *after* the task had already done its work, so callers
+# with a synchronous fallback (apps.audit.utils.log_security_event) wrote the row
+# a second time. Tests never read task results, so keep them out of the backend.
+CELERY_TASK_STORE_EAGER_RESULT = False
+CELERY_BROKER_URL = 'memory://'
+CELERY_RESULT_BACKEND = 'cache+memory://'

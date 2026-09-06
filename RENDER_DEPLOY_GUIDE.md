@@ -9,11 +9,10 @@
 
 | المكوّن | أين يستضيف | العنوان بعد النشر |
 |---|---|---|
-| Django API + واجهة React المبنية (خدمة واحدة) | Render — Web Service (Python) | `https://securemed-web.onrender.com` |
-| المساعد الذكي AI (GLM) | Render — Web Service (Node) | `https://securemed-ai.onrender.com` |
+| Django API + المساعد الذكي + واجهة React المبنية (خدمة واحدة) | Render — Web Service (Python) | `https://securemed-web.onrender.com` |
 | قاعدة بيانات PostgreSQL | **Neon** (مجاني دائم) | رابط `postgresql://...pooler...neon.tech/neondb?sslmode=require` |
 
-- خدمة الويب تقدّم **كل شيء من نطاق واحد**: الـ API على `/api/v1/*`، المساعد عبر وكيل `/ai/*`، وواجهة React المبنية (SPA) من الجذر `/` — لذلك **لا توجد مشاكل CORS أصلاً**.
+- خدمة الويب تقدّم **كل شيء من نطاق واحد**: الـ API على `/api/v1/*`، والمساعد الذكي على `/api/v1/ai/*` داخل Django نفسه، وواجهة React المبنية (SPA) من الجذر `/` — لذلك **لا توجد مشاكل CORS أصلاً**، ولا خدمة Node منفصلة.
 - عند أول إقلاع يتم تلقائياً: إنشاء الجداول (`migrate`) ثم زرع بيانات تجريبية (مستخدمون + مرضى + قنوات + سجلات).
 
 ---
@@ -64,27 +63,30 @@ postgresql://neondb_owner:AbCd1234xYz@ep-cool-darkness-a1b2c3d4-pooler.eu-centra
 
 ## الخطوة 3 — النشر بالـ Blueprint (الطريقة الأسهل — كل شيء تلقائي)
 
-المشروع يحتوي ملف `render.yaml` جاهزاً يعرّف الخدمتين بكل إعداداتهما.
+المشروع يحتوي ملف `render.yaml` جاهزاً يعرّف **ثلاث خدمات** بكل إعداداتها.
 
 1. في لوحة Render اضغط **New +** من الأعلى → اختر **Blueprint**.
 2. اختر المستودع `securemed` من القائمة واضغط **Connect**.
-3. سيقرأ Render الملف تلقائياً ويعرض الخدمتين:
-   - `securemed-web` (Python)
-   - `securemed-ai` (Node)
+3. سيقرأ Render الملف تلقائياً ويعرض الخدمات:
+   - `securemed-production` — خدمة الويب (Docker: Django + SPA + المساعد الذكي)
+   - `securemed-worker` — عامل Celery (نفس الصورة، أمر مختلف)
+   - `securemed-redis` — كاش ووسيط الرسائل معاً
 4. قبل الإنشاء سيطلب منك تعبئة المتغيرات الفارغة (`sync: false`) — املأها هكذا:
 
 | المتغير | القيمة | إلزامي؟ |
 |---|---|---|
 | `DATABASE_URL` | **الصق رابط Neon** الذي نسخته في الخطوة 1 | ✅ نعم — بدونها ستعمل بخادم SQLite مؤقت |
-| `ZAI_BASE_URL` | مثل `https://api.z.ai/v1` | اختياري — للمساعد الذكي |
-| `ZAI_API_KEY` | مفتاحك من منصة Z.ai | اختياري — للمساعد الذكي |
+| `ENCRYPTION_KEY` | مفتاح Fernet تولّده بنفسك **واحفظ نسخة منه** | ✅ نعم — فقدانه يدمّر أعمدة PHI المشفَّرة بلا رجعة |
+| `AUDIT_LOG_HMAC_KEY` | قيمة عشوائية طويلة **واحفظ نسخة منها** | ✅ نعم — تغييرها يُبطل التحقق من كل التوقيعات السابقة |
+| `GEMINI_API_KEY` | مفتاح Gemini | اختياري — للمساعد الذكي وملخص الحالة |
+| `METRICS_TOKEN` | قيمة عشوائية | اختياري — يحمي `/metrics` و`/health/ready/` المفصّل |
 | `EMAIL_HOST` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | بيانات SMTP (مثل Gmail بكلمة تطبيق) | اختياري — لرسائل البريد الحقيقية |
 
-> ✨ المتغيرات المولّدة تلقائياً (`SECRET_KEY`, `ENCRYPTION_KEY`) و`AI_SERVICE_HOST` سيتولى Render إنشاؤها وربطها بنفسه.
+> ✨ `SECRET_KEY` وحده يولّده Render (`generateValue`). أما `ENCRYPTION_KEY` فهو **`sync: false` بقصد**: Render يولّد القيم بعيداً عن نظر المشغّل، ومفتاح تشفير PHI لا يوجد له مسار استرجاع — ولّده واحفظه بنفسك.
 
 5. اضغط **Apply** / **Deploy Blueprint**.
-6. انتظر 5–10 دقائق — راجع سجل البناء (Logs) مباشرة. عند الانتهاء سترى الخدمتين بحالة **Live**.
-7. أول إقلاع سينفّذ تلقائياً: `migrate` ثم زرع البيانات التجريبية ثم تشغيل gunicorn.
+6. انتظر 5–10 دقائق — راجع سجل البناء (Logs) مباشرة. عند الانتهاء سترى الخدمات بحالة **Live**.
+7. `preDeployCommand` ينفّذ `migrate` و`createcachetable` مرة واحدة قبل استلام النسخة الجديدة للطلبات.
 
 ---
 
@@ -108,30 +110,17 @@ postgresql://neondb_owner:AbCd1234xYz@ep-cool-darkness-a1b2c3d4-pooler.eu-centra
 
 ثم من **Environment** أضف متغيرات البيئة (الجدول الكامل أدناه) — أهمها `DATABASE_URL` (رابط Neon) — ثم اضغط **Save and Deploy**.
 
-### ب) خدمة المساعد الذكي (Node)
+### ب) المساعد الذكي — لا توجد خدمة ثانية
 
-| الحقل | القيمة |
-|---|---|
-| New + → | **Web Service** → نفس المستودع |
-| Name | `securemed-ai` |
-| Language / Runtime | **Node** |
-| Root Directory | `ai-service` |
-| Build Command | `npm install` |
-| Start Command | `bash start.sh` |
-| Instance Type | **Free** |
-| Health Check Path | `/health` |
-
-مع متغيري البيئة `ZAI_BASE_URL` و`ZAI_API_KEY` (اختياريان).
-
-### ج) الربط بينهما
-
-في خدمة `securemed-web` → **Environment** أضف:
+المساعد صار **داخل Django** (`backend/apps/ai/` على المسار `/api/v1/ai/*`) ويستخدم Gemini في نفس العملية، محمياً بـ JWT وبفحص الدور وبتعمية بيانات المريض قبل إرسالها للنموذج. كل ما يلزمه متغيّر واحد على خدمة `securemed-web`:
 
 ```
-AI_SERVICE_URL = https://securemed-ai.onrender.com
+GEMINI_API_KEY = <مفتاحك>
 ```
 
-ثم **Manual Deploy → Deploy latest commit** مرة واحدة لتفعيل القيمة.
+بدونه تعمل المنصة كاملةً ويجيب المساعد برسالة «الميزة غير مهيّأة» بدل أن يفشل.
+
+> ⚠️ **لا تنشر مجلد `ai-service/` كخدمة على Render.** كانت هذه الخدمة (Node + GLM على المنفذ 8100) وسيطاً للمساعد، وقد أُوقفت: لا `render.yaml` ولا `docker-compose.yml` ولا وكيل Vite يشير إليها، ونقاطها الخمس بلا مصادقة ولا تحديد معدل ولا سجل تدقيق، وتستقبل بيانات مريض وتمرّرها لطرف ثالث. نشرها على منفذ عام = نقطة نهاية مفتوحة للنموذج ومصرف لبيانات PHI خارج سجل التدقيق. الملف يرفض الإقلاع الآن دون `AI_SERVICE_TOKEN` ويستمع على 127.0.0.1 فقط، وهو محفوظ للاطلاع على تكامل GLM لا للتشغيل.
 
 ---
 
@@ -149,7 +138,7 @@ AI_SERVICE_URL = https://securemed-ai.onrender.com
 | `SECURE_SSL_REDIRECT` | `1` | فرض HTTPS |
 | `DATABASE_URL` | رابط **Neon Pooled** | ⚠️ الأهم |
 | `SEED_DEMO_DATA` | `1` | اجعلها `0` بعد أول إقلاع إذا لا تريد البيانات التجريبية |
-| `AI_SERVICE_HOST` | يُربط تلقائياً من خدمة securemed-ai (Blueprint) | في النشر اليدوي: استخدم `AI_SERVICE_URL` |
+| `GEMINI_API_KEY` | `sync: false` — تضبطه يدوياً | المساعد الذكي وملخص الحالة (داخل Django). بدونه: الميزة معطّلة والبقية تعمل |
 | `FRONTEND_URL` | يُستنتج تلقائياً من `RENDER_EXTERNAL_URL` | روابط استعادة كلمة المرور |
 | `EMAIL_HOST` + المستخدم + كلمة المرور | اختيارية | بدونها تُطبع الرسائل في السجلات (console) |
 
@@ -166,7 +155,7 @@ AI_SERVICE_URL = https://securemed-ai.onrender.com
 | 3 | تسجيل الدخول بـ `admin@securemed.app` / `Admin@2026!` | لوحة التحكم الرئيسية بإحصائيات حية |
 | 4 | صفحة المرضى + فتح مريض | بيانات المرضى المزروعة |
 | 5 | زر **تقرير PDF** من ملف مريض | تنزيل ملف PDF عربي سليم |
-| 6 | المساعد الذكي (أيقونة الدردشة) | يجيب بالعربية (إن أدخلت مفاتيح ZAI) |
+| 6 | المساعد الذكي (أيقونة الدردشة) | يجيب بالعربية (إن ضبطت `GEMINI_API_KEY`) |
 | 7 | `https://securemed-web.onrender.com/admin/` | لوحة Django الإدارية |
 
 > ⏱️ تذكير مهم (الخطة المجانية): الخدمة "تنام" بعد 15 دقيقة بلا زيارات، وأول طلب بعدها ينتظر **50–60 ثانية** حتى تستيقظ. افتح الرابط وانتظر ثم أعد التحديث — هذا طبيعي في Free tier.
@@ -224,7 +213,7 @@ git push
 | `502 Bad Request` فجأة | الخدمة نائمة (free tier) | انتظر دقيقة وأعد التحديث |
 | `relation "..." does not exist` | migrate لم يُنفّذ | Logs → Manual Deploy (الإقلاع ينفّذ migrate تلقائياً) |
 | صفحة الواجهة تعمل لكن `/api` يرجع HTML | طلب وصل للـ SPA بدل الـ API | تأكد أن الطلبات على `/api/v1/...` وأن Root Directory = `backend` |
-| المساعد الذكي يرجع خطأ | مفاتيح ZAI ناقصة أو الخدمة نائمة | أدخل `ZAI_BASE_URL`/`ZAI_API_KEY`، وأعد المحاولة (أول محاولة توقظ الخدمة) |
+| المساعد الذكي يرجع «الميزة غير مهيّأة» أو خطأ | `GEMINI_API_KEY` غير مضبوط | أضفه في Environment ثم Manual Deploy (لا حاجة لأي خدمة Node) |
 | رسائل البريد لا تصل | لا يوجد SMTP | أضف `EMAIL_HOST` + مستخدم + كلمة مرور تطبيق (Gmail) |
 | قاعدة Neon ترفض الاتصال | رابط Direct بدل Pooled | استخدم رابط **Pooled** (يحتوي `-pooler`) |
 
@@ -247,4 +236,5 @@ https://securemed-web.onrender.com
 ## 📎 ملاحظات ختامية
 
 - **دومين مخصص لاحقاً؟** اربطه من Render → Settings → Custom Domains، ثم أضفه إلى `ALLOWED_HOSTS` و`CSRF_TRUSTED_ORIGINS` وأعد النشر.
-- كل شيء في هذا الدليل مطابق للملفات الموجودة فعلاً في المشروع: `render.yaml` + `deploy/build.sh` + `deploy/start.sh` + `ai-service/start.sh` — جرّبتُها محلياً محاكاةً لبيئة Render قبل كتابة الدليل (بناء ثابت + migrate + seed + gunicorn + فحص كل المسارات + 196 اختباراً ناجحاً).
+- الملفات التي يعتمد عليها هذا الدليل هي: `render.yaml` + `Dockerfile` (مسار Blueprint) و`deploy/build.sh` + `deploy/start.sh` (مسار النشر اليدوي). لم يعد `ai-service/start.sh` جزءاً من أي مسار نشر.
+- ⚠️ **الملفات المرفوعة لا تدوم**: لا يوجد `disk:` في `render.yaml`، فكل ملف طبي مرفوع يُفقد عند كل نشر أو إعادة تشغيل. الخيارات موثّقة داخل `render.yaml` نفسه (قرص Render أو S3) وهي قرار يجب اتخاذه قبل أي استخدام حقيقي.

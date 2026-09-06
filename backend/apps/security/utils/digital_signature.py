@@ -20,7 +20,7 @@ class DigitalSignatureService :
         )
         public_key =private_key .public_key ()
 
-        # Comment_409
+        # Serialize private key
         if password :
             encryption_algorithm =serialization .BestAvailableEncryption (password .encode ('utf-8'))
         else :
@@ -32,7 +32,7 @@ class DigitalSignatureService :
         encryption_algorithm =encryption_algorithm 
         )
 
-        # Comment_410
+        # Serialize public key
         public_pem =public_key .public_bytes (
         encoding =serialization .Encoding .PEM ,
         format =serialization .PublicFormat .SubjectPublicKeyInfo 
@@ -46,16 +46,16 @@ class DigitalSignatureService :
         Signs the prescription data using the doctor's private key.
         Returns a base64 encoded signature.
         """
-        # Comment_411
+        # Canonicalize the data
         canonical_data =json .dumps (prescription_data ,sort_keys =True ).encode ('utf-8')
 
-        # Comment_412
+        # Load private key
         private_key =serialization .load_pem_private_key (
         private_key_pem .encode ('utf-8'),
         password =password .encode ('utf-8')if password else None ,
         )
 
-        # Comment_413
+        # Generate signature
         signature =private_key .sign (
         canonical_data ,
         padding .PSS (

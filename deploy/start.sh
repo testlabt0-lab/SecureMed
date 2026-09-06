@@ -1,36 +1,59 @@
 #!/usr/bin/env bash
 # ============================================================
-# SecureMed — Render start step (web service)
-# 1. Applies DB migrations (Neon PostgreSQL or SQLite fallback)
-# 2. Seeds demo data on first boot (idempotent get_or_create)
-# 3. Starts gunicorn
+# SecureMed — start step for a non-Docker host (web service)
+#
+# render.yaml does NOT use this file: it deploys `env: docker` with ./Dockerfile,
+# runs migrations in `preDeployCommand` and starts Daphne from the image CMD. This
+# script is the equivalent for a plain host (a VM, a bare Render "native runtime"
+# service, a systemd unit) where nothing else runs those steps.
+#
+# 1. Applies DB migrations (PostgreSQL or SQLite fallback)
+# 2. Collects static files — the runtime uses ManifestStaticFilesStorage, which
+#    404s every asset until the manifest exists
+# 3. Optionally seeds demo data (idempotent get_or_create)
+# 4. Starts Daphne
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")/../backend"
 
-# Render Blueprint injects AI_SERVICE_HOST (fromService.host) — build the URL
-if [ -n "${AI_SERVICE_HOST:-}" ] && [ -z "${AI_SERVICE_URL:-}" ]; then
-  export AI_SERVICE_URL="https://${AI_SERVICE_HOST}"
-fi
-echo "==> AI service URL: ${AI_SERVICE_URL:-<not set — AI features disabled>}"
-
-# Password-reset links: default to the live Render URL (auto-injected by Render)
+# Password-reset and invitation links are built from FRONTEND_URL.
 if [ -z "${FRONTEND_URL:-}" ] && [ -n "${RENDER_EXTERNAL_URL:-}" ]; then
   export FRONTEND_URL="${RENDER_EXTERNAL_URL}"
 fi
 echo "==> Frontend URL: ${FRONTEND_URL:-<not set — reset links will use localhost>}"
 
-echo "==> Verifying migration history compatibility"
-python scripts/pre_migrate.py || true
+# AI: there is no sidecar to point at any more. The endpoints under /api/v1/ai/
+# call Gemini in-process, so GEMINI_API_KEY is the whole configuration; without it
+# the assistant reports itself unavailable and the rest of the app is unaffected.
+if [ -n "${GEMINI_API_KEY:-}" ]; then
+  echo "==> AI assistant: configured"
+else
+  echo "==> AI assistant: disabled (GEMINI_API_KEY not set)"
+fi
 
-echo "==> Creating migrations"
-python manage.py makemigrations
+# scripts/pre_migrate.py is a one-shot repair for databases predating the
+# channels -> app_channels rename. It rewrites django_migrations, so it is opt-in
+# (PRE_MIGRATE=1) and its exit status is no longer discarded with `|| true`: it
+# used to run on every boot and swallow every error, which is how a broken
+# history survived unnoticed.
+if [ "${PRE_MIGRATE:-0}" != "0" ]; then
+  echo "==> Repairing legacy migration history (PRE_MIGRATE is set)"
+  python scripts/pre_migrate.py
+fi
 
 echo "==> Applying migrations"
-python manage.py migrate --fake-initial --noinput
+# Plain `migrate`, matching render.yaml's preDeployCommand. It used to pass
+# --fake-initial, which marks an initial migration as applied whenever its tables
+# already exist — convenient for the legacy database this directory was written
+# for, but it also hides a table that exists with the *wrong* shape. Legacy
+# databases are handled by PRE_MIGRATE above, deliberately and once.
+python manage.py migrate --noinput
 
-if [ "${SEED_DEMO_DATA:-1}" = "1" ]; then
-  echo "==> Seeding demo data (idempotent — set SEED_DEMO_DATA=0 to disable)"
+echo "==> Collecting static files"
+python manage.py collectstatic --noinput
+
+if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
+  echo "==> Seeding demo data (idempotent — unset SEED_DEMO_DATA to disable)"
   python scripts/seed_data.py || echo "!! seed failed (continuing)"
 fi
 

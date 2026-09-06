@@ -4,9 +4,9 @@ Uses SQLite for easy testing.
 """
 import os 
 from datetime import timedelta 
-from .settings import *# Comment_437
+from .settings import *# noqa
 
-# Comment_438
+# Use SQLite for dev (no PostgreSQL required)
 DATABASES ={
 'default':{
 'ENGINE':'django.db.backends.sqlite3',
@@ -14,19 +14,19 @@ DATABASES ={
 }
 }
 
-# Comment_439
+# Disable SSL for dev
 for db in DATABASES .values ():
     db .get ('OPTIONS',{}).pop ('sslmode',None )
     db .get ('OPTIONS',{}).pop ('sslrootcert',None )
     db .get ('OPTIONS',{}).pop ('sslcert',None )
     db .get ('OPTIONS',{}).pop ('sslkey',None )
 
-    # Comment_440
+    # Dev settings
 DEBUG =True 
 SECRET_KEY ='dev-secret-key-not-for-production'
 ALLOWED_HOSTS =['*']
 
-# Comment_441
+# Disable SSL redirect for dev
 SECURE_SSL_REDIRECT =False 
 SESSION_COOKIE_SECURE =False 
 CSRF_COOKIE_SECURE =False 
@@ -35,7 +35,7 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS =False
 SECURE_HSTS_PRELOAD =False 
 SECURE_PROXY_SSL_HEADER =None 
 
-# Comment_442
+# Use HMAC for JWT in dev (no PEM file needed)
 SIMPLE_JWT ={
 'ACCESS_TOKEN_LIFETIME':timedelta (minutes =15 ),
 'REFRESH_TOKEN_LIFETIME':timedelta (days =1 ),
@@ -52,56 +52,37 @@ SIMPLE_JWT ={
 
 # Rate limiting is now enabled in dev as well to ensure security testing
 
-# Comment_444
+# Use in-memory cache
 CACHES ={
 'default':{
-'BACKEND':'django_redis.cache.RedisCache',
-'LOCATION':os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
-'OPTIONS':{
-'CLIENT_CLASS':'django_redis.client.DefaultClient',
-}
+'BACKEND':'django.core.cache.backends.locmem.LocMemCache',
+'LOCATION':'securemed-dev-cache',
 }
 }
 
-# Comment_445
-MOCK_SERVICES =os .environ .get ('MOCK_SERVICES','true').lower ()=='true'
-if MOCK_SERVICES :
-    from mock_services .config import MOCK_SERVICES as _MS # Comment_446
-    # Comment_447
-    import mock_services 
-    # mock_service =mock_services .patch_ai_service ()
+# The MOCK_SERVICES block that used to live here is gone. It imported
+# mock_services.config, which at import time replaced AIAssistantAskView.post and
+# AIAssistantHealthView.get with stubs. Three problems, and it defaulted to ON in
+# development:
+#   * the stub referenced an unimported `Response`, so every POST to
+#     /api/v1/ai/ask/ answered 500 NameError;
+#   * /api/v1/ai/health/ reported "Mock AI Service / healthy" regardless;
+#   * the stubs skipped _require_module() and anonymize_patient_data(), so a dev
+#     working against real records lost both the basin gate and PHI masking.
+# It existed because there was no AI service to talk to locally. There is no
+# service to miss now: apps.ai.views calls Gemini in-process and, with no
+# GEMINI_API_KEY set, answers 200 with an "AI is not configured" message. The dev
+# experience the mock was for is the default behaviour.
 
-    # Comment_448
-    CACHES ={
-    'default':{
-    'BACKEND':'django_redis.cache.RedisCache',
-    'LOCATION':os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
-    'OPTIONS':{
-    'CLIENT_CLASS':'django_redis.client.DefaultClient',
-    }
-    }
-    }
-
-    # Comment_449
-    try :
-        import redis as _redis 
-        _redis_client =_redis .from_url (os .environ .get ('REDIS_URL','redis://localhost:6379/0'),decode_responses =True )
-        _redis_client .ping ()
-    except Exception :
-        import mock_services as _ms 
-        from unittest .mock import MagicMock 
-        _redis_client =MagicMock ()
-        _redis_client .get .return_value =None 
-        _redis_client .set .return_value =True 
-        _redis_client .exists .return_value =False 
-        _redis_client .flushdb .return_value =None 
-        _redis_client .ping .return_value =True 
-
-        # Comment_450
-    EMAIL_BACKEND ='django.core.mail.backends.console.EmailBackend'
-
-    # Comment_451
-    # Comment_452
-    # Comment_453
+# Mail goes to logs/emails/ as .log files. The mock block also set
+# EMAIL_BACKEND='...console.EmailBackend' a few lines above this, which this
+# assignment then overwrote unconditionally — so the console backend never applied
+# and reading either line alone gave the wrong answer about where dev mail lands.
 EMAIL_BACKEND ='django.core.mail.backends.filebased.EmailBackend'
 EMAIL_FILE_PATH =BASE_DIR /'logs'/'emails'
+
+# Run Celery tasks synchronously in dev to avoid Redis dependency
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_STORE_EAGER_RESULT = True
+# Disable async audit logging to avoid broker connection attempts
+AUDIT_LOG_ASYNC = False

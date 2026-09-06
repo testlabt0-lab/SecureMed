@@ -17,10 +17,10 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up JDK 17
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
@@ -38,8 +38,13 @@ jobs:
     - name: Build Debug APK
       run: ./gradlew assembleDebug
 
+    # v3 of upload-artifact was retired on 2025-01-30 and now fails the step
+    # outright rather than warning, so this job could not finish regardless of the
+    # build result. `path` stays repository-relative: `defaults.run.working-directory`
+    # applies to `run` steps only, never to an action's inputs.
     - name: Upload APK Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: securemed-app-debug
+        if-no-files-found: error
         path: android/app/build/outputs/apk/debug/app-debug.apk

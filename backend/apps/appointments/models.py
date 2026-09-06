@@ -45,7 +45,7 @@ class Appointment (models .Model ):
 
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
 
-    # Comment_96
+    # Core relations
 
     patient =models .ForeignKey (
     'patients.Patient',
@@ -75,7 +75,7 @@ class Appointment (models .Model ):
     verbose_name =_ ('أنشأه'),
     )
 
-    # Comment_97
+    # Basin linkage
     basin =models .ForeignKey (
     'basins.Basin',
     on_delete =models .PROTECT ,
@@ -84,7 +84,7 @@ class Appointment (models .Model ):
     verbose_name =_ ('الحوض الصحي'),
     )
 
-    # Comment_98
+    # Scheduling
     appointment_type =models .CharField (
     _ ('نوع الموعد'),max_length =20 ,
     choices =AppointmentType .choices ,default =AppointmentType .FOLLOW_UP ,
@@ -101,23 +101,23 @@ class Appointment (models .Model ):
     scheduled_at =models .DateTimeField (_ ('وقت الموعد'))
     duration_minutes =models .PositiveIntegerField (_ ('المدة (دقائق)'),default =30 )
 
-    # Comment_99
+    # Location
     location =models .CharField (_ ('المكان'),max_length =255 ,blank =True )
     room_number =models .CharField (_ ('رقم الغرفة'),max_length =50 ,blank =True )
     is_virtual =models .BooleanField (_ ('موعد افتراضي'),default =False )
     virtual_link =models .URLField (_ ('رابط الموعد الافتراضي'),blank =True )
 
-    # Comment_100
+    # Content
     title =models .CharField (_ ('العنوان'),max_length =255 )
     notes =models .TextField (_ ('ملاحظات'),blank =True )
     instructions =models .TextField (_ ('تعليمات للمريض'),blank =True )
 
-    # Comment_101
+    # Post-appointment
     summary =models .TextField (_ ('ملخص الموعد'),blank =True )
     follow_up_needed =models .BooleanField (_ ('يحتاج متابعة'),default =False )
     follow_up_date =models .DateField (_ ('تاريخ المتابعة'),null =True ,blank =True )
 
-    # Comment_102
+    # Cancellation
     cancelled_at =models .DateTimeField (null =True ,blank =True )
     cancellation_reason =models .TextField (_ ('سبب الإلغاء'),blank =True )
     cancelled_by =models .ForeignKey (
@@ -127,11 +127,11 @@ class Appointment (models .Model ):
     related_name ='cancelled_appointments',
     )
 
-    # Comment_103
+    # Reminders
     reminder_sent_24h =models .BooleanField (default =False )
     reminder_sent_1h =models .BooleanField (default =False )
 
-    # Comment_104
+    # Audit
     created_at =models .DateTimeField (auto_now_add =True )
     updated_at =models .DateTimeField (auto_now =True )
 

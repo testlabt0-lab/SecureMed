@@ -3,15 +3,33 @@
  *
  * Security requirement #4: تسجيل الدخول بالبصمة + الاعتماد على البصمة
  *
- * Implements real WebAuthn (FIDO2) for browser biometric authentication.
- * Uses the Web Authentication API (window.PublicKeyCredential) to:
- * - Register biometric credentials (fingerprint, Face ID, security key)
- * - Authenticate users via challenge-response mechanism
- * - Store credentials securely on the device (never sent to server)
+ * The private key stays in the device's secure hardware and is released only after
+ * the biometric prompt succeeds; the server keeps the public key and verifies a
+ * signature over a challenge it issued itself.
+ *
+ * Two things were wrong here before, and both were fatal:
+ *
+ *  1. The challenge was generated in this file with crypto.getRandomValues(), as
+ *     the old comment ("in production, this comes from the server") admitted. A
+ *     challenge the client picks proves nothing — the whole ceremony can be
+ *     assembled offline, and the server has no way to tell a live authenticator
+ *     from a replay.
+ *  2. The assertion was never sent anywhere. Login.tsx passed `assertion.id` as
+ *     `biometric_response` and a string built from it as `biometric_template`, so
+ *     the signature — the only part that proves anything — was discarded. The
+ *     template had to match byte-for-byte what enrollment stored, which it never
+ *     could, so browser biometric login could not have worked even once.
+ *
+ * The device id is also owned here now. The three call sites used to invent their
+ * own (`credential.id`, `webauthn-<ua>`, `web-<ua>`), so enrollment and login
+ * disagreed about which device was asking.
  */
+import { authAPI } from '../api/client';
 
 // WebAuthn type definitions
-interface PublicKeyCredentialCreationOptionsJSON {
+
+/** What GET /auth/biometric/enroll/ returns. */
+export interface PublicKeyCredentialCreationOptionsJSON {
   challenge: string; // base64url
   rp: { name: string; id?: string };
   user: {
@@ -35,45 +53,28 @@ interface PublicKeyCredentialCreationOptionsJSON {
   extensions?: Record<string, unknown>;
 }
 
-interface PublicKeyCredentialRequestOptionsJSON {
-  challenge: string; // base64url
-  rpId?: string;
-  timeout?: number;
-  allowCredentials?: Array<{
-    type: 'public-key';
-    id: string; // base64url
-    transports?: string[];
-  }>;
-  userVerification?: 'required' | 'preferred' | 'discouraged';
-  extensions?: Record<string, unknown>;
+/** What POST /auth/biometric/enroll/ expects. */
+export interface EnrollmentPayload {
+  credential_id: string;
+  public_key: string; // base64url SPKI DER
+  client_data_json: string; // base64url
 }
 
-interface AuthenticatorAttestationResponseJSON {
-  attestationObject: string; // base64url
-  clientDataJSON: string; // base64url
-}
-
-interface AuthenticatorAssertionResponseJSON {
-  authenticatorData: string; // base64url
-  clientDataJSON: string; // base64url
+/** What POST /auth/biometric/login/ expects, minus challenge_id. */
+export interface AssertionPayload {
   signature: string; // base64url
-  userHandle?: string; // base64url
+  client_data_json: string; // base64url
+  authenticator_data: string; // base64url
 }
 
-interface RegistrationResponseJSON {
-  id: string;
-  rawId: string; // base64url
-  type: 'public-key';
-  response: AuthenticatorAttestationResponseJSON;
-  getClientExtensionResults?: () => Record<string, unknown>;
-}
-
-interface AuthenticationResponseJSON {
-  id: string;
-  rawId: string; // base64url
-  type: 'public-key';
-  response: AuthenticatorAssertionResponseJSON;
-  getClientExtensionResults?: () => Record<string, unknown>;
+/** What POST /auth/biometric/challenge/ returns. */
+export interface ServerLoginChallenge {
+  challenge_id: string;
+  challenge: string; // base64url
+  rp_id: string;
+  timeout: number;
+  user_verification: 'required' | 'preferred' | 'discouraged';
+  allow_credentials: Array<{ type: 'public-key'; id: string; transports?: string[] }>;
 }
 
 // ============== Utility Functions ==============
@@ -134,63 +135,49 @@ export async function isBiometricAvailable(): Promise<boolean> {
 // ============== Registration ==============
 
 /**
- * Initiate WebAuthn credential registration.
- * The user will be prompted to use their biometric (fingerprint/Face ID) or security key.
+ * Run the WebAuthn create() ceremony against options issued by the server.
  *
- * @param userId - The user's ID from the server
- * @param userEmail - The user's email
- * @param userDisplayName - The user's full name
- * @returns The registration response to send to the server
+ * The public key is read with `response.getPublicKey()` (WebAuthn Level 2), which
+ * hands back SPKI DER directly. That is why the server asks for `attestation:
+ * 'none'` and never parses an attestation object: attestation only identifies the
+ * authenticator's make and model, and the request is already authenticated, so it
+ * would buy nothing while forcing CBOR parsing into the login path.
+ *
+ * @param options - the creation options returned by GET /auth/biometric/enroll/
+ * @returns the fields the server needs to store the credential
  */
 export async function registerWebAuthnCredential(
-  userId: string,
-  userEmail: string,
-  userDisplayName: string
-): Promise<RegistrationResponseJSON> {
+  options: PublicKeyCredentialCreationOptionsJSON
+): Promise<EnrollmentPayload> {
   if (!isWebAuthnAvailable()) {
     throw new Error('WebAuthn غير مدعوم في هذا المتصفح');
   }
 
-  // Check for platform authenticator (biometric)
   const platformAuthAvailable = await isBiometricAvailable();
   if (!platformAuthAvailable) {
     throw new Error('البصمة غير متاحة على هذا الجهاز. استخدم متصفحاً حديثاً يدعم WebAuthn');
   }
 
-  // Generate a challenge (in production, this comes from the server)
-  const challenge = new Uint8Array(32);
-  crypto.getRandomValues(challenge);
-
-  // Generate user ID (random bytes)
-  const userIdBuffer = new Uint8Array(32);
-  crypto.getRandomValues(userIdBuffer);
-
   const publicKeyOptions: PublicKeyCredentialCreationOptions = {
-    challenge: challenge,
-    rp: {
-      name: 'SecureMed',
-      id: window.location.hostname,
-    },
+    // Server-issued. Never generated here.
+    challenge: base64URLToBuffer(options.challenge),
+    rp: options.rp,
     user: {
-      id: userIdBuffer,
-      name: userEmail,
-      displayName: userDisplayName || userEmail,
+      id: base64URLToBuffer(options.user.id),
+      name: options.user.name,
+      displayName: options.user.displayName,
     },
-    pubKeyCredParams: [
-      { type: 'public-key', alg: -7 },   // ES256
-      { type: 'public-key', alg: -257 }, // RS256
-    ],
-    timeout: 60000,
-    excludeCredentials: [],
-    authenticatorSelection: {
-      authenticatorAttachment: 'platform', // Require platform biometric
-      residentKey: 'preferred',
-      userVerification: 'required', // Require biometric verification
-    },
-    attestation: 'none',
+    pubKeyCredParams: options.pubKeyCredParams,
+    timeout: options.timeout ?? 60000,
+    excludeCredentials: (options.excludeCredentials ?? []).map((c) => ({
+      type: c.type,
+      id: base64URLToBuffer(c.id),
+      transports: c.transports as AuthenticatorTransport[] | undefined,
+    })),
+    authenticatorSelection: options.authenticatorSelection,
+    attestation: options.attestation ?? 'none',
   };
 
-  // Create the credential
   const credential = (await navigator.credentials.create({
     publicKey: publicKeyOptions,
   })) as PublicKeyCredential | null;
@@ -200,58 +187,55 @@ export async function registerWebAuthnCredential(
   }
 
   const response = credential.response as AuthenticatorAttestationResponse;
+  if (typeof response.getPublicKey !== 'function') {
+    throw new Error('متصفحك قديم ولا يوفر المفتاح العام. حدّث المتصفح لتفعيل البصمة');
+  }
+  const spki = response.getPublicKey();
+  if (!spki) {
+    throw new Error('لم يوفر المتصفح مفتاحاً عاماً بصيغة مدعومة');
+  }
 
-  // Convert to JSON-serializable format
-  const registrationResponse: RegistrationResponseJSON = {
-    id: credential.id,
-    rawId: bufferToBase64URL(credential.rawId),
-    type: 'public-key',
-    response: {
-      attestationObject: bufferToBase64URL(response.attestationObject),
-      clientDataJSON: bufferToBase64URL(response.clientDataJSON),
-    },
+  return {
+    credential_id: bufferToBase64URL(credential.rawId),
+    public_key: bufferToBase64URL(spki),
+    client_data_json: bufferToBase64URL(response.clientDataJSON),
   };
-
-  return registrationResponse;
 }
 
 // ============== Authentication ==============
 
 /**
- * Authenticate with a registered WebAuthn credential.
- * The user will be prompted to verify their biometric.
+ * Run the WebAuthn get() ceremony against a challenge issued by the server.
  *
- * @param credentialId - The credential ID from a previous registration
- * @returns The authentication response to send to the server
+ * Everything the ceremony is bound to comes from `challenge`: the random bytes,
+ * the RP id, and the list of credentials the server has on file for this device.
+ * `allow_credentials` may be empty — that is what a decoy challenge for an
+ * unknown account looks like, and the client deliberately cannot tell the
+ * difference, so it runs the ceremony anyway and lets the server refuse.
+ *
+ * @param challenge - the body of POST /auth/biometric/challenge/
+ * @returns the three fields the server verifies the signature over
  */
 export async function authenticateWebAuthn(
-  credentialId?: string
-): Promise<AuthenticationResponseJSON> {
+  challenge: ServerLoginChallenge
+): Promise<AssertionPayload> {
   if (!isWebAuthnAvailable()) {
     throw new Error('WebAuthn غير مدعوم في هذا المتصفح');
   }
 
-  // Generate a challenge (in production, this comes from the server)
-  const challenge = new Uint8Array(32);
-  crypto.getRandomValues(challenge);
-
   const publicKeyOptions: PublicKeyCredentialRequestOptions = {
-    challenge: challenge,
-    rpId: window.location.hostname,
-    timeout: 60000,
-    userVerification: 'required', // Require biometric
+    // Server-issued. Never generated here.
+    challenge: base64URLToBuffer(challenge.challenge),
+    rpId: challenge.rp_id,
+    timeout: (challenge.timeout ?? 60) * 1000,
+    userVerification: challenge.user_verification ?? 'required',
+    allowCredentials: (challenge.allow_credentials ?? []).map((c) => ({
+      type: c.type,
+      id: base64URLToBuffer(c.id),
+      transports: (c.transports ?? ['internal']) as AuthenticatorTransport[],
+    })),
   };
 
-  // If we have a credential ID, add it to allowCredentials
-  if (credentialId) {
-    publicKeyOptions.allowCredentials = [{
-      type: 'public-key',
-      id: base64URLToBuffer(credentialId),
-      transports: ['internal'],
-    }];
-  }
-
-  // Get the assertion
   const assertion = (await navigator.credentials.get({
     publicKey: publicKeyOptions,
   })) as PublicKeyCredential | null;
@@ -262,156 +246,179 @@ export async function authenticateWebAuthn(
 
   const response = assertion.response as AuthenticatorAssertionResponse;
 
-  const authResponse: AuthenticationResponseJSON = {
-    id: assertion.id,
-    rawId: bufferToBase64URL(assertion.rawId),
-    type: 'public-key',
-    response: {
-      authenticatorData: bufferToBase64URL(response.authenticatorData),
-      clientDataJSON: bufferToBase64URL(response.clientDataJSON),
-      signature: bufferToBase64URL(response.signature),
-      userHandle: response.userHandle
-        ? bufferToBase64URL(response.userHandle)
-        : undefined,
-    },
+  return {
+    signature: bufferToBase64URL(response.signature),
+    client_data_json: bufferToBase64URL(response.clientDataJSON),
+    authenticator_data: bufferToBase64URL(response.authenticatorData),
   };
-
-  return authResponse;
 }
 
-// ============== Storage ==============
+// ============== Device identity ==============
 
-const CREDENTIAL_STORAGE_KEY = 'securemed_webauthn_credentials';
-
-interface StoredCredential {
-  userId: string;
-  credentialId: string;
-  userEmail: string;
-  createdAt: string;
-}
+const DEVICE_ID_KEY = 'securemed_device_id';
+const ENROLLED_EMAILS_KEY = 'securemed_biometric_emails';
 
 /**
- * Store a WebAuthn credential ID locally (the actual biometric never leaves the device).
+ * The id this browser is known by on the server, created once and kept.
+ *
+ * `BiometricProfile` is keyed on (user, device_id), and the challenge endpoint
+ * looks up the credential by that pair. Enrollment and login therefore have to
+ * agree on the string. They did not: enrollment sent `credential.id` from one
+ * page and `webauthn-<userAgent>` from another, while login sent
+ * `web-<userAgent>`, so a device enrolled from the profile page could never be
+ * found again at login. Deriving it from the user agent was doubly wrong — a
+ * browser update silently renames the device.
  */
-export function storeCredential(userId: string, credentialId: string, userEmail: string): void {
-  const credentials = getStoredCredentials();
-  const existingIdx = credentials.findIndex((c) => c.userId === userId);
-  const newCred: StoredCredential = {
-    userId,
-    credentialId,
-    userEmail,
-    createdAt: new Date().toISOString(),
-  };
-  if (existingIdx >= 0) {
-    credentials[existingIdx] = newCred;
-  } else {
-    credentials.push(newCred);
+export function getDeviceId(): string {
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, id);
   }
-  localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credentials));
+  return id;
 }
 
+/** A human-readable name for the device list in the security settings. */
+export function describeDevice(): string {
+  const ua = navigator.userAgent;
+  const browser = /Edg\//.test(ua) ? 'Edge'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Safari\//.test(ua) ? 'Safari'
+    : 'متصفح';
+  const platform = (navigator as any).userAgentData?.platform
+    || (/Windows/.test(ua) ? 'Windows'
+      : /Mac OS/.test(ua) ? 'macOS'
+      : /Android/.test(ua) ? 'Android'
+      : /iPhone|iPad/.test(ua) ? 'iOS'
+      : /Linux/.test(ua) ? 'Linux'
+      : 'جهاز');
+  return `${browser} على ${platform}`;
+}
+
+// ============== Local UI hints ==============
+
 /**
- * Get all stored WebAuthn credentials.
+ * Which accounts have enrolled a credential *in this browser*.
+ *
+ * This is a convenience list for the login screen — it decides whether the
+ * fingerprint button is worth offering — and nothing more. It is not consulted
+ * by the server and carries no key material: the credential ids now come back
+ * inside the server's challenge, so nothing here can put enrollment and login
+ * out of step. Treat a stale entry as a bad hint, never as a permission.
  */
-export function getStoredCredentials(): StoredCredential[] {
+function readEnrolledEmails(): string[] {
   try {
-    const data = localStorage.getItem(CREDENTIAL_STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const data = localStorage.getItem(ENROLLED_EMAILS_KEY);
+    const parsed = data ? JSON.parse(data) : [];
+    return Array.isArray(parsed) ? parsed.filter((e) => typeof e === 'string') : [];
   } catch {
     return [];
   }
 }
 
-/**
- * Get a stored credential by user email.
- */
-export function getCredentialByEmail(email: string): StoredCredential | null {
-  return getStoredCredentials().find((c) => c.userEmail === email) || null;
+export function rememberEnrolledEmail(email: string): void {
+  const normalized = email.trim().toLowerCase();
+  const emails = readEnrolledEmails();
+  if (!emails.includes(normalized)) {
+    emails.push(normalized);
+    localStorage.setItem(ENROLLED_EMAILS_KEY, JSON.stringify(emails));
+  }
 }
 
-/**
- * Remove a stored credential.
- */
-export function removeCredential(userId: string): void {
-  const credentials = getStoredCredentials().filter((c) => c.userId !== userId);
-  localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credentials));
+export function isEnrolledOnThisDevice(email: string): boolean {
+  return readEnrolledEmails().includes(email.trim().toLowerCase());
 }
 
-/**
- * Clear all stored credentials.
- */
-export function clearAllCredentials(): void {
-  localStorage.removeItem(CREDENTIAL_STORAGE_KEY);
+export function forgetEnrolledEmail(email: string): void {
+  const normalized = email.trim().toLowerCase();
+  localStorage.setItem(
+    ENROLLED_EMAILS_KEY,
+    JSON.stringify(readEnrolledEmails().filter((e) => e !== normalized))
+  );
+}
+
+export function clearEnrolledEmails(): void {
+  localStorage.removeItem(ENROLLED_EMAILS_KEY);
 }
 
 // ============== High-level API ==============
 
-/**
- * Enroll biometric authentication for the current user.
- * This is the main function to call from the UI.
- */
-export async function enrollBiometric(
-  userId: string,
-  userEmail: string,
-  userDisplayName: string
-): Promise<{ success: boolean; credentialId: string; error?: string }> {
-  try {
-    const response = await registerWebAuthnCredential(userId, userEmail, userDisplayName);
-    // Store the credential ID for future logins
-    storeCredential(userId, response.id, userEmail);
-    return { success: true, credentialId: response.id };
-  } catch (err: any) {
-    if (err.name === 'InvalidStateError') {
-      return {
-        success: false,
-        credentialId: '',
-        error: 'البصمة مسجلة مسبقاً على هذا الجهاز',
-      };
-    }
-    if (err.name === 'NotAllowedError') {
-      return {
-        success: false,
-        credentialId: '',
-        error: 'تم رفض الإذن أو انتهت المهلة',
-      };
-    }
-    return {
-      success: false,
-      credentialId: '',
-      error: err.message || 'فشل في تسجيل البصمة',
-    };
+/** Turn a DOMException from the ceremony into something a patient can read. */
+function describeCeremonyError(err: any, fallback: string): string {
+  switch (err?.name) {
+    case 'InvalidStateError':
+      return 'البصمة مسجلة مسبقاً على هذا الجهاز';
+    case 'NotAllowedError':
+      return 'تم رفض الإذن أو انتهت المهلة';
+    case 'SecurityError':
+      return 'النطاق الحالي غير مسموح لتسجيل البصمة';
+    default:
+      return err?.response?.data?.detail
+        || err?.response?.data?.error
+        || err?.message
+        || fallback;
   }
 }
 
 /**
- * Login with biometric authentication.
- * Returns the WebAuthn assertion to send to the server.
+ * Enroll this browser's platform authenticator for the signed-in user.
+ *
+ * Three round trips, in this order and no other: ask the server for creation
+ * options (which is where the challenge comes from), run create(), then hand the
+ * server the public key together with the clientDataJSON that proves the
+ * ceremony answered *that* challenge on *this* origin.
+ */
+export async function enrollBiometric(
+  deviceName?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data: options } = await authAPI.biometricRegistrationOptions();
+    const payload = await registerWebAuthnCredential(options);
+
+    await authAPI.enrollBiometric({
+      device_id: getDeviceId(),
+      device_name: deviceName?.trim() || describeDevice(),
+      platform: 'WEB',
+      ...payload,
+    });
+
+    rememberEnrolledEmail(options.user.name);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: describeCeremonyError(err, 'فشل في تسجيل البصمة') };
+  }
+}
+
+/**
+ * Log in with the platform authenticator, start to finish.
+ *
+ * Returns the user and tokens straight from the server so the caller only has to
+ * put them in the store. The old version returned an assertion and left it to
+ * `Login.tsx` to invent a payload out of it, which is how the signature ended up
+ * being thrown away.
  */
 export async function loginWithBiometric(
   userEmail: string
-): Promise<{ success: boolean; assertion?: AuthenticationResponseJSON; error?: string }> {
+): Promise<{ success: boolean; user?: any; tokens?: any; error?: string }> {
   try {
-    // Look up the stored credential for this user
-    const stored = getCredentialByEmail(userEmail);
-    if (!stored) {
-      return {
-        success: false,
-        error: 'البصمة غير مسجلة لهذا المستخدم على هذا الجهاز',
-      };
-    }
+    const { data: challenge } = await authAPI.biometricChallenge(userEmail, getDeviceId());
+    const assertion = await authenticateWebAuthn(challenge as ServerLoginChallenge);
 
-    const assertion = await authenticateWebAuthn(stored.credentialId);
-    return { success: true, assertion };
+    const { data } = await authAPI.biometricLogin({
+      challenge_id: challenge.challenge_id,
+      ...assertion,
+    });
+
+    rememberEnrolledEmail(userEmail);
+    return { success: true, user: data.user, tokens: data.tokens };
   } catch (err: any) {
-    if (err.name === 'NotAllowedError') {
-      return {
-        success: false,
-        error: 'تم رفض المصادقة البيومترية',
-      };
+    if (err?.name === 'NotAllowedError') {
+      return { success: false, error: 'تم رفض المصادقة البيومترية' };
     }
     return {
       success: false,
-      error: err.message || 'فشل في المصادقة البيومترية',
+      error: describeCeremonyError(err, 'فشل المصادقة البيومترية'),
     };
   }
 }

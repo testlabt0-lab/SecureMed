@@ -10,7 +10,7 @@ import io
 from datetime import datetime ,timedelta 
 
 import matplotlib 
-matplotlib .use ('Agg')# Comment_284
+matplotlib .use ('Agg')# headless
 import matplotlib .pyplot as plt 
 
 from django .utils import timezone 
@@ -81,11 +81,11 @@ generated_by :str ='النظام')->tuple [bytes ,str ,datetime ]:
     logs =AuditLog .objects .filter (timestamp__range =(start ,end ))
     messages =ChannelMessage .objects .filter (created_at__range =(start ,end ))
 
-    # Comment_285
+    # ---- Charts ----
     plt .rcParams ['font.sans-serif']=['DejaVu Sans']
     plt .rcParams ['axes.unicode_minus']=False 
 
-    # Comment_286
+    # Channels by type (pie)
     type_counts =list (channels .values ('channel_type').annotate (n =Count ('id')))
     labels ,sizes =[],[]
     type_names =dict (Channel .ChannelType .choices )
@@ -101,7 +101,7 @@ generated_by :str ='النظام')->tuple [bytes ,str ,datetime ]:
         ax1 .axis ('off')
     chart_channels =_chart_bytes (fig1 )
 
-    # Comment_287
+    # Daily activity (bar)
     days ,counts =[],[]
     d =start .date ()
     while d <end .date ():
@@ -115,7 +115,7 @@ generated_by :str ='النظام')->tuple [bytes ,str ,datetime ]:
     ax2 .tick_params (axis ='x',rotation =45 ,labelsize =7 )
     chart_activity =_chart_bytes (fig2 )
 
-    # Comment_288
+    # Security severity (barh)
     sev =dict (logs .values ('severity').annotate (n =Count ('id')).values_list ('severity','n'))
     fig3 ,ax3 =plt .subplots (figsize =(4.6 ,2.6 ),constrained_layout =True )
     sev_labels =[_mpl_ar (x )for x in ['معلومة','تحذير','حرج']]
@@ -125,7 +125,7 @@ generated_by :str ='النظام')->tuple [bytes ,str ,datetime ]:
     ax3 .spines [['top','right']].set_visible (False )
     chart_security =_chart_bytes (fig3 )
 
-    # Comment_289
+    # ---- PDF ----
     buf =io .BytesIO ()
     doc =SimpleDocTemplate (buf ,pagesize =A4 ,topMargin =18 *mm ,bottomMargin =16 *mm ,
     leftMargin =15 *mm ,rightMargin =15 *mm )
@@ -230,7 +230,7 @@ def send_report_email (to_email :str ,month_label :str ,filename :str ,pdf_bytes
         msg .attach (filename ,pdf_bytes ,'application/pdf')
         sent =msg .send (fail_silently =False )
         return sent >0 
-    except Exception :# Comment_290
+    except Exception :# noqa: BLE001 — email must never break the caller
         import logging 
         logging .getLogger ('security').error (
         'MONTHLY_REPORT_EMAIL_FAILED to=%s month=%s',to_email ,month_label ,

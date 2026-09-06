@@ -1,7 +1,7 @@
 """
 Notifications views - real-time notification system.
 """
-from rest_framework import viewsets, permissions, status, filters
+from rest_framework import viewsets, permissions, status, filters, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters import rest_framework as django_filters
@@ -107,23 +107,27 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
-class NotificationPreferenceViewSet(viewsets.ModelViewSet):
-    """Manage notification preferences."""
+class NotificationPreferenceView(generics.RetrieveUpdateAPIView):
+    """GET/PUT/PATCH /api/v1/notifications/preferences/ — the caller's own row.
+
+    Preferences are a singleton per user, so the URL carries no id: get_object()
+    resolves the row from request.user and creates it on first read.
+
+    This was a ModelViewSet on the router, which broke the endpoint twice over.
+    NotificationViewSet is registered at prefix '' and its detail route
+    ^(?P<pk>[^/.]+)/$ is generated before the 'preferences' prefix, so
+    /notifications/preferences/ was swallowed by it with pk='preferences' — a
+    non-UUID pk lookup raises django.core.exceptions.ValidationError, which DRF
+    does not translate, so the caller got HTTP 500 rather than data. And even
+    unshadowed, a router's list route maps only GET and POST, so the frontend's
+    PATCH could not have returned anything but 405. urls.py now declares this
+    path ahead of the router include.
+    """
     serializer_class = NotificationPreferenceSerializer
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ['get', 'put', 'patch']
-
-    def get_queryset(self):
-        return NotificationPreference.objects.filter(user=self.request.user)
 
     def get_object(self):
-        """Get or create preferences for current user."""
-        obj, created = NotificationPreference.objects.get_or_create(
+        obj, _created = NotificationPreference.objects.get_or_create(
             user=self.request.user
         )
         return obj
-
-    def list(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)

@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -33,14 +31,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.securemed.app.BuildConfig
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.reminders.NotificationHelper
 import com.securemed.app.navigation.Route
+import com.securemed.app.security.AppLock
 import com.securemed.app.security.SecurityUtils
 import com.securemed.app.ui.components.BottomNavBar
 import com.securemed.app.ui.screens.*
 import com.securemed.app.ui.theme.SecureMedTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 
 /**
  * FragmentActivity (not plain ComponentActivity) because AndroidX
@@ -55,38 +56,39 @@ class MainActivity : FragmentActivity() {
             android.util.Log.d("SecureMed", "POST_NOTIFICATIONS granted=$granted")
         }
 
-    // ===== Session Timeout (Inactivity) =====
-    private val INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000L // 5 دقائق
-    private val timeoutHandler = Handler(Looper.getMainLooper())
-    private var logoutAction: (() -> Unit)? = null
-
-    private val logoutRunnable = Runnable {
-        if (SecurePreferences.isLoggedIn()) {
-            android.util.Log.w("SecureMed", "Session timed out due to inactivity.")
-            logoutAction?.invoke()
-        }
-    }
+    // ===== Idle lock =====
+    //
+    // The activity's only job here is to report interaction and to ask
+    // [AppLock] to judge the idle time; the rule itself, and the reasons the
+    // previous Handler-based timeout could not enforce it, live in that class.
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-        resetInactivityTimer()
+        AppLock.noteInteraction()
         return super.dispatchTouchEvent(ev)
     }
 
-    private fun resetInactivityTimer() {
-        timeoutHandler.removeCallbacks(logoutRunnable)
-        if (SecurePreferences.isLoggedIn()) {
-            timeoutHandler.postDelayed(logoutRunnable, INACTIVITY_TIMEOUT_MS)
-        }
+    /** Hardware keys and D-pad input, which never reach dispatchTouchEvent. */
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        AppLock.noteInteraction()
     }
 
     override fun onResume() {
         super.onResume()
-        resetInactivityTimer()
+        // Judge before marking: the mark left behind when the app last lost
+        // focus is the only evidence of how long it has been untouched, and
+        // noting an interaction first would erase it.
+        if (!AppLock.lockIfIdle()) {
+            AppLock.noteInteraction(force = true)
+        }
     }
 
     override fun onPause() {
         super.onPause()
-        timeoutHandler.removeCallbacks(logoutRunnable)
+        // The last moment the app can observe the user, so the throttle is
+        // bypassed: an interaction from a second ago must not be recorded as
+        // fifteen seconds ago once the session is judged on the next resume.
+        AppLock.noteInteraction(force = true)
     }
     // =========================================
 
@@ -94,8 +96,12 @@ class MainActivity : FragmentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         
-        // فحص الروت (Root Detection)
-        if (SecurityUtils.isDeviceRooted()) {
+        // فحص الروت — في نسخ الإصدار فقط.
+        //
+        // كان الفحص يشمل كشف المحاكي أيضاً، فكان التطبيق يُغلق نفسه على كل
+        // محاكي؛ وحتى بعد فصلهما تبقى صور المحاكي موقّعة بـ test-keys، لذا
+        // يُستثنى بناء التطوير كي يظل التطبيق قابلاً للتشغيل والاختبار.
+        if (!BuildConfig.DEBUG && SecurityUtils.isDeviceRooted()) {
             android.widget.Toast.makeText(this, "عذراً، لا يمكن تشغيل هذا التطبيق على أجهزة مكسورة الحماية (Rooted) لأسباب أمنية.", android.widget.Toast.LENGTH_LONG).show()
             finishAffinity()
             return
@@ -131,13 +137,40 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    // Register global logout action for Session Timeout
+                    // The single way out of a session: the logout buttons on the
+                    // dashboard and the profile, the all-devices row in settings,
+                    // and the lock screen — where it is the only way forward for a
+                    // device that cannot satisfy an unlock prompt at all.
+                    //
+                    // [allDevices] decides whether the server ends only this
+                    // session or every session the account holds; the lock is
+                    // lifted synchronously inside AuthViewModel.logout, before the
+                    // network call, so the overlay never outlives the session it
+                    // was covering.
+                    //
+                    // popUpTo(0) clears the whole back stack. The per-screen
+                    // versions this replaced popped up to the dashboard, which a
+                    // session started by tapping a dose reminder never visited —
+                    // leaving the medications list, patient name included, one
+                    // back press behind the login screen.
+                    val signOut: (Boolean) -> Unit = { allDevices ->
+                        authViewModel.logout(allDevices)
+                        navController.navigate(Route.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+
+                    val locked by AppLock.locked.collectAsState()
+
+                    // Someone reading a chart without touching the screen never
+                    // produces an onPause, so the resume check alone would never
+                    // fire for them. Coarse on purpose: the interaction mark is
+                    // itself only written every 15 seconds, so a finer tick would
+                    // buy nothing but wake-ups.
                     LaunchedEffect(Unit) {
-                        logoutAction = {
-                            authViewModel.logout()
-                            navController.navigate(Route.Login.route) {
-                                popUpTo(0) { inclusive = true }
-                            }
+                        while (true) {
+                            delay(15_000L)
+                            AppLock.lockIfIdle()
                         }
                     }
 
@@ -169,6 +202,12 @@ class MainActivity : FragmentActivity() {
                                 LoginScreen(
                                     viewModel = authViewModel,
                                     onLoginSuccess = {
+                                        // Starts the idle clock. Without it the
+                                        // new session has no interaction mark at
+                                        // all, and AppLock reads a missing mark as
+                                        // "idle for an unknown time" — locking the
+                                        // app in the first seconds after a login.
+                                        AppLock.unlock()
                                         navController.navigate(Route.Dashboard.route) {
                                             popUpTo(Route.Login.route) { inclusive = true }
                                         }
@@ -188,12 +227,7 @@ class MainActivity : FragmentActivity() {
                                     onNavigateToLab = { navController.navigate(Route.Lab.route) },
                                     onNavigateToTelemedicine = { navController.navigate(Route.Telemedicine.route) },
                                     onNavigateToAnalytics = { navController.navigate(Route.Analytics.route) },
-                                    onLogout = {
-                                        authViewModel.logout()
-                                        navController.navigate(Route.Login.route) {
-                                            popUpTo(Route.Dashboard.route) { inclusive = true }
-                                        }
-                                    }
+                                    onLogout = { signOut(false) }
                                 )
                             }
                             composable(Route.Notifications.route) {
@@ -232,13 +266,9 @@ class MainActivity : FragmentActivity() {
                             }
                             composable(Route.Profile.route) {
                                 ProfileScreen(
-                                    onLogout = {
-                                        authViewModel.logout()
-                                        navController.navigate(Route.Login.route) {
-                                            popUpTo(Route.Dashboard.route) { inclusive = true }
-                                        }
-                                    },
-                                    onBack = { navController.popBackStack() }
+                                    onLogout = { signOut(false) },
+                                    onBack = { navController.popBackStack() },
+                                    onNavigateToSettings = { navController.navigate(Route.Settings.route) }
                                 )
                             }
                             composable(Route.Appointments.route) {
@@ -261,9 +291,34 @@ class MainActivity : FragmentActivity() {
                                 AnalyticsScreen(onBack = { navController.popBackStack() })
                             }
                             composable(Route.Settings.route) {
-                                SettingsScreen(onBack = { navController.popBackStack() })
+                                SettingsScreen(
+                                    onBack = { navController.popBackStack() },
+                                    // Biometric enrollment lives in the profile
+                                    // screen, which is also where Settings was
+                                    // opened from — pop back to it instead of
+                                    // stacking a second copy.
+                                    onNavigateToProfile = {
+                                        navController.navigate(Route.Profile.route) {
+                                            popUpTo(Route.Profile.route) { inclusive = true }
+                                        }
+                                    },
+                                    onLogoutAllDevices = { signOut(true) }
+                                )
                             }
                         }
+                    }
+
+                    // Drawn after the Scaffold and therefore over it, bottom bar
+                    // included. A sibling of the navigation host rather than a
+                    // destination inside it: Surface lays its children out like a
+                    // Box, so every screen below stays composed and an unlock
+                    // returns the user to the chart — and the half-typed note —
+                    // they left.
+                    if (locked) {
+                        LockScreen(
+                            onUnlocked = { AppLock.unlock() },
+                            onSignOut = { signOut(false) }
+                        )
                     }
                 }
             }

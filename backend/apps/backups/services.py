@@ -36,7 +36,7 @@ TRANSIENT_EXCLUDE =[
 'sessions.session',
 'token_blacklist.outstandingtoken',
 'token_blacklist.blacklistedtoken',
-'backups.BackupRecord',# Comment_143
+'backups.BackupRecord',# never restore backup metadata into itself
 ]
 
 
@@ -84,12 +84,12 @@ def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='')
 
     started =time .time ()
     ts =timezone .localtime ().strftime ('%Y%m%d_%H%M%S')
-    # Comment_144
+    # unique suffix avoids same-second filename collisions
     unique =uuid .uuid4 ().hex [:6 ]
     filename =f'securemed_backup_{ts }_{unique }.zip'
     out_path =backup_dir ()/filename 
 
-    # Comment_145
+    # 1) data dump
     dump_file =backup_dir ()/f'_tmp_dump_{ts }.json'
     with open (dump_file ,'w',encoding ='utf-8')as f :
         call_command (
@@ -110,12 +110,12 @@ def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='')
     'kind':kind ,
     }
 
-    # Comment_146
+    # 2) build the zip
     try :
         with zipfile .ZipFile (out_path ,'w',zipfile .ZIP_DEFLATED )as zf :
             zf .write (dump_file ,arcname ='db.json')
             zf .writestr ('manifest.json',json .dumps (manifest ,ensure_ascii =False ,indent =2 ))
-            # Comment_147
+            # 3) media files
             media_root =Path (settings .MEDIA_ROOT )
             if media_root .exists ():
                 for root ,_ ,files in os .walk (media_root ):
@@ -167,7 +167,7 @@ def verify_backup (filepath :str )->dict :
             raise ValueError ('أرشيف غير صالح — db.json أو manifest.json مفقود')
         manifest =json .loads (zf .read ('manifest.json').decode ('utf-8'))
         expected =manifest .get ('checksum_sha256','')
-        # Comment_148
+        # extract db.json to temp and hash
         tmp =path .parent /f'_verify_{path .name }.json'
         try :
             with zf .open ('db.json')as src ,open (tmp ,'wb')as dst :
@@ -185,7 +185,7 @@ def restore_backup (filepath :str ,force :bool =False )->dict :
     Restore database + media from an archive.
     Refuses without force=True (destructive: flushes current data).
     """
-    manifest =verify_backup (filepath )# Comment_149
+    manifest =verify_backup (filepath )# raises on corruption
     if not force :
         return {
         'verified':True ,
@@ -197,18 +197,18 @@ def restore_backup (filepath :str ,force :bool =False )->dict :
     with zipfile .ZipFile (path )as zf :
         db_json =zf .read ('db.json').decode ('utf-8')
 
-        # Comment_150
+        # write the dump to a temp fixture file (loaddata accepts paths)
         tmp_fixture =path .parent /f'_restore_{path .name }.json'
         tmp_fixture .write_text (db_json ,encoding ='utf-8')
         try :
-        # Comment_151
-        # Comment_152
+        # 1) flush current data (django_migrations is preserved;
+        #    post_migrate inhibited so loaddata refills contenttypes)
             call_command (
             'flush',interactive =False ,verbosity =0 ,
             inhibit_post_migrate =True ,
             )
 
-            # Comment_153
+            # 2) load the dump
             from django .core .serializers .base import DeserializationError 
             try :
                 call_command ('loaddata',str (tmp_fixture ),verbosity =0 )
@@ -217,7 +217,7 @@ def restore_backup (filepath :str ,force :bool =False )->dict :
         finally :
             tmp_fixture .unlink (missing_ok =True )
 
-            # Comment_154
+            # 3) restore media files
         media_root =Path (settings .MEDIA_ROOT )
         media_root .mkdir (parents =True ,exist_ok =True )
         restored_files =0 

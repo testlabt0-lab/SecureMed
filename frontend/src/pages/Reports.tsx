@@ -9,8 +9,15 @@ import {
 import toast from 'react-hot-toast';
 import { reportsAPI } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
+import { OVERSIGHT_ROLES, CLINICAL_EXPORT_ROLES } from '../constants/roles';
 
 // ─── Report definitions ───────────────────────────────────────────────────────
+//
+// `roles` mirrors REPORT_ROLES in backend/apps/reports/views.py, which is what
+// enforces the export. The lists here used to be hand-written and predated
+// CENTER_ADMIN, so a centre admin was let onto /reports by the route guard and
+// then shown an empty catalogue; the same guard admitted an ACCOUNTANT, who
+// matches no report at all and is now excluded from the route instead.
 
 const REPORTS = [
   {
@@ -21,7 +28,7 @@ const REPORTS = [
     color: 'from-blue-500 to-indigo-600',
     shadow: 'shadow-blue-500/20',
     formats: ['pdf', 'excel'],
-    roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN'],
+    roles: OVERSIGHT_ROLES,
   },
   {
     id: 'patient_report',
@@ -31,7 +38,7 @@ const REPORTS = [
     color: 'from-emerald-500 to-teal-600',
     shadow: 'shadow-emerald-500/20',
     formats: ['pdf', 'excel'],
-    roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR'],
+    roles: CLINICAL_EXPORT_ROLES,
   },
   {
     id: 'security_report',
@@ -41,7 +48,7 @@ const REPORTS = [
     color: 'from-red-500 to-rose-600',
     shadow: 'shadow-red-500/20',
     formats: ['pdf'],
-    roles: ['SUPER_ADMIN', 'AUDITOR'],
+    roles: OVERSIGHT_ROLES,
   },
   {
     id: 'appointments_report',
@@ -51,7 +58,7 @@ const REPORTS = [
     color: 'from-purple-500 to-violet-600',
     shadow: 'shadow-purple-500/20',
     formats: ['pdf', 'excel'],
-    roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR'],
+    roles: CLINICAL_EXPORT_ROLES,
   },
   {
     id: 'audit_report',
@@ -61,7 +68,7 @@ const REPORTS = [
     color: 'from-amber-500 to-orange-600',
     shadow: 'shadow-amber-500/20',
     formats: ['pdf', 'excel'],
-    roles: ['SUPER_ADMIN', 'AUDITOR'],
+    roles: OVERSIGHT_ROLES,
   },
   {
     id: 'channels_report',
@@ -71,7 +78,7 @@ const REPORTS = [
     color: 'from-cyan-500 to-sky-600',
     shadow: 'shadow-cyan-500/20',
     formats: ['pdf', 'excel'],
-    roles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR'],
+    roles: CLINICAL_EXPORT_ROLES,
   },
 ];
 
@@ -218,7 +225,7 @@ export default function Reports() {
 
   // Filter reports by role
   const availableReports = REPORTS.filter(
-    r => !r.roles || r.roles.includes(user?.role || '')
+    r => !r.roles || (user != null && r.roles.includes(user.role))
   );
 
   const handleDownload = async (reportId: string, format: string) => {

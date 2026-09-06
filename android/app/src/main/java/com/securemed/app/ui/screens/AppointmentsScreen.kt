@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,7 +29,7 @@ fun AppointmentsScreen(
                 title = { Text("المواعيد") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "رجوع")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
                     }
                 }
             )
@@ -100,12 +100,16 @@ fun AppointmentCard(appointment: Appointment) {
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "${appointment.appointmentDate} - ${appointment.consultationType}",
+                    // The server already localises the type; fall back to the
+                    // raw enum only if an older build omits the display field.
+                    text = "${appointment.scheduledAt} — " +
+                        (appointment.typeDisplay ?: appointment.appointmentType),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "الطبيب: ${appointment.doctorName ?: "طبيب غير معروف"} | الحالة: ${appointment.status}",
+                    text = "الطبيب: ${appointment.doctorName ?: "طبيب غير معروف"} | " +
+                        "الحالة: ${appointment.statusDisplay ?: appointment.status}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: securemed_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        pip install pytest pytest-django pytest-cov pytest-asyncio factory-boy
+      
+    - name: Run Tests
+      env:
+        DJANGO_SETTINGS_MODULE: config.test_settings
+        DATABASE_URL: postgres://postgres:postgrespassword@localhost:5432/securemed_test
+        REDIS_URL: redis://localhost:6379/0
+        SECRET_KEY: django-insecure-test-key
+        # Any string works — apps.security.crypto derives the Fernet key from it
+        # with PBKDF2 and FIELD_ENCRYPTION_SALT. It must not be the placeholder
+        # default in config/settings.py: that value is on the reject list of the
+        # production configuration guard, and CI should not be the one deployment
+        # that proves the guard can be bypassed.
+        ENCRYPTION_KEY: ci-only-not-a-real-encryption-key-32b
+        FIELD_ENCRYPTION_SALT: testsalt
+        AUDIT_LOG_HMAC_KEY: ci-only-not-a-real-audit-hmac-key
+      run: |
+        cd backend
+        # Both trees. pytest.ini declares `testpaths = tests apps`, but naming
+        # `tests/` here overrode it, so every test that lives beside the code it
+        # covers under apps/* was collected by nobody and skipped silently on every
+        # push. Listing both keeps the app-level suites (audit, patients, MFA, ...)
+        # actually running in CI.
+        python -m pytest tests apps --cov=apps --cov-report=xml
+
+  # The frontend had no CI at all: `npm run build` (which is `tsc && vite build`)
+  # was never run on a push, so a type error or a broken lazy() import path in
+  # App.tsx could sit on main until someone built locally. Adding this job is what
+  # makes the TypeScript types on the auth store and the role groups in
+  # src/constants/roles.ts load-bearing — typed roles only prevent a bad
+  # comparison if something actually compiles the code.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    # `npm install`, not `npm ci`, and this is temporary. package-lock.json was
+    # generated before the eslint devDependencies were added to package.json, and
+    # `npm ci` refuses to run when the two disagree. Regenerating the lockfile
+    # needs npm, which was not available where these files were edited. After the
+    # first local `npm install` commits the updated lockfile, switch this line to
+    # `npm ci` — it is the reproducible one.
+    - name: Install dependencies
+      run: npm install
+
+    # Advisory for now. The ruleset in eslint.config.mjs is tuned so a clean
+    # checkout reports only a handful of warnings, but it has never been executed
+    # against this codebase, so a first run may surface more. Once the output is
+    # known and cleaned up, drop continue-on-error so lint regressions block.
+    - name: Lint
+      run: npm run lint
+      continue-on-error: true
+
+    # Blocking: this runs tsc and then bundles. A failure here is a failure that
+    # would also break a deploy, so it should be red.
+    - name: Type-check and build
+      run: npm run build

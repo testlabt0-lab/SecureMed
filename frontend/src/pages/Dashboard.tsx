@@ -11,11 +11,37 @@ import {
 } from 'recharts';
 import { useAuthStore } from '../store/authStore';
 import { securityAPI, channelsAPI, patientsAPI } from '../api/client';
+import { OVERSIGHT_ROLES, type Role } from '../constants/roles';
 import CountUp from '../components/fx/CountUp';
 import { StaggerContainer, StaggerItem } from '../components/fx/PageTransition';
 import ECGLine from '../components/fx/ECGLine';
 
-const COLORS = ['#3b82f6', '#0d9488', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+/**
+ * Sub-heading under the dashboard greeting.
+ *
+ * This was a chain of `user?.role === '...' && '...'` expressions covering five
+ * roles, so the other six (CENTER_ADMIN, LAB_TECH, PHARMACIST, ACCOUNTANT,
+ * RECEPTIONIST) rendered an empty line under their own name. A map with a
+ * fallback means a role added to the backend degrades to a generic sentence
+ * instead of blank space.
+ */
+const roleGreetings: Partial<Record<Role, string>> = {
+  DOCTOR: 'إليك نظرة على حالاتك اليوم — كل شيء تحت السيطرة',
+  NURSE: 'إليك نظرة على واجباتك اليوم — يومك مليء بالخير',
+  SUPER_ADMIN: 'إليك نظرة شاملة على أداء المنصة اليوم',
+  HOSPITAL_ADMIN: 'إليك نظرة شاملة على أداء المنصة اليوم',
+  CENTER_ADMIN: 'إليك نظرة على أداء مركزك اليوم',
+  AUDITOR: 'إليك نظرة على سجلات الأمان والامتثال',
+  PATIENT: 'صحتك أولويتنا — إليك ملخص حالتك اليوم',
+  LAB_TECH: 'إليك نظرة على طلبات التحاليل اليوم',
+  PHARMACIST: 'إليك نظرة على الوصفات والمخزون اليوم',
+  ACCOUNTANT: 'إليك نظرة على الفواتير والتحصيل اليوم',
+  RECEPTIONIST: 'إليك نظرة على المواعيد والاستقبال اليوم',
+};
+
+function greetingFor(role?: Role): string {
+  return (role && roleGreetings[role]) || 'إليك ملخص يومك على المنصة';
+}
 
 const channelTypeLabels: Record<string, string> = {
   EMERGENCY: 'طارئة',
@@ -76,7 +102,10 @@ export default function Dashboard() {
   const { data: securityData } = useQuery({
     queryKey: ['security-dashboard'],
     queryFn: () => securityAPI.dashboard(),
-    enabled: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'AUDITOR'].includes(user?.role || ''),
+    // Same set that guards /security, so a centre admin no longer sees an empty
+    // security card on a dashboard they are otherwise allowed to read. The list
+    // was written before CENTER_ADMIN existed.
+    enabled: user != null && OVERSIGHT_ROLES.includes(user.role),
   });
 
   const stats = statsData?.data;
@@ -213,12 +242,7 @@ export default function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.18, duration: 0.5 }}
             >
-              {user?.role === 'DOCTOR' && 'إليك نظرة على حالاتك اليوم — كل شيء تحت السيطرة'}
-              {user?.role === 'NURSE' && 'إليك نظرة على واجباتك اليوم — يومك مليء بالخير'}
-              {(user?.role === 'SUPER_ADMIN' || user?.role === 'HOSPITAL_ADMIN') &&
-                'إليك نظرة شاملة على أداء المنصة اليوم'}
-              {user?.role === 'AUDITOR' && 'إليك نظرة على سجلات الأمان والامتثال'}
-              {user?.role === 'PATIENT' && 'صحتك أولويتنا — إليك ملخص حالتك اليوم'}
+              {greetingFor(user?.role)}
             </motion.p>
 
             {/* Quick live chips */}

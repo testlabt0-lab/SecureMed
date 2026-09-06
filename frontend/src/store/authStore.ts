@@ -1,11 +1,18 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { Role } from '../constants/roles';
 
 export interface User {
   id: string;
   email: string;
   full_name: string;
-  role: string;
+  /**
+   * One of the eleven codes in User.Role (backend/apps/accounts/models.py).
+   * Typed rather than `string` so a comparison against a code that does not
+   * exist — a typo, or a role removed from the backend — fails at compile time
+   * instead of quietly evaluating to false and hiding a screen from everyone.
+   */
+  role: Role;
   phone?: string;
   license_number?: string;
   department?: string;

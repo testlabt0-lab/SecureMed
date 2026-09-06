@@ -13,6 +13,7 @@ import { arSA } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import { appointmentsAPI } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
+import { CARE_TEAM_ROLES } from '../constants/roles';
 import CreateAppointmentModal from '../components/appointments/CreateAppointmentModal';
 
 // ─── Type definitions ────────────────────────────────────────────────────────
@@ -378,7 +379,7 @@ export default function Appointments() {
           <p className="text-gray-400 text-sm mt-1">إدارة مواعيد المرضى والجدول الطبي</p>
         </div>
         <div className="flex items-center gap-2">
-          {user && ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'CENTER_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'].includes(user.role) && (
+          {user && CARE_TEAM_ROLES.includes(user.role) && (
             <button 
               onClick={() => setIsModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-bold rounded-xl transition-colors"

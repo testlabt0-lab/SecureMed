@@ -88,7 +88,7 @@ class IsChannelOwnerOrAdmin (permissions .BasePermission ):
         user =request .user 
         if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             return True 
-            # Comment_349
+            # Check if user is the owner of the channel
         if hasattr (obj ,'owner'):
             return obj .owner ==user 
         if hasattr (obj ,'channel'):

@@ -1,9 +1,10 @@
 """
 Views for accounts app: authentication, biometric, user management.
 """
-import base64 
-import io 
-import secrets 
+import base64
+import io
+import secrets
+from datetime import timedelta
 
 import pyotp 
 import qrcode 
@@ -24,6 +25,7 @@ from apps .accounts .serializers import (
 UserSerializer ,UserCreateSerializer ,LoginSerializer ,
 BiometricEnrollSerializer ,BiometricChallengeSerializer ,
 BiometricLoginSerializer ,ChangePasswordSerializer ,
+build_registration_options ,
 )
 from apps .audit .utils import log_security_event 
 from apps .audit .device_tracker import DeviceTracker 
@@ -31,25 +33,50 @@ from apps .security .session_security import SessionManager
 from apps .security .throttling import BiometricRateThrottle ,LoginRateThrottle 
 from apps .security .crypto import encrypt_field ,decrypt_field 
 from apps .security .models import LoginHistory, BlockedDevice
-import hashlib 
+from apps .security .authentication import BoundJWTAuthentication
+from apps .core .net import client_fingerprint ,get_client_ip as _canonical_client_ip
+import hashlib
 
 def get_client_ip(request):
-    remote_addr = request.META.get('REMOTE_ADDR', '0.0.0.0')
-    if getattr(settings, 'TRUST_X_FORWARDED_FOR', False):
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0].strip()
-    return remote_addr
+    """Deprecated shim — kept so existing call sites keep working."""
+    return _canonical_client_ip(request)
+
+REFRESH_COOKIE_NAME ='refresh_token'
+
+
+def set_refresh_cookie (response ,refresh_token ):
+    """Attach the refresh token as an HttpOnly cookie.
+
+    One helper so the flags cannot drift between the password, MFA, biometric and
+    refresh responses. max_age tracks REFRESH_TOKEN_LIFETIME — the cookie used to
+    be pinned at seven days while the token inside it expired after one, which
+    only teaches the browser to keep replaying a dead credential.
+    """
+    lifetime =settings .SIMPLE_JWT .get ('REFRESH_TOKEN_LIFETIME')
+    max_age =int (lifetime .total_seconds ())if lifetime else 86400
+    response .set_cookie (
+    REFRESH_COOKIE_NAME ,
+    refresh_token ,
+    httponly =True ,
+    secure =not settings .DEBUG ,
+    samesite ='Strict',
+    max_age =max_age ,
+    path ='/',
+    )
+    return response
 
 def get_tokens_for_user (user ,request =None ):
     """Generate JWT tokens for user."""
     refresh =RefreshToken .for_user (user )
 
     if request :
-        ip =request .META .get ('REMOTE_ADDR','')
-        ua =request .META .get ('HTTP_USER_AGENT','')
-        fingerprint =hashlib .sha256 (f"{ip }:{ua }".encode ('utf-8')).hexdigest ()
-        refresh ['client_fingerprint']=fingerprint 
+        refresh ['client_fingerprint']=client_fingerprint (request )
+
+    # Session id claim. simplejwt copies custom claims from the refresh token onto
+    # the access tokens minted from it, so both sides of a session share one `sid`
+    # — which is what makes it possible to end *one* session on logout instead of
+    # every session the user has (see SessionManager.end_session).
+    refresh ['sid']=str (refresh ['jti'])
 
     return {
     'refresh':str (refresh ),
@@ -68,6 +95,12 @@ class IsAdminOrSelf (permissions .BasePermission ):
         if request .user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             return True 
         return obj ==request .user 
+
+class IsAdmin (permissions .BasePermission ):
+    """Allow only admins."""
+    
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and request.user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']
 
 
 class LoginView (APIView ):
@@ -118,12 +151,19 @@ class LoginView (APIView ):
                     cache.set(block_key, True, timeout=timeout_seconds)
                     cache.set(level_key, new_level, timeout=timeout_seconds + 86400)
                     cache.delete(cache_key) # Reset attempts for next block cycle
-                    
-                    BlockedDevice.objects.get_or_create(
+
+                    # update_or_create, not get_or_create: the row is what
+                    # WAFMiddleware enforces, and with get_or_create a device
+                    # blocked once kept its first reason forever and — since the
+                    # model had no expiry — stayed blocked for good. Mirror the
+                    # escalating cache lockout so the block lifts by itself.
+                    BlockedDevice.objects.update_or_create(
                         device_fingerprint=fingerprint,
                         defaults={
                             'reason': f'Blocked at level {new_level} ({attempts} attempts)',
                             'mac_address': mac_address,
+                            'is_active': True,
+                            'expires_at': timezone.now() + timedelta(seconds=timeout_seconds),
                         }
                     )
             
@@ -154,7 +194,7 @@ class LoginView (APIView ):
             cache.delete(f"failed_login_device_{fingerprint}")
             cache.delete(f"failed_login_level_{fingerprint}")
 
-        # Comment_26
+        # Device Tracking (early evaluation for Adaptive Auth)
         device_info ={
         'ip_address': ip_address,
         'mac_address': mac_address,
@@ -165,7 +205,7 @@ class LoginView (APIView ):
         tracked =DeviceTracker .track_device (user ,request ,device_info )
         device ,is_new_device =tracked if tracked else (None ,False )
 
-        # Comment_27
+        # Determine if we need MFA (TOTP enabled OR Adaptive Auth for untrusted/new device if enabled)
         needs_mfa =False 
         mfa_method ='none'
 
@@ -173,20 +213,20 @@ class LoginView (APIView ):
             needs_mfa =True 
             mfa_method ='totp'
         elif getattr (settings ,'ADAPTIVE_MFA_ENABLED',False )and (is_new_device or (device and not device .is_trusted )):
-        # Comment_28
+        # Adaptive Authentication: Untrusted device needs email OTP
             needs_mfa =True 
             mfa_method ='email'
 
         if needs_mfa :
             mfa_token =secrets .token_urlsafe (32 )
-            cache .set (f'mfa_pending:{mfa_token }',str (user .id ),timeout =300 )# Comment_29
+            cache .set (f'mfa_pending:{mfa_token }',str (user .id ),timeout =300 )# 5 min
 
             if mfa_method =='email':
                 import random 
                 otp_code =f"{random .randint (100000 ,999999 )}"
                 cache .set (f'mfa_code:{mfa_token }',otp_code ,timeout =300 )
 
-                # Comment_30
+                # Send OTP via email
                 from utils .email_service import send_securemed_email 
                 send_securemed_email (
                 to_email =user .email ,
@@ -209,9 +249,12 @@ class LoginView (APIView ):
             'detail':'يجب إدخال رمز التحقق بخطوتين',
             })
 
-            # Comment_31
+            # Update login metadata
         user.last_login = timezone.now()
-        user.last_login_ip = request.META.get('REMOTE_ADDR')
+        # get_client_ip, not REMOTE_ADDR directly: behind the production proxy
+        # REMOTE_ADDR is the proxy's own address, so every login was recorded from
+        # the same IP and last_login_ip was useless for spotting a stolen account.
+        user.last_login_ip = get_client_ip(request)
         user.save(update_fields=['last_login', 'last_login_ip'])
         
         # Log successful login history
@@ -239,22 +282,37 @@ class LoginView (APIView ):
         'user':UserSerializer (user ).data ,
         'requires_biometric':user .is_biometric_enabled ,
         })
-        response.set_cookie('refresh_token', tokens['refresh'], httponly=True, secure=getattr(settings, 'SECURE_SSL_REDIRECT', False), samesite='Strict', max_age=86400*7)
+        set_refresh_cookie (response ,tokens ['refresh'])
         return response
 
 
 class LogoutView (APIView ):
-    """Logout by blacklisting the refresh token."""
+    """Logout by blacklisting the refresh token and ending this one session.
+
+    It used to call force_logout_user, which denies every token the account
+    holds: signing out on a phone also signed the user out of the workstation
+    they were working on. Only the session presenting the token is ended here —
+    force_logout_user stays for the admin action and for hijack detection.
+    """
 
     def post (self ,request ):
         try :
-            refresh_token =request .COOKIES .get ('refresh_token')or request .data .get ('refresh')
+            refresh_token =request .COOKIES .get (REFRESH_COOKIE_NAME )or request .data .get ('refresh')
+            session_id =None
             if refresh_token :
                 token =RefreshToken (refresh_token )
+                # `sid` is stable across rotation; jti is the pre-rotation value
+                # register_session recorded. Try both so either shape matches.
+                session_id =token .get ('sid')or str (token .get ('jti')or '')
                 token .blacklist ()
 
             if request .user .is_authenticated :
-                SessionManager .force_logout_user (request .user .id )
+                if session_id :
+                    SessionManager .end_session (request .user .id ,session_id )
+                else :
+                    # No token to identify the session — the safe reading of
+                    # "log me out" is then to end all of them.
+                    SessionManager .force_logout_user (request .user .id )
 
             log_security_event (
             user =request .user ,
@@ -262,43 +320,110 @@ class LogoutView (APIView ):
             request =request ,
             )
             response = Response ({'detail':'تم تسجيل الخروج بنجاح'})
-            response .delete_cookie ('refresh_token')
+            response .delete_cookie (REFRESH_COOKIE_NAME )
             return response
         except TokenError :
             return Response (
             {'detail':'الرمز غير صالح'},
-            status =status .HTTP_400_BAD_REQUEST 
+            status =status .HTTP_400_BAD_REQUEST
             )
 
 
 class RefreshTokenView (APIView ):
-    """Refresh access token."""
+    """Exchange a refresh token for a new access token, rotating the refresh token.
+
+    SIMPLE_JWT already declares ROTATE_REFRESH_TOKENS and BLACKLIST_AFTER_ROTATION,
+    but those are honoured by simplejwt's own TokenRefreshView — this custom view
+    bypassed them, so a single refresh token stayed valid for its entire lifetime
+    and a stolen one could be replayed until it expired. Rotation, denylist and
+    device-binding checks are therefore done explicitly here.
+    """
     permission_classes =[permissions .AllowAny ]
 
     def post (self ,request ):
-        refresh_token =request .COOKIES .get ('refresh_token')or request .data .get ('refresh')
+        refresh_token =request .COOKIES .get (REFRESH_COOKIE_NAME )or request .data .get ('refresh')
         if not refresh_token :
             return Response (
             {'detail':'رمز التحديث مطلوب'},
-            status =status .HTTP_400_BAD_REQUEST 
+            status =status .HTTP_400_BAD_REQUEST
             )
         try :
             token =RefreshToken (refresh_token )
-            return Response ({
-            'access':str (token .access_token ),
-            })
         except TokenError :
             return Response (
             {'detail':'رمز التحديث غير صالح أو منتهي'},
-            status =status .HTTP_401_UNAUTHORIZED 
+            status =status .HTTP_401_UNAUTHORIZED
             )
+
+        user =User .objects .filter (pk =token .get ('user_id')).first ()
+
+        # The same binding BoundJWTAuthentication enforces on every API call. The
+        # claim is deliberately NOT re-derived from this request: rebinding here
+        # would let whoever holds a stolen refresh token re-point the session at
+        # their own IP and user agent, which is the exact attack the binding exists
+        # to stop.
+        bound =token .get ('client_fingerprint')
+        if bound and bound !=client_fingerprint (request ):
+            log_security_event (
+            user =user ,
+            event_type ='SESSION_HIJACK_DETECTED',
+            request =request ,
+            severity ='CRITICAL',
+            details ={'reason':'refresh_fingerprint_mismatch'},
+            )
+            return self ._reject ('الجلسة غير مطابقة لهذا الجهاز. يرجى تسجيل الدخول مرة أخرى.')
+
+        # A force-logout denies every token issued before it. Without this the
+        # refresh endpoint keeps minting access tokens for a session that an
+        # administrator — or the user — has already terminated.
+        denied_since =cache .get (f'token_denylist:{token .get ("user_id")}')
+        if denied_since and BoundJWTAuthentication ._issued_before (token ,denied_since ):
+            return self ._reject ('الجلسة غير صالحة. يرجى تسجيل الدخول مرة أخرى.')
+
+        if user is None or not user .is_active :
+            return self ._reject ('الحساب غير مفعّل')
+
+        rotated =None
+        if settings .SIMPLE_JWT .get ('ROTATE_REFRESH_TOKENS'):
+            if settings .SIMPLE_JWT .get ('BLACKLIST_AFTER_ROTATION'):
+                try :
+                    token .blacklist ()
+                except AttributeError :
+                    pass # Comment: token_blacklist app not installed
+            token .set_jti ()
+            token .set_exp ()
+            token .set_iat ()
+            rotated =str (token )
+
+        payload ={'access':str (token .access_token )}
+        if rotated :
+            payload ['refresh']=rotated
+
+        response =Response (payload )
+        if rotated :
+            set_refresh_cookie (response ,rotated )
+        return response
+
+    def _reject (self ,detail ):
+        """401 and clear the cookie, so a browser stops replaying a dead token."""
+        response =Response ({'detail':detail },status =status .HTTP_401_UNAUTHORIZED )
+        response .delete_cookie (REFRESH_COOKIE_NAME )
+        return response
 
 
 class BiometricEnrollView (APIView ):
-    """
-    Enroll biometric authentication for the current user.
+    """Enroll a device's public-key credential for the signed-in user.
+
     Security requirement #4: تسجيل الدخول بالبصمة
+
+    GET returns the creation options — including the challenge, which the server
+    now issues and remembers. The web client used to generate its own challenge,
+    so the whole registration could be assembled without the server ever being
+    involved in the ceremony.
     """
+
+    def get (self ,request ):
+        return Response (build_registration_options (request .user ))
 
     def post (self ,request ):
         serializer =BiometricEnrollSerializer (
@@ -384,12 +509,16 @@ class BiometricLoginView (APIView ):
                     cache.set(block_key, True, timeout=timeout_seconds)
                     cache.set(level_key, new_level, timeout=timeout_seconds + 86400)
                     cache.delete(cache_key)
-                    
-                    BlockedDevice.objects.get_or_create(
+
+                    # See the password-login path: update_or_create + expires_at,
+                    # so the WAF-enforced row expires with the cache lockout.
+                    BlockedDevice.objects.update_or_create(
                         device_fingerprint=fingerprint,
                         defaults={
                             'reason': f'Blocked at level {new_level} ({attempts} attempts) via biometric',
                             'mac_address': mac_address,
+                            'is_active': True,
+                            'expires_at': timezone.now() + timedelta(seconds=timeout_seconds),
                         }
                     )
             
@@ -414,7 +543,7 @@ class BiometricLoginView (APIView ):
         user .last_login_ip =ip_address
         user .save (update_fields =['last_login','last_login_ip'])
 
-        # Comment_32
+        # Device Tracking
         device_info ={
         'ip_address':ip_address,
         'mac_address':mac_address,
@@ -446,7 +575,7 @@ class BiometricLoginView (APIView ):
         'tokens':tokens ,
         'user':UserSerializer (user ).data ,
         })
-        response.set_cookie('refresh_token', tokens['refresh'], httponly=True, secure=getattr(settings, 'SECURE_SSL_REDIRECT', False), samesite='Strict', max_age=86400*7)
+        set_refresh_cookie (response ,tokens ['refresh'])
         return response
 
 
@@ -460,14 +589,16 @@ class UserViewSet (viewsets .ModelViewSet ):
     ordering_fields =['created_at','email','full_name']
 
     def get_permissions (self ):
-        if self .action in ['create','destroy','update','partial_update']:
+        if self .action =='create':
+            return [permissions .IsAuthenticated (),IsAdmin ()]
+        if self .action in ['destroy','update','partial_update']:
             return [permissions .IsAuthenticated (),IsAdminOrSelf ()]
         return [permissions .IsAuthenticated ()]
 
     def get_queryset (self ):
         qs =super ().get_queryset ()
-        # Comment_33
-        # Comment_34
+        # Basin scoping: a basin-bound HOSPITAL_ADMIN manages only their
+        # basin's users (plan requirement: linkage by basin).
         from apps .basins .utils import basin_scoped_queryset 
         return basin_scoped_queryset (qs ,self .request .user ,lookup ='basin_id')
 
@@ -557,9 +688,9 @@ class UserViewSet (viewsets .ModelViewSet ):
         return Response (UserSerializer (users ,many =True ).data )
 
 
-        # Comment_35
-        # Comment_36
-        # Comment_37
+        # ============================================================
+        # Two-Factor Authentication (TOTP) — DevSecOps security layer
+        # ============================================================
 
 def _qr_data_uri (text :str )->str :
     """Render otpauth:// URI as a base64 PNG data URI."""
@@ -696,15 +827,15 @@ class MFALoginView (APIView ):
             status =status .HTTP_401_UNAUTHORIZED ,
             )
 
-            # Comment_38
+            # Check if it's an email OTP
         cached_code =cache .get (f'mfa_code:{mfa_token }')
         is_valid =False 
 
         if cached_code :
-        # Comment_39
+        # Verify Email OTP
             is_valid =(code ==cached_code )
         else :
-        # Comment_40
+        # Verify TOTP
             if not user .mfa_secret :
                 return Response ({'detail':'إعدادات التحقق غير صالحة'},status =400 )
             secret =decrypt_field (user .mfa_secret )
@@ -720,7 +851,7 @@ class MFALoginView (APIView ):
             status =status .HTTP_400_BAD_REQUEST ,
             )
 
-            # Comment_41
+            # Trust this device if requested
         trust_device =request .data .get ('trust_device',False )
         if trust_device :
             fingerprint =request .META .get ('HTTP_X_DEVICE_FINGERPRINT')
@@ -735,9 +866,17 @@ class MFALoginView (APIView ):
             cache .delete (f'mfa_code:{mfa_token }')
 
         user .last_login =timezone .now ()
-        user .last_login_ip =request .META .get ('REMOTE_ADDR')
+        user .last_login_ip =get_client_ip (request )
         user .save (update_fields =['last_login','last_login_ip'])
         tokens =get_tokens_for_user (user ,request )
+        # Register the session exactly as LoginView and BiometricLoginView do.
+        # Without this, a 2FA login minted tokens for a session that was never
+        # recorded in `active_sessions`, with two consequences: the concurrent
+        # session limit did not apply to it, and — for any client that sends
+        # X-Device-Fingerprint — SessionManager.is_session_valid found the
+        # request's fingerprint in no live session and reject_if_hijacked
+        # force-logged-out the whole account on the first authenticated call.
+        SessionManager .register_session (user ,request ,token =tokens )
         
         # Log successful login history
         fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
@@ -757,13 +896,13 @@ class MFALoginView (APIView ):
         'tokens':tokens ,
         'user':UserSerializer (user ).data ,
         })
-        response.set_cookie('refresh_token', tokens['refresh'], httponly=True, secure=getattr(settings, 'SECURE_SSL_REDIRECT', False), samesite='Strict', max_age=86400*7)
+        set_refresh_cookie (response ,tokens ['refresh'])
         return response
 
 
-        # Comment_42
-        # Comment_43
-        # Comment_44
+        # ============================================================
+        # Biometric device management (list / revoke / delete)
+        # ============================================================
 
 class BiometricDeviceSerializer (drf_serializers .ModelSerializer ):
     class Meta :
@@ -823,30 +962,51 @@ class BiometricProfileViewSet (viewsets .ReadOnlyModelViewSet ):
         return Response ({'detail':'تم حذف الجهاز البيوميتري'})
 
 
-        # Comment_45
-        # Comment_46
-        # Comment_47
+        # ============================================================
+        # Global search — patients / channels / users in one query
+        # ============================================================
 
 class GlobalSearchView (APIView ):
     """Cross-entity search (Ctrl+K). Results are permission-scoped."""
+
+    # Patient name / national id are Fernet-encrypted properties over TextField
+    # columns, so they CANNOT be matched with SQL icontains — the scan below is
+    # unavoidable. What matters is that it iterates an already-scoped queryset,
+    # never Patient.objects.all(). This cap bounds the decrypt cost per request.
+    PATIENT_SCAN_LIMIT = 500
 
     def get (self ,request ):
         q =(request .query_params .get ('q')or '').strip ()
         if len (q )<2 :
             return Response ({'patients':[],'channels':[],'users':[],'total':0 })
 
-        from apps .channels .models import Channel 
-        from apps .patients .models import Patient 
+        from apps .channels .models import Channel
+        from apps .patients .models import Patient
+        from apps .core .mixins import (
+        NON_CLINICAL_ROLES ,
+        PATIENT_INDEX_ADMIN_ROLES ,
+        accessible_patients ,
+        )
 
-        user =request .user 
-        is_admin =user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']
+        user =request .user
+        is_admin =user .role in PATIENT_INDEX_ADMIN_ROLES
 
-        # Comment_48
+        # Scope BEFORE scanning: accessible_patients() applies basin scoping and
+        # then the channel-membership rule. This previously read
+        # Patient.objects.all(), so any authenticated account — including the
+        # PATIENT role, which is the default for new users — could enumerate
+        # every patient's name and national id.
         patients =[]
-        for p in Patient .objects .all ()[:500 ]:
+        needle =q .lower ()
+        patient_qs =accessible_patients (
+        Patient .objects .all (),user
+        ).only (
+        '_full_name','_national_id','gender','blood_type'
+        )[:self .PATIENT_SCAN_LIMIT ]
+        for p in patient_qs :
             name =p .full_name or ''
             nid =p .national_id or ''
-            if q .lower ()in name .lower ()or (nid and q in nid ):
+            if needle in name .lower ()or (nid and q in nid ):
                 patients .append ({
                 'id':str (p .id ),
                 'full_name':name ,
@@ -855,9 +1015,9 @@ class GlobalSearchView (APIView ):
                 'blood_type':p .blood_type ,
                 })
             if len (patients )>=6 :
-                break 
+                break
 
-                # Comment_49
+                # --- Channels (visibility-scoped) ---
         if is_admin :
             channels_qs =Channel .objects .all ()
         else :
@@ -877,9 +1037,11 @@ class GlobalSearchView (APIView ):
         ).order_by ('-created_at')[:6 ]
         ]
 
-        # Comment_50
+        # Staff directory: withheld from AUDITOR (separation of duties) and from
+        # non-clinical roles, which previously could enumerate every account's
+        # name, email and role.
         users =[]
-        if user .role not in ['AUDITOR']:
+        if user .role not in ('AUDITOR',)+NON_CLINICAL_ROLES :
             for u in User .objects .filter (
             Q (full_name__icontains =q )|Q (email__icontains =q )
             ).order_by ('full_name')[:6 ]:
@@ -899,17 +1061,17 @@ class GlobalSearchView (APIView ):
         })
 
 
-        # Comment_51
-        # Comment_52
-        # Comment_53
-        # Comment_54
-        # Comment_55
-        # Comment_56
-        # Comment_57
-        # Comment_58
-        # Comment_59
-        # Comment_60
-        # Comment_61
+        # ---------------------------------------------------------------------------
+        # Password reset (forgot password) — anonymous, rate-limited, audited.
+        #
+        # Flow (three steps, no user enumeration at any point):
+        #   1) POST /auth/password/reset/          {email}       → always the same reply
+        #   2) Email with a one-time signed link  (valid 1 hour)
+        #   3) POST /auth/password/reset/confirm/ {uid, token,
+        #                                          new_password} → password changed
+        # The token uses Django's PasswordResetTokenGenerator: bound to the user's
+        # password hash + last_login, so it self-invalidates after use or change.
+        # ---------------------------------------------------------------------------
 from django .contrib .auth .tokens import default_token_generator 
 from django .utils .encoding import force_bytes ,force_str 
 from django .utils .http import urlsafe_base64_encode ,urlsafe_base64_decode 
@@ -973,7 +1135,7 @@ class PasswordResetRequestView (APIView ):
             details ={'email':email ,'email_sent':bool (sent )},
             )
 
-            # Comment_62
+            # Identical response whether or not the account exists (no enumeration)
         return Response ({
         'detail':'إذا كان هذا البريد مسجلاً لدينا، ستصل رسالة تحتوي رابط '
         'إعادة التعيين خلال دقائق. تفضلوا بفحص صندوق الوارد '
@@ -991,7 +1153,7 @@ class PasswordResetConfirmView (APIView ):
         serializer .is_valid (raise_exception =True )
         data =serializer .validated_data 
 
-        # Comment_63
+        # Resolve the user from the base64 uid
         try :
             uid =force_str (urlsafe_base64_decode (data ['uid']))
             user =User .objects .filter (pk =uid ,is_active =True ).first ()

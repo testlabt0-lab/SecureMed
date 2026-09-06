@@ -8,7 +8,24 @@ import {
 import toast from 'react-hot-toast';
 import { telemedicineAPI } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
+import { TELEMEDICINE_ROLES } from '../constants/roles';
 import CreateSessionModal from '../components/telemedicine/CreateSessionModal';
+import { useWebRTCCall } from '../hooks/useWebRTCCall';
+
+/**
+ * What the call banner says, per signalling state. Previously the banner read
+ * "اتصال حي آمن ومباشر" unconditionally — including while no peer connection
+ * existed at all — which is the one thing a clinician must not be misled about
+ * before discussing a patient.
+ */
+const CALL_STATUS_TEXT: Record<string, { label: string; tone: string; pulse: boolean }> = {
+  idle: { label: 'لم تُفتح قناة الاتصال', tone: 'text-gray-300', pulse: false },
+  connecting: { label: 'جارٍ الاتصال بالغرفة…', tone: 'text-amber-300', pulse: true },
+  waiting: { label: 'في انتظار انضمام الطرف الآخر', tone: 'text-amber-300', pulse: true },
+  connected: { label: 'اتصال مباشر بين الطرفين', tone: 'text-emerald-400', pulse: true },
+  failed: { label: 'تعذّر تأسيس الاتصال', tone: 'text-red-400', pulse: false },
+  unauthorised: { label: 'لا تملك صلاحية دخول هذه الغرفة', tone: 'text-red-400', pulse: false },
+};
 
 export default function Telemedicine() {
   const user = useAuthStore(state => state.user);
@@ -28,10 +45,33 @@ export default function Telemedicine() {
 
   // Video element refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const screenShareVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
+
+  // The same stream as localStreamRef, in state: the peer connection has to be
+  // (re)built when the tracks change, and a ref does not re-run the effect.
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+
+  // Signalling + peer connection. Without this the page only ever showed the
+  // operator their own camera; the far side was a stock photograph.
+  const { state: callState, remoteStream } = useWebRTCCall({
+    roomId: activeSession?.room_id || null,
+    localStream,
+    // Tear the peer connection down when the session panel closes, instead of
+    // leaving a socket and an RTCPeerConnection alive behind a hidden panel.
+    enabled: !!activeSession,
+  });
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  const callStatus = CALL_STATUS_TEXT[callState] ?? CALL_STATUS_TEXT.idle;
 
   // In-call duration timer
   const [callDuration, setCallDuration] = useState(0);
@@ -46,7 +86,10 @@ export default function Telemedicine() {
   const [newMessage, setNewMessage] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const canManageSessions = ['DOCTOR', 'SUPER_ADMIN', 'HOSPITAL_ADMIN'].includes(user?.role || '');
+  // Same set that guards the /telemedicine route, so the page cannot admit a
+  // role and then hide every control from it. The literal list here predated
+  // CENTER_ADMIN and left centre admins on a read-only screen.
+  const canManageSessions = user != null && TELEMEDICINE_ROLES.includes(user.role);
 
   useEffect(() => {
     fetchConsultations();
@@ -95,13 +138,16 @@ export default function Telemedicine() {
           audio: true,
         });
         localStreamRef.current = stream;
+        setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
       }
     } catch (err) {
       console.warn('Webcam/mic access declined or not available:', err);
-      // Still allow session with mock feed fallback
+      // The session still opens — chat, notes and the clinical record work without
+      // media — but no peer connection is attempted, because there is nothing to
+      // send and useWebRTCCall treats a null stream as "not in a call".
     }
   };
 
@@ -110,6 +156,7 @@ export default function Telemedicine() {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
     }
+    setLocalStream(null);
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(track => track.stop());
       screenStreamRef.current = null;
@@ -301,21 +348,22 @@ export default function Telemedicine() {
                 playsInline
                 className="w-full h-full object-contain bg-black"
               />
+            ) : remoteStream ? (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover bg-black"
+              />
             ) : (
-              <div className="w-full h-full relative flex items-center justify-center">
-                {/* Fallback ambient medical backdrop */}
-                <img
-                  src="https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1200&q=80"
-                  alt="Remote party"
-                  className="w-full h-full object-cover opacity-60 filter blur-xs"
-                />
+              <div className="w-full h-full relative flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-950 to-black">
                 <div className="absolute flex flex-col items-center gap-3 bg-black/40 backdrop-blur-md p-6 rounded-3xl border border-white/10 text-white text-center">
                   <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary-500 to-medical-600 flex items-center justify-center text-3xl font-bold shadow-xl">
                     {otherPartyName?.charAt(0) || 'م'}
                   </div>
                   <div>
                     <h3 className="text-xl font-bold">{otherPartyName}</h3>
-                    <p className="text-xs text-gray-300 mt-0.5">غرفة الاستشارة الافتراضية مشفرة من طرف لطرف</p>
+                    <p className={`text-xs mt-1 ${callStatus.tone}`}>{callStatus.label}</p>
                   </div>
                 </div>
               </div>
@@ -335,9 +383,11 @@ export default function Telemedicine() {
                     ID: #{activeSession.room_id?.slice(0, 8)}
                   </span>
                 </h3>
-                <p className="text-xs text-emerald-400 flex items-center gap-1.5 mt-0.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  اتصال حي آمن ومباشر
+                <p className={`text-xs flex items-center gap-1.5 mt-0.5 ${callStatus.tone}`}>
+                  <span
+                    className={`w-2 h-2 rounded-full bg-current ${callStatus.pulse ? 'animate-pulse' : ''}`}
+                  />
+                  {callStatus.label}
                 </p>
               </div>
             </div>

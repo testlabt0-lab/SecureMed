@@ -76,7 +76,7 @@ class InvoiceCreateSerializer (serializers .ModelSerializer ):
         invoice .total_amount =total 
         invoice .patient_payable =total -float (invoice .discount )
 
-        # Comment_177
+        # Auto-apply insurance if available
         from .models import PatientInsurance 
         active_insurance =PatientInsurance .objects .filter (
         patient =invoice .patient ,is_valid =True 

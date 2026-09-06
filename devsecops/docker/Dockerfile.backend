@@ -52,8 +52,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 EXPOSE 8000
 
-# Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", \
-     "--threads", "2", "--timeout", "60", \
-     "--access-logfile", "-", "--error-logfile", "-", \
-     "config.wsgi:application"]
+# Run with daphne: this project serves WebSockets through Channels, and the
+# previous `gunicorn config.wsgi:application` silently dropped every one of them —
+# WSGI has no way to carry a WebSocket handshake. See the root Dockerfile for the
+# rationale and for the gunicorn+uvicorn-worker alternative when scaling out.
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", \
+     "--access-log", "-", \
+     "config.asgi:application"]

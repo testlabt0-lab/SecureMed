@@ -56,7 +56,7 @@ class BasinViewSet (viewsets .ModelViewSet ):
 
     def perform_destroy (self ,instance ):
         if instance .stats ()['users']>0 :
-        # Comment_174
+        # Never orphan users silently.
             raise permissions .exceptions .PermissionDenied (
             'لا يمكن حذف حوض مرتبط بمستخدمين — عطّله بدلاً من ذلك'
             )
@@ -68,7 +68,7 @@ class BasinViewSet (viewsets .ModelViewSet ):
         )
         instance .delete ()
 
-        # Comment_175
+        # ------------------------------------------------------------------
     @action (detail =False ,methods =['get'])
     def modules (self ,request ):
         """Catalogue of all system modules (for the admin UI)."""

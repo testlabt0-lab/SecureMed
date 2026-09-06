@@ -8,8 +8,8 @@ import django
 from datetime import date ,timedelta 
 from django .utils import timezone 
 
-os .environ .setdefault ('DJANGO_SETTINGS_MODULE',os .environ .get ('DJANGO_SETTINGS_MODULE','config.dev_settings'))
-sys .path .insert (0 ,os .path .dirname (os .path .dirname (os .path .abspath (__file__ ))))# Comment_594
+os .environ .setdefault ('DJANGO_SETTINGS_MODULE',os .environ .get ('DJANGO_SETTINGS_MODULE','config.settings'))
+sys .path .insert (0 ,os .path .dirname (os .path .dirname (os .path .abspath (__file__ ))))# backend/ (project root)
 django .setup ()
 
 from apps .accounts .models import User 
@@ -45,7 +45,7 @@ def seed_basins ():
         }
         )
         if was_created :
-        # Comment_595
+        # module activation by basin type (plan requirement)
             basin .apply_default_modules (save =False )
             basin .save ()
             print (f"  ✓ {name } — {basin .get_basin_type_display ()} ({len (basin .enabled_modules )} وحدات مفعّلة)")
@@ -248,7 +248,7 @@ def seed_channels (users ,patients ):
         }
         )
         if was_created :
-        # Comment_596
+        # Create owner membership
             ChannelMembership .objects .get_or_create (
             channel =channel ,
             user =ch_data ['owner'],
@@ -257,7 +257,7 @@ def seed_channels (users ,patients ):
             'granted_by':ch_data ['owner'],
             }
             )
-            # Comment_597
+            # Create member memberships
             for member_user ,member_role in ch_data ['members']:
                 ChannelMembership .objects .get_or_create (
                 channel =channel ,
@@ -446,9 +446,9 @@ def seed_appointments (users ,patients ):
             created +=1 
             print (f"  ✓ {title } ({doc .full_name } ➔ {pat .full_name })")
 
-            # Comment_598
+            # Also seed doctor slots
     for doc in doctors :
-        for day in [0 ,1 ,2 ,3 ,4 ]:# Comment_599
+        for day in [0 ,1 ,2 ,3 ,4 ]:# Sun-Thu
             AppointmentSlot .objects .get_or_create (
             doctor =doc ,
             day_of_week =day ,
@@ -472,7 +472,7 @@ def main ():
     link_demo_data_to_basins (basins )
     seed_appointments (users ,patients )
 
-    # Comment_600
+    # Log the seed event
     admin =User .objects .filter (role =User .Role .SUPER_ADMIN ).first ()
     if admin :
         log_security_event (

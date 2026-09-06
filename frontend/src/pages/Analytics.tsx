@@ -1,3 +1,11 @@
+/**
+ * UNREFERENCED. Nothing imports this file — /analytics is served by
+ * pages/AnalyticsDashboard.tsx, which is the maintained screen (it reads
+ * analyticsApi, supports report export and the dark theme; this one reads
+ * securityAPI.stats()). Kept on disk rather than deleted because removing a file
+ * is the user's call, but treat AnalyticsDashboard as the live page and do not
+ * add features here.
+ */
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -5,6 +13,7 @@ import {
 } from 'recharts';
 import { Activity, Users, FolderKanban, FileText, TrendingUp } from 'lucide-react';
 import { securityAPI } from '../api/client';
+import { roleLabel } from '../constants/roles';
 
 const COLORS = ['#3b82f6', '#0d9488', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -25,17 +34,6 @@ const recordTypeLabels: Record<string, string> = {
   NOTES: 'ملاحظات',
   VITALS: 'علامات حيوية',
   PROCEDURE: 'إجراء',
-};
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'مدير النظام',
-  HOSPITAL_ADMIN: 'مدير المستشفى',
-  DOCTOR: 'طبيب',
-  NURSE: 'ممرض',
-  LAB_TECH: 'فني مختبر',
-  PHARMACIST: 'صيدلي',
-  AUDITOR: 'مراجع أمني',
-  PATIENT: 'مريض',
 };
 
 export default function Analytics() {
@@ -68,7 +66,7 @@ export default function Analytics() {
 
   const usersByRoleData = stats?.users?.by_role
     ? Object.entries(stats.users.by_role).map(([key, value]) => ({
-        name: roleLabels[key] || key,
+        name: roleLabel(key),
         value: value as number,
       }))
     : [];

@@ -1,6 +1,6 @@
 """
 Tests for Phase 5 features:
-- AI clinical case summary (with mocked AI microservice)
+- AI clinical case summary (in-process Gemini, model factory patched)
 - Email service (filebased backend) + test_email endpoint
 - Monthly report email endpoint (admin/auditor only)
 - Scheduled reports management command
@@ -14,6 +14,7 @@ from unittest import mock
 import pytest
 from django.core import mail
 from django.core.management import call_command
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
@@ -24,12 +25,10 @@ from apps.patients.models import MedicalRecord
 from tests.factories import UserFactory, PatientFactory, ChannelFactory
 
 from tests.test_phase4_features import make_client, make_admin, make_channel_with_owner
+from tests.test_phase6_deployment import _patched
 
 
-AI_SUMMARY_FIXTURE = {
-    'summary': 'ملخص الحالة السريرية\n**نظرة عامة**: مريض ذكر.\n- نقطة انتباه',
-    'generated_at': '2026-08-31T10:00:00Z',
-}
+SUMMARY_TEXT = 'ملخص الحالة السريرية\n**نظرة عامة**: مريض ذكر.\n- نقطة انتباه'
 
 
 # ============================================================
@@ -38,6 +37,14 @@ AI_SUMMARY_FIXTURE = {
 
 @pytest.mark.django_db
 class TestAISummary:
+    """POST /api/v1/patients/<id>/ai-summary/.
+
+    These tests used to mock ``urllib.request.urlopen``, because the view POSTed
+    the patient payload to a Node microservice at AI_SERVICE_URL. That service is
+    not deployed anywhere, so the endpoint answered 503 outside a dev laptop; the
+    view now calls Gemini in-process, and the seam is the model factory that
+    ``tests.test_phase6_deployment`` already patches for the /api/v1/ai/ views.
+    """
 
     def setup_method(self):
         self.owner, self.channel = make_channel_with_owner()
@@ -51,23 +58,40 @@ class TestAISummary:
     def _url(self):
         return f'/api/v1/patients/{self.patient.id}/ai-summary/'
 
-    @mock.patch('urllib.request.urlopen')
-    def test_summary_success(self, mocked_urlopen):
-        import json as _json
-        resp_obj = mock.MagicMock()
-        resp_obj.read.return_value = _json.dumps(AI_SUMMARY_FIXTURE).encode()
-        resp_obj.__enter__.return_value = resp_obj
-        mocked_urlopen.return_value = resp_obj
-
-        resp = make_client(self.owner).post(self._url(), format='json')
+    def test_summary_success(self):
+        with _patched(text=SUMMARY_TEXT):
+            resp = make_client(self.owner).post(self._url(), format='json')
         assert resp.status_code == 200
         assert 'ملخص الحالة' in resp.data['summary']
         assert resp.data['records_used'] >= 1
+        assert resp.data['disclaimer']
         assert AuditLog.objects.filter(event_type='AI_SUMMARY_GENERATED').exists()
 
-    @mock.patch('urllib.request.urlopen', side_effect=OSError('service down'))
-    def test_summary_service_down_returns_503(self, _mocked):
-        resp = make_client(self.owner).post(self._url(), format='json')
+    def test_patient_identity_is_masked_before_the_prompt_leaves(self):
+        # The old implementation sent full_name, age and record text verbatim to
+        # a third party. The clinical content is what the model needs; the
+        # patient's identity is not.
+        sent = []
+        with _patched(text=SUMMARY_TEXT, sent=sent):
+            resp = make_client(self.owner).post(self._url(), format='json')
+        assert resp.status_code == 200
+        prompt = sent[0]
+        assert self.patient.full_name not in prompt
+        assert 'ارتفاع ضغط الدم' in prompt   # the diagnosis still reaches it
+
+    def test_upstream_failure_returns_503_and_hides_the_error(self):
+        secret = 'API key AIzaSyLEAKED rejected by generativelanguage.googleapis.com'
+        with _patched(error=RuntimeError(secret)):
+            resp = make_client(self.owner).post(self._url(), format='json')
+        assert resp.status_code == 503
+        assert 'AIzaSyLEAKED' not in str(resp.data)
+        log = AuditLog.objects.filter(event_type='AI_SUMMARY_FAILED').first()
+        assert log is not None
+        assert 'AIzaSyLEAKED' in str(log.details)
+
+    def test_missing_api_key_returns_503_and_audits(self):
+        with override_settings(GEMINI_API_KEY=''):
+            resp = make_client(self.owner).post(self._url(), format='json')
         assert resp.status_code == 503
         assert AuditLog.objects.filter(event_type='AI_SUMMARY_FAILED').exists()
 
@@ -77,6 +101,22 @@ class TestAISummary:
     def test_non_member_forbidden(self):
         outsider = UserFactory(role=User.Role.NURSE)
         resp = make_client(outsider).post(self._url(), format='json')
+        assert resp.status_code == 403
+
+    def test_gated_by_the_ai_module(self):
+        # A basin-less user is not subject to module gating, so give the owner one
+        # rather than skipping: the point is that ai_summary honours the same gate
+        # as the /api/v1/ai/ views, which it did not before.
+        from apps.basins.models import Basin
+        from tests.factories import BasinFactory
+
+        basin = BasinFactory()
+        basin.disable_module(Basin.MODULE_AI_ASSISTANT)
+        self.owner.basin = basin
+        self.owner.save(update_fields=['basin'])
+
+        with _patched(text=SUMMARY_TEXT):
+            resp = make_client(self.owner).post(self._url(), format='json')
         assert resp.status_code == 403
 
 

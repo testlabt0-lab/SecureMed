@@ -29,7 +29,7 @@ class PatientSerializer (serializers .ModelSerializer ):
         read_only_fields =['id','age','created_at']
 
     def create (self ,validated_data ):
-    # Comment_237
+    # Use property setters for encryption
         patient =Patient (**validated_data )
         patient .save ()
         return patient 
@@ -44,10 +44,10 @@ class PatientSerializer (serializers .ModelSerializer ):
         ret =super ().to_representation (instance )
         request =self .context .get ('request')
 
-        # Comment_238
+        # Dynamic Data Masking (Privacy-by-Design)
         if request and request .user .is_authenticated :
             role =request .user .role 
-            # Comment_239
+            # Only Admins and Doctors can see full PII
             if role not in ['SUPER_ADMIN','HOSPITAL_ADMIN','DOCTOR']:
                 nid =ret .get ('national_id')
                 if nid and len (nid )>4 :
@@ -55,7 +55,7 @@ class PatientSerializer (serializers .ModelSerializer ):
 
                 phone =ret .get ('phone')
                 if phone and len (phone )>6 :
-                # Comment_240
+                # e.g., +966501234567 -> +9665*****567
                     prefix_len =5 if phone .startswith ('+')else 3 
                     ret ['phone']=phone [:prefix_len ]+'*'*(len (phone )-prefix_len -3 )+phone [-3 :]
 

@@ -1,11 +1,11 @@
 """
 Views for patients app.
 """
-from rest_framework import viewsets ,permissions ,status 
-from rest_framework .response import Response 
-from rest_framework .decorators import action 
-from django .core .exceptions import PermissionDenied 
-from django .conf import settings 
+from rest_framework import viewsets ,permissions ,status
+from rest_framework .response import Response
+from rest_framework .decorators import action
+from django .core .exceptions import PermissionDenied
+from django .utils import timezone
 
 from apps.patients.models import Patient, MedicalRecord
 from apps.patients.serializers import PatientSerializer, MedicalRecordSerializer
@@ -16,9 +16,9 @@ from apps.core.mixins import PatientAccessMixin
 class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
     """Patient management."""
 
-    # Comment_241
-    # Comment_242
-    # Comment_243
+    # select_related('basin'): PatientSerializer exposes basin_name via
+    # basin.name — without the join each serialized row triggered an extra
+    # DB round-trip to Neon (~20 extra queries per page over the WAN).
     queryset =Patient .objects .select_related ('basin').order_by ('-created_at')
     serializer_class =PatientSerializer 
 
@@ -29,17 +29,17 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
 
     def get_queryset (self ):
         qs =super ().get_queryset ()
-        # Comment_244
+        # Basin scoping (plan requirement: data is linked to basins)
         from apps .basins .utils import basin_scoped_queryset 
         qs =basin_scoped_queryset (qs ,self .request .user ,lookup ='basin_id')
-        # Comment_245
+        # Optional explicit basin filter: ?basin=<id>
         basin_param =self .request .query_params .get ('basin')
         if basin_param :
             qs =qs .filter (basin_id =basin_param )
         return qs 
 
     def create (self ,request ,*args ,**kwargs ):
-    # Comment_246
+    # Module activation by basin type (plan requirement)
         from apps .basins .utils import ensure_module_enabled 
         ensure_module_enabled (request .user ,'patients')
         return super ().create (request ,*args ,**kwargs )
@@ -65,7 +65,7 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         from apps .channels .serializers import ChannelSerializer 
 
         channels = patient.channels.all()
-        # Comment_248
+        # Filter channels user can view
         viewable_channels = self.get_viewable_channels(request.user, patient)
         serializer = ChannelSerializer(
         viewable_channels ,many =True ,context ={'request':request }
@@ -85,15 +85,15 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         patient = self.get_object()
         user = request.user
         self.check_patient_access(user, patient, 'view profile')
-        # Comment_249
+        # Channels the requester can view for this patient
         viewable_channels = self.get_viewable_channels(user, patient)
 
-            # Comment_250
+            # Records belonging to those channels (access-scoped)
         records =MedicalRecord .objects .filter (
         channel__in =viewable_channels 
         ).select_related ('channel','created_by').order_by ('-created_at')[:100 ]
 
-        # Comment_251
+        # Medical files for those channels
         from apps .patients .models import MedicalFile 
         files =MedicalFile .objects .filter (
         channel__in =viewable_channels 
@@ -136,25 +136,34 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
     def ai_summary(self, request, pk=None):
         """
         Generate an AI clinical case summary for this patient.
-        Aggregates the same permission-scoped data as `profile`, then calls
-        the internal AI microservice (server-to-server, never exposed).
-        The summary is generated from real record data only — the AI service
-        is instructed to never invent clinical facts.
+
+        Aggregates the same permission-scoped data as `profile`, then asks Gemini
+        in-process — the same path as apps.ai.views. It used to POST this payload
+        to a Node microservice at AI_SERVICE_URL (127.0.0.1:8100 by default):
+        that service is not deployed alongside the app, so the endpoint answered
+        503 anywhere but a developer laptop, and what it did send carried the
+        patient's name, age and record text unmasked. The summary is built from
+        real record data only, and the model is told never to invent a clinical
+        fact.
         """
         import json as _json
-        import urllib.request
+
+        from apps.ai.utils import anonymize_patient_data
+        from apps.ai.views import UPSTREAM_ERROR, get_gemini_model
+        from apps.basins.utils import ensure_module_enabled
 
         patient = self.get_object()
         user = request.user
         self.check_patient_access(user, patient, 'AI summary')
-        # Comment_252
+        ensure_module_enabled(user, 'ai_assistant')
+        # Same access-scoping as the profile action
         viewable_channels = self.get_viewable_channels(user, patient)
 
         records =MedicalRecord .objects .filter (
         channel__in =viewable_channels 
         ).select_related ('channel','created_by').order_by ('-created_at')[:40 ]
 
-        # Comment_253
+        # ---- Build the AI payload (permission-scoped) ----
         payload ={
         'patient':{
         'full_name':patient .full_name ,
@@ -189,18 +198,37 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         },
         }
 
-        # Comment_254
-        ai_url =getattr (settings ,'AI_SERVICE_URL','http://127.0.0.1:8100')
-        import requests
-        try :
-            resp = requests.post(
-                f'{ai_url}/case-summary',
-                json=payload,
-                timeout=75
+        # ---- Call the AI microservice (server-to-server) ----
+        model =get_gemini_model ()
+        if not model :
+            log_security_event (
+            user =user ,
+            event_type ='AI_SUMMARY_FAILED',
+            request =request ,
+            details ={'patient_id':str (patient .id ),'error':'GEMINI_API_KEY not configured'},
             )
-            resp.raise_for_status()
-            ai_data = resp.json()
-        except Exception as e :# Comment_255
+            return Response (
+            {'detail':UPSTREAM_ERROR },
+            status =status .HTTP_503_SERVICE_UNAVAILABLE ,
+            )
+
+        try :
+            # Anonymised for the same reason every other call in apps.ai is: the
+            # payload leaves the deployment, and the clinical content is what the
+            # model needs — the patient's identity is not.
+            safe_payload =anonymize_patient_data (payload )
+            prompt =(
+            'أنت طبيب استشاري. اكتب ملخصاً سريرياً موجزاً باللغة العربية لهذه '
+            'الحالة، معتمداً على البيانات المرفقة فقط، ولا تخترع أي معلومة طبية '
+            'غير موجودة فيها.\n\n'
+            f'{_json .dumps (safe_payload ,ensure_ascii =False ,default =str )}'
+            )
+            response =model .generate_content (prompt )
+            summary =response .text
+        except Exception as e :# service down / timeout / bad response
+            # str(e) from the SDK can carry the request URL and, on an auth
+            # error, part of the API key — the client gets the module's generic
+            # message and the real error goes to the audit trail.
             log_security_event (
             user =user ,
             event_type ='AI_SUMMARY_FAILED',
@@ -208,10 +236,9 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
             details ={'patient_id':str (patient .id ),'error':str (e )[:200 ]},
             )
             return Response (
-            {'detail':'تعذر توليد الملخص الذكي حالياً — تأكد من تشغيل خدمة الذكاء الاصطناعي'},
+            {'detail':UPSTREAM_ERROR },
             status =status .HTTP_503_SERVICE_UNAVAILABLE ,
             )
-
         log_security_event (
         user =user ,
         event_type ='AI_SUMMARY_GENERATED',
@@ -224,8 +251,8 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         )
 
         return Response ({
-        'summary':ai_data .get ('summary',''),
-        'generated_at':ai_data .get ('generated_at'),
+        'summary':summary ,
+        'generated_at':timezone .now ().isoformat (),
         'records_used':len (payload ['records']),
         'disclaimer':'هذا الملخص مولّد آلياً ولا يُغني عن المراجعة الطبية البشرية',
         })
@@ -234,8 +261,8 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
 class MedicalRecordViewSet (viewsets .ModelViewSet ):
     """Medical records management."""
 
-    # Comment_256
-    # Comment_257
+    # select_related: serializer reads channel.name + created_by.full_name
+    # per row — avoid 2 extra queries per record on list responses.
     queryset =MedicalRecord .objects .select_related (
     'channel','created_by'
     ).order_by ('-created_at')
@@ -250,7 +277,7 @@ class MedicalRecordViewSet (viewsets .ModelViewSet ):
             'channel','created_by'
             ).order_by ('-created_at')
 
-            # Comment_258
+            # Get channels the user can view
         from apps .channels .models import Channel 
         accessible_channels =Channel .objects .filter (
         Q (owner =user )|Q (memberships__user =user ,memberships__is_active =True )
@@ -265,7 +292,7 @@ class MedicalRecordViewSet (viewsets .ModelViewSet ):
         if not channel .can_view (self .request .user ):
             raise PermissionDenied ('غير مصرح لك بإضافة سجلات لهذه القناة')
 
-            # Comment_259
+            # Check if user can create records (must be admin or EDITOR or higher)
         if self .request .user .role not in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             role =channel .get_user_role (self .request .user )
             if role not in ['OWNER','MODERATOR','EDITOR','CONTRIBUTOR']:
@@ -284,5 +311,5 @@ class MedicalRecordViewSet (viewsets .ModelViewSet ):
         )
 
 
-        # Comment_260
+        # Helper import
 from django .db .models import Q 

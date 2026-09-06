@@ -6,9 +6,10 @@
 
 | المكوّن | الخدمة | العنوان النهائي |
 |---------|--------|-----------------|
-| Django API + واجهة React | Render (Web Service) | `https://securemed-web.onrender.com` |
-| خدمة الذكاء الاصطناعي (GLM) | Render (Web Service) | `https://securemed-ai.onrender.com` |
+| Django API + واجهة React + المساعد الذكي (خدمة واحدة) | Render (Web Service) | `https://securemed-web.onrender.com` |
 | قاعدة البيانات PostgreSQL | Neon (خطة Free الدائمة) | سلسلة اتصال مشفّرة TLS |
+
+> 🤖 **لا توجد خدمة ذكاء اصطناعي منفصلة.** المساعد صار داخل Django (`backend/apps/ai/` على `/api/v1/ai/*`) ويستدعي Gemini في نفس العملية، خلف JWT وفحص الدور وتعمية بيانات المريض. كل ما يلزمه متغيّر `GEMINI_API_KEY` على خدمة الويب. مجلد `ai-service/` (Node + GLM) **متوقّف ولا يُنشر** — نقاطه الخمس تستقبل بيانات مريض بلا مصادقة ولا سجل تدقيق.
 
 > ⚠️ **مهم**: الخطة المجانية على Render «تنام» بعد 15 دقيقة بلا زيارات — أول طلب بعدها يستغرق ~50 ثانية للاستيقاظ. Neon مجانية للأبد (0.5GB) ولا تحتاج بطاقة.
 
@@ -45,11 +46,13 @@ git push -u origin main
 
 1. سجّل في <https://render.com> (أو GitHub).
 2. **New +** ← **Blueprint** ← اختر مستودع `securemed`.
-3. سيقرأ Render ملف `render.yaml` تلقائياً ويقترح خدمتين: `securemed-web` و `securemed-ai`.
-4. قبل التطبيق املأ المتغيرات التي تظهر (نوع `sync`):
+3. سيقرأ Render ملف `render.yaml` تلقائياً ويقترح ثلاث خدمات: `securemed-production` (الويب) و`securemed-worker` (Celery) و`securemed-redis` (كاش ووسيط).
+4. قبل التطبيق املأ المتغيرات المعلّمة `sync: false` (Render لا يولّدها):
    - `DATABASE_URL` ← الصق سلسلة Neon من الخطوة 2.
-   - `ZAI_BASE_URL` ← عنوان مزوّد GLM (مثال: `https://api.z.ai/v1`).
-   - `ZAI_API_KEY` ← مفتاحك من منصة Z.ai.
+   - `ENCRYPTION_KEY` ← مفتاح Fernet تولّده بنفسك **واحفظ نسخة منه**؛ فقدانه يعني أن أعمدة PHI المشفَّرة لا تُقرأ مرة أخرى ولا يوجد مسار استرجاع.
+   - `AUDIT_LOG_HMAC_KEY` ← قيمة عشوائية طويلة **واحفظ نسخة منها**؛ تغييرها يُبطل التحقق من كل توقيعات التدقيق السابقة.
+   - (اختياري) `GEMINI_API_KEY` ← مفتاح Gemini للمساعد الذكي وملخص الحالة. بدونه تعمل المنصة كاملةً وتُجيب نقاط الذكاء الاصطناعي بـ «الميزة غير مهيّأة».
+   - (اختياري) `METRICS_TOKEN` ← يحمي `/metrics` وتفصيل `/health/ready/`.
    - (اختياري) `EMAIL_HOST` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` لتفعيل بريد الإشعارات الحقيقي — مثال Gmail: `smtp.gmail.com` + App Password.
 5. اضغط **Apply**. سيبنى كل شيء ويعمل خلال دقائق.
 
@@ -61,14 +64,13 @@ git push -u origin main
 # فحص الصحة
 curl https://securemed-web.onrender.com/health/
 
-# فحص خدمة الذكاء الاصطناعي
-curl https://securemed-ai.onrender.com/health
-
 # دخول تجريبي
 curl -X POST https://securemed-web.onrender.com/api/v1/auth/login/ \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@securemed.app","password":"Admin@2026!"}'
 ```
+
+> 🔗 استبدل `securemed-web` باسم خدمتك الفعلي: مسار الـ Blueprint ينشئها باسم `securemed-production` (وهو الاسم المكتوب في `ALLOWED_HOSTS` و`FRONTEND_URL` داخل `render.yaml`)، أما الأسماء أعلاه فتخصّ النشر اليدوي أدناه. أي اسم آخر يجب إضافته إلى `ALLOWED_HOSTS` وإلا رجع كل طلب — بما فيه فحص صحة Render — بـ 400 DisallowedHost.
 
 **حسابات العرض التجريبي** (تُبذر تلقائياً عند أول إقلاع — `SEED_DEMO_DATA=1`):
 
@@ -107,21 +109,19 @@ cd android
 
 ## بديل: نشر يدوي (دون Blueprint)
 
-إن فضّلت الإعداد اليدوي أنشئ خدمتين على Render:
+إن فضّلت الإعداد اليدوي أنشئ **خدمة واحدة** على Render:
 
-**خدمة 1 — `securemed-web` (Python)**
+**`securemed-web` (Python)**
 - Root Directory: `backend`
 - Build Command: `bash ../deploy/build.sh`
 - Start Command: `bash ../deploy/start.sh`
 - Health Check Path: `/health/`
-- نفس متغيرات البيئة من `render.yaml`
+- نفس متغيرات البيئة من `render.yaml` (وأهمها `DATABASE_URL`)، مع `ALLOWED_HOSTS=securemed-web.onrender.com` مطابقاً للاسم الذي اخترته
+- المساعد الذكي داخل هذه الخدمة نفسها: أضف `GEMINI_API_KEY` فقط
 
-**خدمة 2 — `securemed-ai` (Node)**
-- Root Directory: `ai-service`
-- Build Command: `npm install`
-- Start Command: `bash start.sh`
-- Health Check Path: `/health`
-- ثم في خدمة الويب أضف: `AI_SERVICE_URL=https://securemed-ai.onrender.com`
+> ⛔ **لا تنشر `ai-service/` كخدمة.** كانت خدمة Node + GLM على المنفذ 8100 وقد أُوقفت: لا `render.yaml` ولا `docker-compose.yml` ولا وكيل Vite يشير إليها، ونقاطها الخمس بلا مصادقة ولا تحديد معدل ولا سجل تدقيق وتمرّر بيانات مريض إلى طرف ثالث. نشرها على منفذ عام = نقطة نموذج مفتوحة ومصرف PHI خارج سجل التدقيق. الملف يرفض الإقلاع الآن دون `AI_SERVICE_TOKEN` ويستمع على 127.0.0.1 فقط، وهو محفوظ للاطلاع لا للتشغيل.
+
+> ℹ️ النشر اليدوي بخدمة واحدة يعني عدم وجود عامل Celery؛ في هذه الحالة اضبط `AUDIT_LOG_ASYNC=False` حتى تُكتب سجلات التدقيق فوراً بدل أن تُصطف لعامل غير موجود.
 
 ## بديل: Docker
 

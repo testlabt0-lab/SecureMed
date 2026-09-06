@@ -26,6 +26,13 @@ import java.time.format.DateTimeFormatter
 class ReminderScheduler(private val context: Context) {
 
     companion object {
+        /**
+         * Broadcast action for a due dose. [ReminderReceiver] drops anything
+         * else, and PendingIntent matching is action-sensitive, so scheduling
+         * and cancelling must both go through this constant.
+         */
+        const val ACTION_MEDICATION_REMINDER = "com.securemed.app.MEDICATION_REMINDER"
+
         const val EXTRA_MEDICATION_NAME = "med_name"
         const val EXTRA_MEDICATION_DOSAGE = "med_dosage"
         const val EXTRA_PATIENT_NAME = "patient_name"
@@ -55,7 +62,7 @@ class ReminderScheduler(private val context: Context) {
         }
 
         val intent = Intent(context, ReminderReceiver::class.java).apply {
-            action = "com.securemed.app.MEDICATION_REMINDER"
+            action = ACTION_MEDICATION_REMINDER
             putExtra(EXTRA_MEDICATION_ID, medication.id)
             putExtra(EXTRA_MEDICATION_NAME, medication.name)
             putExtra(EXTRA_MEDICATION_DOSAGE, medication.dosage)
@@ -94,14 +101,38 @@ class ReminderScheduler(private val context: Context) {
         }
     }
 
+    /**
+     * Drops the pending alarm for one medication.
+     *
+     * The Intent must carry the same action as the one used to schedule:
+     * PendingIntent lookup compares Intents with `filterEquals`, which
+     * includes the action, so an actionless Intent silently matches nothing
+     * and leaves the alarm armed.
+     */
     fun cancel(medicationId: String) {
+        val intent = Intent(context, ReminderReceiver::class.java).apply {
+            action = ACTION_MEDICATION_REMINDER
+        }
         val pending = PendingIntent.getBroadcast(
             context,
             medicationId.hashCode(),
-            Intent(context, ReminderReceiver::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        ) ?: return
+
         alarmManager.cancel(pending)
+        pending.cancel()
+    }
+
+    /**
+     * Drops every alarm this device has armed.
+     *
+     * Must run *before* the medication cache is wiped (logout), otherwise the
+     * plan ids the alarms are keyed by are gone and the alarms keep firing —
+     * posting patient names and prescriptions for a signed-out user.
+     */
+    fun cancelAll() {
+        MedicationStore.loadPlans().forEach { cancel(it.id) }
     }
 
     /** Next (triggerMillis, time-of-day) pair for this medication. */
@@ -140,7 +171,7 @@ class ReminderScheduler(private val context: Context) {
 class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != "com.securemed.app.MEDICATION_REMINDER") return
+        if (intent.action != ReminderScheduler.ACTION_MEDICATION_REMINDER) return
 
         NotificationHelper.ensureChannels(context)
 
@@ -172,8 +203,17 @@ class ReminderReceiver : BroadcastReceiver() {
  */
 class BootReceiver : BroadcastReceiver() {
 
+    private companion object {
+        /** Pre-Android-N OEM equivalent of BOOT_COMPLETED (HTC, some Samsungs). */
+        const val ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON"
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
+            intent.action != ACTION_QUICKBOOT_POWERON
+        ) {
+            return
+        }
         try {
             ReminderScheduler(context).refreshFromCache()
         } catch (_: Exception) {

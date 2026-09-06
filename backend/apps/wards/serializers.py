@@ -70,11 +70,11 @@ class BedAssignmentCreateSerializer (serializers .ModelSerializer ):
     def create (self ,validated_data ):
         bed =validated_data ['bed']
 
-        # Comment_420
+        # Verify bed is free
         if bed .status !='FREE':
             raise serializers .ValidationError ({"bed":"السرير غير متاح حالياً."})
 
-            # Comment_421
+            # Verify patient is not already admitted
         if BedAssignment .objects .filter (patient =validated_data ['patient'],is_active =True ).exists ():
             raise serializers .ValidationError ({"patient":"المريض منوّم حالياً في سرير آخر."})
 
@@ -83,7 +83,7 @@ class BedAssignmentCreateSerializer (serializers .ModelSerializer ):
         **validated_data 
         )
 
-        # Comment_422
+        # Update bed status
         bed .status ='OCCUPIED'
         bed .save (update_fields =['status'])
 

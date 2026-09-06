@@ -11,6 +11,44 @@ plugins {
     namespace = "com.securemed.app"
     compileSdk = 35
 
+    // Backend URL — override at build time:
+    //   ./gradlew assembleRelease -PAPI_BASE_URL=https://host/api/v1/
+    // Without an override, debug goes to the emulator loopback (10.0.2.2 = the
+    // dev machine) and release goes to production over TLS. A release build
+    // must not inherit the loopback default: it is cleartext, 10.0.2.2 is the
+    // one host network_security_config still permits in the clear, and the
+    // OkHttp pinner reads its host from this URL — an http base URL therefore
+    // disables pinning as well.
+    val apiBaseUrlOverride = project.findProperty("API_BASE_URL") as String?
+    val debugApiBaseUrl = apiBaseUrlOverride ?: "http://10.0.2.2:8000/api/v1/"
+    val releaseApiBaseUrl = apiBaseUrlOverride ?: "https://securemed-production.onrender.com/api/v1/"
+
+    // Release signing material stays out of the repository — read from
+    // ~/.gradle/gradle.properties or from the CI environment:
+    //   SECUREMED_KEYSTORE_FILE (absolute, or relative to the android/ root)
+    //   SECUREMED_KEYSTORE_PASSWORD, SECUREMED_KEY_ALIAS, SECUREMED_KEY_PASSWORD
+    fun signingValue(name: String): String? =
+        (project.findProperty(name) as String?) ?: System.getenv(name)
+
+    val releaseKeystore = signingValue("SECUREMED_KEYSTORE_FILE")
+        ?.let { rootProject.file(it) }
+        ?.takeIf { it.isFile }
+
+    // An unsigned release APK fails at install time, far from the cause. Say so
+    // while the build is still running, and only for release tasks so debug
+    // builds stay quiet. A wrong or missing path lands here identically —
+    // takeIf { it.isFile } above rejects both.
+    if (releaseKeystore == null &&
+        gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+    ) {
+        logger.warn(
+            "SECUREMED_KEYSTORE_FILE is not set to an existing file — the release " +
+                "build will be UNSIGNED and cannot be installed or uploaded. Set " +
+                "SECUREMED_KEYSTORE_FILE / _PASSWORD, SECUREMED_KEY_ALIAS / _PASSWORD " +
+                "in ~/.gradle/gradle.properties or the CI environment."
+        )
+    }
+
     defaultConfig {
         applicationId = "com.securemed.app"
         minSdk = 26
@@ -20,13 +58,23 @@ plugins {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+    }
 
-        // Backend URL — configurable at build time:
-        //   ./gradlew assembleRelease -PAPI_BASE_URL=https://securemed-web.onrender.com/api/v1/
-        // Falls back to the Android emulator loopback (10.0.2.2 = host machine).
-        val apiBaseUrl = (project.findProperty("API_BASE_URL") as String?)
-            ?: "http://10.0.2.2:8000/api/v1/"
-        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = signingValue("SECUREMED_KEYSTORE_PASSWORD")
+                keyAlias = signingValue("SECUREMED_KEY_ALIAS")
+                keyPassword = signingValue("SECUREMED_KEY_PASSWORD")
+                // minSdk is 26, so the v1 JAR signature is dead weight and
+                // only widens what an attacker can tamper with; v2+v3 cover
+                // every supported device.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -34,10 +82,20 @@ plugins {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug") // For demo APK
+            buildConfigField("String", "API_BASE_URL", "\"$releaseApiBaseUrl\"")
+            // Signed only when real key material was supplied; otherwise the
+            // build produces an unsigned APK/AAB, which is a loud failure at
+            // install time instead of a quiet one.
+            //
+            // This used to be signingConfigs["debug"], whose key ships inside
+            // the Android SDK and is identical on every machine: anyone can
+            // strip and re-sign such a build, Play rejects it, and the
+            // fallback hid the fact that no release key was ever configured.
+            signingConfig = signingConfigs.findByName("release")
         }
         debug {
             isDebuggable = true
+            buildConfigField("String", "API_BASE_URL", "\"$debugApiBaseUrl\"")
         }
     }
 
@@ -76,6 +134,10 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
+    // Compose UI 1.7 deprecated its own LocalLifecycleOwner in favour of the
+    // one here. Declared explicitly rather than relied on transitively through
+    // compose-ui, so the import cannot break on a BOM bump.
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
     implementation("androidx.activity:activity-compose:1.9.0")
 
     // Hilt — Dependency Injection

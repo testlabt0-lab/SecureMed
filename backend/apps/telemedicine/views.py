@@ -28,9 +28,9 @@ class ConsultationViewSet (viewsets .ModelViewSet ):
         qs =super ().get_queryset ()
         user =self .request .user 
 
-        # Comment_416
+        # Doctors see their own consultations, patients see theirs. Admins see all.
         if user .role =='PATIENT':
-        # Comment_417
+        # Assuming patient UUID is somehow linked, or we filter by something else.
             pass 
         elif user .role =='DOCTOR':
             qs =qs .filter (doctor =user )
@@ -50,8 +50,8 @@ class ConsultationViewSet (viewsets .ModelViewSet ):
             consultation .started_at =timezone .now ()
             consultation .save (update_fields =['status','started_at'])
 
-            # Comment_418
-            # Comment_419
+            # In a real app, generate the WebRTC token or join link here.
+            # We simulate it with the room_id.
         return Response (ConsultationSerializer (consultation ).data )
 
     @action (detail =True ,methods =['post'])

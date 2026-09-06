@@ -3,7 +3,7 @@ package com.securemed.app.ui.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -27,7 +27,7 @@ fun BottomNavBar(navController: NavController) {
     val items = listOf(
         BottomNavItem(Route.Dashboard.route, "الرئيسية", Icons.Default.Home),
         BottomNavItem(Route.Patients.route, "المرضى", Icons.Default.People),
-        BottomNavItem(Route.Channels.route, "المحادثات", Icons.Default.Chat),
+        BottomNavItem(Route.Channels.route, "المحادثات", Icons.AutoMirrored.Filled.Chat),
         BottomNavItem(Route.Profile.route, "حسابي", Icons.Default.Person)
     )
 

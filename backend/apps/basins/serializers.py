@@ -34,7 +34,7 @@ class BasinSerializer (serializers .ModelSerializer ):
         ]
 
     def get_stats (self ,obj ):
-    # Comment_171
+    # Cheap on list views at demo scale; exact counts per basin.
         return obj .stats ()
 
     def validate_enabled_modules (self ,value ):
@@ -45,7 +45,7 @@ class BasinSerializer (serializers .ModelSerializer ):
             raise serializers .ValidationError (
             f'وحدات غير معروفة: {", ".join (unknown )}'
             )
-        return list (dict .fromkeys (value ))# Comment_172
+        return list (dict .fromkeys (value ))# de-duplicate, keep order
 
 
 class BasinStatsSerializer (serializers .Serializer ):

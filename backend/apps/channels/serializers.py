@@ -36,7 +36,7 @@ class ChannelMembershipSerializer (serializers .ModelSerializer ):
             {'user_email':'المستخدم غير موجود'}
             )
 
-            # Comment_185
+            # DV: Check user doesn't already have a role in this channel
         existing =ChannelMembership .objects .filter (
         channel =validated_data ['channel'],user =user 
         ).first ()

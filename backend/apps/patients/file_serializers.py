@@ -41,16 +41,16 @@ class MedicalFileUploadSerializer (serializers .ModelSerializer ):
 
     def validate_file (self ,value ):
         """Validate uploaded file."""
-        # Comment_226
+        # Max 10MB
         if value .size >10 *1024 *1024 :
             raise serializers .ValidationError (
             'حجم الملف يجب أن يكون أقل من 10 ميجابايت'
             )
-            # Comment_227
+            # Check extension
         allowed_extensions =[
         '.jpg','.jpeg','.png','.gif','.bmp',
         '.pdf','.doc','.docx',
-        '.dcm',# Comment_228
+        '.dcm',# DICOM medical images
         ]
         import os 
         ext =os .path .splitext (value .name )[1 ].lower ()

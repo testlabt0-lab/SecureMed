@@ -86,3 +86,6 @@ CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_STORE_EAGER_RESULT = True
 # Disable async audit logging to avoid broker connection attempts
 AUDIT_LOG_ASYNC = False
+
+# Disable adaptive MFA for dev to avoid lockout loop
+ADAPTIVE_MFA_ENABLED = True

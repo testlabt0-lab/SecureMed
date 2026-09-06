@@ -9,6 +9,10 @@ import com.securemed.app.security.AppLock
 import com.securemed.app.ui.theme.ThemeController
 import dagger.hilt.android.HiltAndroidApp
 
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
+import javax.inject.Inject
+
 /**
  * Application class - initializes secure storage, the offline cache,
  * notification channels, connectivity observation and the theme.
@@ -17,7 +21,14 @@ import dagger.hilt.android.HiltAndroidApp
  * injection container that serves as the application's parent component.
  */
 @HiltAndroidApp
-class SecureMedApp : Application() {
+class SecureMedApp : Application(), Configuration.Provider {
+
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
 
     companion object {
         lateinit var instance: SecureMedApp

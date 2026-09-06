@@ -325,3 +325,22 @@ data class AdherenceStats(
     @SerialName("taken_doses") val takenDoses: Int,
     @SerialName("adherence_percent") val adherencePercent: Int
 )
+
+@Serializable
+data class PatientCreateRequest(
+    @SerialName("full_name") val fullName: String,
+    @SerialName("date_of_birth") val dateOfBirth: String,
+    val gender: String,
+    @SerialName("blood_type") val bloodType: String? = null,
+    val phone: String? = null,
+    @SerialName("chronic_conditions") val chronicConditions: String? = null
+)
+
+@Serializable
+data class MedicalRecordCreateRequest(
+    val title: String,
+    val content: String,
+    @SerialName("record_type") val recordType: String,
+    @SerialName("is_critical") val isCritical: Boolean = false,
+    @SerialName("channel_id") val channelId: String? = null
+)

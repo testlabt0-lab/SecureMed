@@ -46,3 +46,14 @@ data class AppointmentEntity(
     val type: String,
     val status: String
 )
+
+/**
+ * Local representation of a pending action to sync with the server.
+ */
+@Entity(tableName = "pending_sync_actions")
+data class PendingSyncActionEntity(
+    @PrimaryKey val id: String,
+    val actionType: String,
+    val payloadJson: String,
+    val createdAt: Long
+)

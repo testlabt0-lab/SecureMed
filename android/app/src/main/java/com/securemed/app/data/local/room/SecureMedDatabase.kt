@@ -17,9 +17,10 @@ import androidx.room.RoomDatabase
     entities = [
         PatientEntity::class,
         MedicalRecordEntity::class,
-        AppointmentEntity::class
+        AppointmentEntity::class,
+        PendingSyncActionEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class SecureMedDatabase : RoomDatabase() {

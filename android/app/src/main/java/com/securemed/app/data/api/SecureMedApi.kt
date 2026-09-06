@@ -72,11 +72,17 @@ interface SecureMedApi {
     @GET("patients/")
     suspend fun getPatients(@Query("page") page: Int = 1): PagedResponse<Patient>
 
+    @POST("patients/")
+    suspend fun createPatient(@Body patient: PatientCreateRequest): Patient
+
     @GET("patients/{id}/")
     suspend fun getPatient(@Path("id") id: String): Patient
 
     @GET("patients/records/")
     suspend fun getMedicalRecords(@Query("channel") channelId: String? = null): PagedResponse<MedicalRecord>
+
+    @POST("patients/records/")
+    suspend fun createMedicalRecord(@Body record: MedicalRecordCreateRequest): MedicalRecord
 
     // ===== SECURITY =====
     @GET("security/dashboard/")

@@ -18,6 +18,13 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
+import androidx.work.WorkManager
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.NetworkType
+import androidx.work.Constraints
+import com.securemed.app.data.local.room.PendingSyncActionEntity
+import com.securemed.app.data.sync.SyncWorker
+import java.util.UUID
 
 /**
  * Repository for authentication and data operations.
@@ -347,6 +354,68 @@ class SecureMedRepository @Inject constructor(
 
     suspend fun getPatient(id: String): Result<Patient> =
         cached("patient_$id", Patient.serializer()) { api.getPatient(id) }
+
+    suspend fun createPatient(request: PatientCreateRequest): Result<Patient> = try {
+        val patient = api.createPatient(request)
+        Result.success(patient)
+    } catch (e: Exception) {
+        val action = PendingSyncActionEntity(
+            id = UUID.randomUUID().toString(),
+            actionType = "CREATE_PATIENT",
+            payloadJson = json.encodeToString(PatientCreateRequest.serializer(), request),
+            createdAt = System.currentTimeMillis()
+        )
+        dao.insertPendingAction(action)
+        scheduleSyncWorker()
+        
+        // Return a simulated success so the UI doesn't crash, 
+        // using a temporary ID.
+        Result.success(Patient(
+            id = "temp_${action.id}",
+            fullName = request.fullName,
+            dateOfBirth = request.dateOfBirth,
+            gender = request.gender,
+            bloodType = request.bloodType,
+            phone = request.phone,
+            chronicConditions = request.chronicConditions
+        ))
+    }
+
+    suspend fun createMedicalRecord(request: MedicalRecordCreateRequest): Result<MedicalRecord> = try {
+        val record = api.createMedicalRecord(request)
+        Result.success(record)
+    } catch (e: Exception) {
+        val action = PendingSyncActionEntity(
+            id = UUID.randomUUID().toString(),
+            actionType = "CREATE_MEDICAL_RECORD",
+            payloadJson = json.encodeToString(MedicalRecordCreateRequest.serializer(), request),
+            createdAt = System.currentTimeMillis()
+        )
+        dao.insertPendingAction(action)
+        scheduleSyncWorker()
+        
+        // Return a simulated success.
+        Result.success(MedicalRecord(
+            id = "temp_${action.id}",
+            title = request.title,
+            content = request.content,
+            recordType = request.recordType,
+            recordTypeDisplay = request.recordType,
+            createdByName = SecurePreferences.userName ?: "Unknown",
+            isCritical = request.isCritical,
+            createdAt = "Pending Sync"
+        ))
+    }
+
+    private fun scheduleSyncWorker() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+        val request = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setConstraints(constraints)
+            .build()
+        WorkManager.getInstance(context).enqueue(request)
+    }
 
     suspend fun getMedicalRecords(channelId: String? = null): Result<List<MedicalRecord>> {
         if (channelId == null) {

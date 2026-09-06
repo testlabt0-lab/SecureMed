@@ -35,6 +35,19 @@ interface SecureMedDao {
     @Query("DELETE FROM appointments")
     suspend fun clearAppointments()
 
+    // Pending Actions
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPendingAction(action: PendingSyncActionEntity)
+
+    @Query("SELECT * FROM pending_sync_actions ORDER BY createdAt ASC")
+    suspend fun getPendingActions(): List<PendingSyncActionEntity>
+
+    @Query("DELETE FROM pending_sync_actions WHERE id = :id")
+    suspend fun deletePendingAction(id: String)
+
+    @Query("DELETE FROM pending_sync_actions")
+    suspend fun clearPendingActions()
+
     /**
      * Wipes every cached PHI table — used on logout, where the session's
      * patient data must not outlive the session. One transaction, so a
@@ -47,5 +60,6 @@ interface SecureMedDao {
         clearPatients()
         clearRecords()
         clearAppointments()
+        clearPendingActions()
     }
 }

@@ -42,20 +42,11 @@ jobs:
         # سحب ملفات الواجهة الأمامية ودمجها مع الباك إند
         python manage.py collectstatic --noinput
 
-    - name: 🚀 Deploy to SmarterASP.net via FTP
-      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+    - name: 🚀 Deploy to SmarterASP.net via Web Deploy
+      uses: glitchedgitz/web-deploy-action@v2.0.4
       with:
-        server: ${{ secrets.FTP_SERVER }}
-        username: ${{ secrets.FTP_USERNAME }}
-        password: ${{ secrets.FTP_PASSWORD }}
-        local-dir: ./backend/ # نرفع مجلد الباك إند فقط لأنه يحتوي الآن على كل شيء
-        server-dir: ./ # المسار الجذري في الاستضافة (عدله إذا كان موقعك في مجلد فرعي)
-        exclude: |
-          **/.git*
-          **/.git*/**
-          **/venv/**
-          **/.venv/**
-          **/__pycache__/**
-          **/.pytest_cache/**
-          **/.env
-          db.sqlite3
+        server-computer-name: ${{ secrets.WEB_DEPLOY_SERVER }}
+        server-username: ${{ secrets.WEB_DEPLOY_USERNAME }}
+        server-password: ${{ secrets.WEB_DEPLOY_PASSWORD }}
+        server-website-name: ${{ secrets.WEB_DEPLOY_SITE_NAME }}
+        source-path: './backend'

@@ -34,6 +34,9 @@ jobs:
 
     - name: 📦 Install Python Dependencies & Collect Static
       working-directory: ./backend
+      env:
+        SECRET_KEY: 'dummy-key-for-build'
+        DB_ENGINE: 'sqlite'
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt

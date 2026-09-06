@@ -1,28 +1,5 @@
 # =============================================================================
-#  SecureMed — Render Blueprint
-# =============================================================================
-#  Three services: the ASGI web service, a Celery worker, and one Redis used as
-#  both cache and broker.
-#
-#  What this file previously omitted, and why each omission was fatal:
-#
-#   * ALLOWED_HOSTS — settings.py defaults it to "localhost,127.0.0.1,0.0.0.0",
-#     so every request to *.onrender.com, including Render's own health check,
-#     was answered with 400 DisallowedHost. The deploy could never go live.
-#   * Migrations — nothing ran `migrate`, so a fresh database served 500s
-#     ("relation does not exist") on every request.
-#   * REDIS_URL — with DEBUG=False the cache defaults to Redis at
-#     redis://localhost:6379/0, which does not exist inside the container. Rate
-#     limiting, the JWT denylist, biometric challenges and the WAF blocklists all
-#     live in that cache and are configured not to fail open, so every request
-#     touching them raised. Now a real Redis instance is provisioned and wired.
-#   * A Celery worker — `.delay()` succeeds as soon as the broker accepts the
-#     message, so with Redis present but no worker every audit event, report and
-#     notification queued forever and nothing reported an error.
-#   * ENCRYPTION_KEY was `generateValue: true`. Render generates that value out of
-#     sight of the operator; it is the Fernet key for patient PHI columns, so a
-#     lost or regenerated key means the medical records are unrecoverable — there
-#     is no reset path. It must be generated and stored deliberately.
+#  SecureMed — Render Blueprint (Free Tier Adapted)
 # =============================================================================
 
 services:
@@ -32,35 +9,22 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    region: frankfurt # Or your preferred region
-    plan: starter # Starter plan recommended for PostgreSQL + Django
+    region: frankfurt
+    plan: free
     healthCheckPath: /health/live/
-    # Runs once per release, before the new container takes traffic — unlike the
-    # container CMD, which runs on every replica start and would let concurrent
-    # `migrate` processes race. `createcachetable` is a no-op unless CACHE_BACKEND
-    # is DatabaseCache; it is here so that fallback works without a manual step.
-    # collectstatic runs here too now that USE_S3_STORAGE routes staticfiles to S3:
-    # the build-time collectstatic in the Dockerfile uploads nothing to S3 (no creds
-    # in the build layer), so without a deploy-time run the admin/DRF static assets
-    # would 404. It executes once per release in the deployed env, where AWS_* exist.
-    preDeployCommand: "python manage.py migrate --noinput && python manage.py createcachetable && python manage.py collectstatic --noinput"
+    # This command creates the DB tables, cache table, static files, and superuser!
+    preDeployCommand: "python manage.py migrate --noinput && python manage.py createcachetable && python manage.py collectstatic --noinput && (python manage.py createsuperuser --noinput || true)"
     envVars:
       - key: DEBUG
         value: "False"
       - key: DJANGO_SETTINGS_MODULE
         value: "config.settings"
-      # Must list every hostname that reaches this service. Add your custom domain
-      # here as a comma-separated entry; CSRF_TRUSTED_ORIGINS is derived from it.
       - key: ALLOWED_HOSTS
         value: "securemed-production.onrender.com"
-      # Password-reset and invitation links are built from this.
       - key: FRONTEND_URL
         value: "https://securemed-production.onrender.com"
       - key: SECRET_KEY
         generateValue: true
-      # sync:false = set it yourself in the dashboard and keep a copy somewhere
-      # safe. Losing ENCRYPTION_KEY destroys the encrypted PHI columns; changing
-      # AUDIT_LOG_HMAC_KEY makes every historical audit signature unverifiable.
       - key: ENCRYPTION_KEY
         sync: false
       - key: AUDIT_LOG_HMAC_KEY
@@ -69,64 +33,28 @@ services:
         sync: false # Set this in Render dashboard using your Neon DB URL
       - key: DB_ENGINE
         value: "postgres"
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: securemed-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: securemed-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: securemed-redis
-          property: connectionString
-      # Optional: protects /metrics and the detailed /health/ready/ breakdown.
+      
+      # === Free Tier Overrides ===
+      # Disable Redis completely and fallback to local memory to avoid Error 111
+      - key: USE_REDIS_CACHE
+        value: "False"
+      - key: CACHE_BACKEND
+        value: "django.core.cache.backends.locmem.LocMemCache"
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: "admin@securemed.app"
+      - key: DJANGO_SUPERUSER_PASSWORD
+        value: "Admin@123"
+
       - key: METRICS_TOKEN
         sync: false
-      # The AI features (apps.ai → /api/v1/ai/*, and the patient case summary)
-      # call Gemini in-process; this is the only key they need — the Node sidecar
-      # in ai-service/ is retired and no service here builds it. Left unset, the
-      # endpoints answer with "AI is not configured" instead of failing, so the
-      # rest of the platform deploys fine without it. Web service only: no Celery
-      # task calls the model.
       - key: GEMINI_API_KEY
         sync: false
       - key: FRONTEND_DIST
         value: "/app/frontend/dist"
       - key: SECURE_SSL_REDIRECT
         value: "True"
-
-      # ── Audit durability ──────────────────────────────────────────────────
-      # Redis below is the free plan (no persistence), so a queued audit event is
-      # lost if Redis restarts. AUDIT_LOG_ASYNC=False takes audit rows off the queue
-      # and writes them straight to Postgres, so the compliance-critical trail
-      # survives a broker restart — at the cost of a little request latency. Reports
-      # and notifications stay async: a lost notification is recoverable, a lost
-      # audit row is not.
       - key: AUDIT_LOG_ASYNC
         value: "False"
-
-      # ── Durable PHI storage on S3 ─────────────────────────────────────────
-      # Replaces the ephemeral container disk. Uploaded medical files (X-rays, lab
-      # reports, consent scans) now live in S3 and survive every deploy, restart and
-      # instance replacement; patients.MedicalFile rows no longer point at files that
-      # vanished. settings.py reads exactly these names (STORAGES S3 branch). The
-      # three credential values are sync:false — set them in the Render dashboard and
-      # never commit them. Create the bucket in the SAME region as these services
-      # (Frankfurt → eu-central-1) so PHI stays in-region for GDPR, and keep
-      # AWS_S3_REGION_NAME matching the bucket's real region. Until the three values
-      # are set the service will refuse to boot (settings reads them with no default)
-      # — a deliberate, loud failure rather than a silent misconfiguration.
-      #
-      # Access-model change to confirm before go-live: with S3, files are delivered
-      # as time-limited SIGNED URLs (AWS_QUERYSTRING_AUTH=True, private ACL), not
-      # through ProtectedMediaView. A signed URL works for anyone holding it until it
-      # expires, and those reads are NOT passed through channel.can_view or written to
-      # the audit trail the way /media downloads were.
       - key: USE_S3_STORAGE
         value: "True"
       - key: AWS_S3_REGION_NAME
@@ -137,109 +65,3 @@ services:
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
-
-  # ─────────────────────────────────────────────────── Celery worker ───────────
-  # Same image, different command. Without this service nothing that goes through
-  # Celery ever executes: audit events, scheduled reports and notification emails
-  # all queue up silently. (AI summaries are not among them — apps.ai and the
-  # patient case summary call the model inline in the request, which is why
-  # GEMINI_API_KEY is declared on the web service only.)
-  - type: worker
-    name: securemed-worker
-    env: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: "celery -A config worker --loglevel=info --concurrency=2 --max-tasks-per-child=100"
-    region: frankfurt
-    plan: starter
-    envVars:
-      - key: DEBUG
-        value: "False"
-      - key: DJANGO_SETTINGS_MODULE
-        value: "config.settings"
-      - key: ALLOWED_HOSTS
-        value: "securemed-production.onrender.com"
-      - key: FRONTEND_URL
-        value: "https://securemed-production.onrender.com"
-      # These four MUST hold the same values as the web service. `envVarKey` copies
-      # them across instead of re-declaring: `generateValue` on both services would
-      # mint two *different* SECRET_KEYs, and the worker would then sign audit rows
-      # the web service cannot verify.
-      - key: SECRET_KEY
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: SECRET_KEY
-      - key: ENCRYPTION_KEY
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: ENCRYPTION_KEY
-      - key: AUDIT_LOG_HMAC_KEY
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: AUDIT_LOG_HMAC_KEY
-      - key: DATABASE_URL
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: DATABASE_URL
-      - key: DB_ENGINE
-        value: "postgres"
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: securemed-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: securemed-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: securemed-redis
-          property: connectionString
-      - key: FRONTEND_DIST
-        value: "/app/frontend/dist"
-      # Same durability posture as the web service. The worker also emits audit rows
-      # (e.g. scheduled reports) and reads/writes media through default_storage, so it
-      # needs synchronous audit and the S3 config too. The credentials are copied from
-      # the web service so there is a single place to set them; if they are unset the
-      # worker refuses to boot for the same reason the web service does.
-      - key: AUDIT_LOG_ASYNC
-        value: "False"
-      - key: USE_S3_STORAGE
-        value: "True"
-      - key: AWS_S3_REGION_NAME
-        value: "eu-central-1"
-      - key: AWS_STORAGE_BUCKET_NAME
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: AWS_STORAGE_BUCKET_NAME
-      - key: AWS_ACCESS_KEY_ID
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: AWS_ACCESS_KEY_ID
-      - key: AWS_SECRET_ACCESS_KEY
-        fromService:
-          type: web
-          name: securemed-production
-          envVarKey: AWS_SECRET_ACCESS_KEY
-
-  # ─────────────────────────────────────────────────── Redis ───────────────────
-  # noeviction, not allkeys-lru: this instance is also the Celery broker, and an
-  # LRU policy is free to evict queued messages under memory pressure — which for
-  # this application means silently discarding audit events. Cache writes failing
-  # loudly is the lesser problem. If the cache ever grows enough to matter, give it
-  # its own instance and point CACHE_URL at that one.
-  - type: redis
-    name: securemed-redis
-    region: frankfurt
-    plan: free # 25 MB, no persistence — queued tasks are lost on restart
-    maxmemoryPolicy: noeviction
-    ipAllowList: [] # internal connections only

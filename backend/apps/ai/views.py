@@ -292,6 +292,173 @@ class AIStructureNoteView(APIView):
             return _upstream_failure(request, e, event_type='AI_STRUCTURE_NOTE_FAILED')
 
 
+MAX_MEDICATION_NAMES = 50
+
+
+class AIDrugInteractionCheckView(APIView):
+    """POST /api/v1/ai/interactions-check — check a medication list for clashes.
+
+    Two engines, deliberately layered:
+
+    1. Rule-based: the pharmacy department's DrugInteraction table. Deterministic,
+       instant, auditable, works with no API key — this is the safety net that
+       always runs.
+    2. AI review (optional): when GEMINI_API_KEY is configured, the anonymised
+       list plus the patient's allergies and current medications go to Gemini for
+       a clinical review the rule table cannot express (duplicates, class effects,
+       allergy conflicts).
+
+    The response marks which engine produced what, so the SPA can style a
+    rule-engine SEVERE hit differently from a model suggestion.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        _require_module(request.user)
+
+        medications = request.data.get('medications')
+        if not isinstance(medications, list) or not medications:
+            return Response(
+                {'detail': 'قائمة الأدوية مطلوبة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Every entry becomes part of a prompt; keep each name bounded and the
+        # list itself bounded so one request cannot push a 50k-token payload.
+        medications = [str(m).strip()[:200] for m in medications if str(m).strip()]
+        if not medications:
+            return Response(
+                {'detail': 'قائمة الأدوية مطلوبة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(medications) > MAX_MEDICATION_NAMES:
+            return Response(
+                {'detail': f'عدد الأدوية كبير جداً — الحد الأقصى {MAX_MEDICATION_NAMES}'},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        patient_payload = {}
+        patient = None
+        patient_id = request.data.get('patient_id')
+        if patient_id:
+            # Same access rule as every other patient-scoped view: an id is a
+            # key, not an authorisation.
+            from apps.core.mixins import accessible_patients
+            from apps.patients.models import Patient as PatientModel
+            patient = accessible_patients(
+                PatientModel.objects.all(), request.user
+            ).filter(pk=patient_id).first()
+            if patient is None:
+                return Response(
+                    {'detail': 'غير مصرح لك بالوصول لهذا المريض'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            patient_payload = {
+                'allergies': patient.allergies or '',
+                'current_medications': patient.current_medications or '',
+                'chronic_conditions': patient.chronic_conditions or '',
+            }
+
+        rule_based, has_severe = self._rule_based_check(medications)
+
+        model = get_gemini_model()
+        ai_review = None
+        if model:
+            try:
+                ai_review = self._ai_review(model, medications, patient_payload)
+            except Exception as e:
+                return _upstream_failure(
+                    request, e, event_type='AI_INTERACTION_FAILED',
+                    # The rule engine already answered; the AI layer failing
+                    # must not fail the request, but the caller should know the
+                    # review is missing rather than silently absent.
+                    detail='نجح الفحص القاعدي، تعذّرت المراجعة الآلية الإضافية.',
+                )
+
+        log_security_event(
+            user=request.user,
+            event_type='AI_INTERACTION_CHECKED',
+            request=request,
+            details={
+                'medication_count': len(medications),
+                'patient_id': str(patient.id) if patient else None,
+                'rule_hits': len(rule_based),
+                'has_severe': has_severe,
+                'ai_reviewed': ai_review is not None,
+            },
+        )
+
+        return Response({
+            'rule_based': rule_based,
+            'has_severe': has_severe,
+            'ai_review': ai_review,
+            'disclaimer': 'الفحص آلي ولا يُغني عن مراجعة الصيدلي أو الطبيب',
+        }, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def _rule_based_check(medications):
+        """Match the list against the pharmacy DrugInteraction rules by name.
+
+        Name matching is case-insensitive and substring-tolerant, because real
+        prescriptions carry trade names ("بانادول إكسترا") while the catalog
+        stores the scientific entry. Both orderings are tested — the rule table
+        stores (drug_a, drug_b) once.
+        """
+        from apps.pharmacy.models import DrugInteraction, Medication
+
+        names = [m.lower() for m in medications]
+        matched = {}
+        for med in Medication.objects.only('id', 'name', 'scientific_name'):
+            haystacks = (med.name or '').lower(), (med.scientific_name or '').lower()
+            if any(needle and (needle in hay or hay in needle)
+                   for needle in names for hay in haystacks if hay):
+                matched[med.id] = med.name
+
+        interactions = DrugInteraction.objects.filter(
+            drug_a_id__in=matched.keys(), drug_b_id__in=matched.keys()
+        ).select_related('drug_a', 'drug_b')
+
+        hits, has_severe = [], False
+        for inter in interactions:
+            has_severe = has_severe or inter.severity == 'SEVERE'
+            hits.append({
+                'drug_a': matched.get(inter.drug_a_id, inter.drug_a.name),
+                'drug_b': matched.get(inter.drug_b_id, inter.drug_b.name),
+                'severity': inter.severity,
+                'description': inter.description,
+                'source': 'rule_engine',
+            })
+        return hits, has_severe
+
+    @staticmethod
+    def _ai_review(model, medications, patient_payload):
+        """Gemini clinical review over the anonymised payload."""
+        safe_payload = anonymize_patient_data({
+            'medications': medications,
+            'patient': patient_payload,
+        })
+        prompt = f"""
+راجع قائمة الأدوية التالية من حيث التداخلات الدوائية، التكرار، تعارض الحساسية،
+وتأثير الأمراض المزمنة. البيانات:
+{_json.dumps(safe_payload, ensure_ascii=False)}
+
+أجب بصيغة JSON فقط بهذا الشكل:
+{{
+  "overall_risk": "LOW" | "MODERATE" | "HIGH",
+  "findings": [
+    {{"medications": ["دواء1", "دواء2"], "severity": "SEVERE|MODERATE|MILD|INFO", "note": "شرح موجز بالعربية"}}
+  ],
+  "summary": "جملة تلخيصية بالعربية"
+}}
+"""
+        response = model.generate_content(prompt)
+        raw_json = response.text.strip().strip('`').replace('json\n', '')
+        result = _json.loads(raw_json)
+        if not isinstance(result, dict):
+            raise ValueError('interaction review was not a JSON object')
+        result['source'] = 'ai_review'
+        return result
+
+
 class AITriageView(APIView):
     """POST /api/v1/ai/triage — Triages patient data based on symptoms and vitals."""
     permission_classes = [IsAuthenticated]

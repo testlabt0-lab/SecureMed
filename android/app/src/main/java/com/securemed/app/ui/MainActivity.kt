@@ -107,6 +107,20 @@ class MainActivity : FragmentActivity() {
             return
         }
 
+        // Runtime instrumentation check (Frida / Xposed / attached debugger).
+        // Release-only, same reasoning as the root check: a debug build that
+        // refused to run under a debugger would stop every developer at once.
+        // The response to tampering is to wipe every local trace of the
+        // session before closing — a hooked process must not be left holding
+        // PHI, tokens, or a device identity the attacker can reuse.
+        if (!BuildConfig.DEBUG && com.securemed.app.security.TamperDetection
+                .isTamperingDetected(this)) {
+            com.securemed.app.security.SecureWipe.wipeEverything(this)
+            android.widget.Toast.makeText(this, "رُصدت أدوات تحليل على هذا الجهاز. تم مسح البيانات المحلية وإغلاق التطبيق.", android.widget.Toast.LENGTH_LONG).show()
+            finishAffinity()
+            return
+        }
+
         // منع أخذ لقطات الشاشة أو تسجيلها لحماية البيانات الطبية (Screenshot Protection)
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,

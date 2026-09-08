@@ -14,6 +14,7 @@ from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E40
 from apps.security.channels_auth import JWTAuthMiddlewareStack  # noqa: E402
 import apps.notifications.routing  # noqa: E402
 import apps.telemedicine.routing  # noqa: E402
+import apps.channels.routing  # noqa: E402
 
 # AllowedHostsOriginValidator rejects sockets whose Origin is not in ALLOWED_HOSTS.
 # Without it any page on the internet could open an authenticated socket in a
@@ -30,6 +31,7 @@ application = ProtocolTypeRouter({
             URLRouter(
                 apps.notifications.routing.websocket_urlpatterns
                 + apps.telemedicine.routing.websocket_urlpatterns
+                + apps.channels.routing.websocket_urlpatterns
             )
         )
     ),

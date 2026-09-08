@@ -197,6 +197,16 @@ class Patient (models .Model ):
     related_name ='patients',verbose_name =_ ('الحوض الصحي'),
     )
 
+    # Portal account. A PATIENT-role user reaches their own record through
+    # this link — appointments views already filtered on patient__user, which
+    # previously pointed at a column that did not exist and raised FieldError
+    # for every PATIENT-role caller. OneToOne: one account, one medical record.
+    user =models .OneToOneField (
+    settings .AUTH_USER_MODEL ,on_delete =models .SET_NULL ,
+    null =True ,blank =True ,
+    related_name ='patient_record',verbose_name =_ ('حساب المريض'),
+    )
+
     created_at =models .DateTimeField (auto_now_add =True )
     updated_at =models .DateTimeField (auto_now =True )
 

@@ -5,17 +5,34 @@ import androidx.paging.PagingState
 import com.securemed.app.data.api.SecureMedApi
 import com.securemed.app.data.model.Patient
 
+/**
+ * Pages the patient list, optionally through a server-side search term.
+ *
+ * [search] flows through every page request — a query that only filtered
+ * page 1 would show the matches of the first 20 patients and then append
+ * unrelated ones as the user scrolls. A new [Search] value must produce a
+ * new PagingSource (the ViewModel recreates it), because a PagingSource is
+ * immutable once loading begins.
+ */
 class PatientPagingSource(
-    private val api: SecureMedApi
+    private val api: SecureMedApi,
+    private val search: String? = null
 ) : PagingSource<Int, Patient>() {
+
+    /** Tag so a stale source can refuse to answer after the term changed. */
+    data class Search(val term: String?) {
+        val pagingKey: String get() = term?.trim().orEmpty()
+    }
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, Patient> {
         val position = params.key ?: 1
         return try {
-            val response = api.getPatients(page = position)
+            val response = api.getPatients(
+                page = position,
+                search = search?.takeIf { it.isNotBlank() }
+            )
             val patients = response.results
-            
-            // To simulate pagination for the demo, we check if we have more pages (next != null)
+
             val nextKey = if (response.hasNext) position + 1 else null
 
             LoadResult.Page(

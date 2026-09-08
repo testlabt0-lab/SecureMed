@@ -28,6 +28,10 @@ import com.securemed.app.data.model.Patient
 import com.securemed.app.ui.components.PullToRefreshLayout
 import com.securemed.app.ui.components.StateLayout
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import javax.inject.Inject
 
 @HiltViewModel
@@ -35,10 +39,36 @@ class PatientsViewModel @Inject constructor(
     private val repository: SecureMedRepository
 ) : ViewModel() {
 
-    val patientsPagingFlow = Pager(
-        config = PagingConfig(pageSize = 20, enablePlaceholders = false),
-        pagingSourceFactory = { repository.getPatientPagingSource() }
-    ).flow.cachedIn(viewModelScope)
+    /** The live search term, debounced before it becomes a PagingSource. */
+    private val _searchTerm = MutableStateFlow("")
+
+    /**
+     * Search-driven paging flow. flatMapLatest so typing replaces the in-flight
+     * query: without it, every character added a new page source waiting on
+     * the same scroll container, and results interleaved.
+     *
+     * The 350ms debounce keeps "server-side search" from meaning "one request
+     * per keystroke" — each pause in typing produces exactly one query.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val patientsPagingFlow = _searchTerm
+        .debounce(350)
+        .distinctUntilChanged()
+        .flatMapLatest { term ->
+            Pager(
+                config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+                pagingSourceFactory = {
+                    repository.getPatientPagingSource(
+                        search = term.takeIf { it.isNotBlank() }
+                    )
+                }
+            ).flow
+        }
+        .cachedIn(viewModelScope)
+
+    fun onSearchChanged(term: String) {
+        _searchTerm.value = term
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,8 +101,13 @@ fun PatientsScreen(
         ) {
             OutlinedTextField(
                 value = search,
-                onValueChange = { search = it },
-                placeholder = { Text("بحث عن مريض (محلي)...") },
+                onValueChange = {
+                    search = it
+                    // Server-side search (decrypted post-scope on the backend)
+                    // with a local filter over the loaded page as instant UX.
+                    viewModel.onSearchChanged(it)
+                },
+                placeholder = { Text("بحث بالاسم أو الهاتف أو الهوية...") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()

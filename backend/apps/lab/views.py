@@ -111,6 +111,35 @@ class LabResultViewSet (viewsets .ModelViewSet ):
         order .status ='COMPLETED'
         order .save (update_fields =['status'])
 
+        # A critical value is a phone-the-ward-now event, not a dashboard dot.
+        # The Telegram alert reaches the on-call admin even with the app closed.
+        # Best-effort and non-blocking: a messaging outage must never fail a
+        # result entry.
+        if result .is_critical :
+            self._notify_critical_result (result )
+
+    def _notify_critical_result (self ,result ):
+        from apps .security .telegram_service import send_critical_alert 
+
+        patient =result .order .patient 
+        test =result .order .test 
+        value =(result .numeric_value if result .numeric_value is not None 
+        else (result .text_value or ''))
+        try :
+            send_critical_alert (
+            'نتيجة مختبر حرجة',
+            [
+            f"<b>التحليل:</b> {test .name }",
+            f"<b>المريض:</b> {patient .full_name }",
+            f"<b>القيمة:</b> {value } {test .unit or ''}".strip (),
+            f"<b>النطاق الطبيعي:</b> {test .normal_range_min } - {test .normal_range_max }"
+            if test .normal_range_min is not None else '',
+            f"<b>الطبيب الطالب:</b> د. {result .order .doctor .full_name }",
+            ],
+            )
+        except Exception :
+            pass 
+
     @action (detail =True ,methods =['post'])
     def validate (self ,request ,pk =None ):
         """Doctor validates a lab result."""

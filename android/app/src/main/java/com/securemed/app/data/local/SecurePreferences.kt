@@ -272,6 +272,24 @@ object SecurePreferences {
             .apply()
     }
 
+    /**
+     * Last-resort wipe for the tamper path ([com.securemed.app.security.SecureWipe]):
+     * drops the device-bound identities too, not just the session keys.
+     *
+     * Deliberately separate from [clearSession] — an ordinary logout keeps
+     * [deviceId]/[installId] so the trusted-device row and the biometric
+     * enrollment survive, but a device that reported instrumentation is one
+     * whose identities we no longer trust.
+     *
+     * Synchronous `commit()`: the process may be killed the moment the
+     * caller decides to wipe, and an async write landing after that would
+     * resurrect exactly the state we are trying to destroy.
+     */
+    fun clearAllForWipe() {
+        cachedInstallId = null
+        prefs.edit().clear().commit()
+    }
+
     val deviceId: String
         get() {
             var id = prefs.getString(KEY_DEVICE_ID, null)

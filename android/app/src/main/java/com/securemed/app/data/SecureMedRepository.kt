@@ -325,8 +325,17 @@ class SecureMedRepository @Inject constructor(
         cachedPagedList("channel_${id}_members", ChannelMembership.serializer()) { api.getChannelMembers(id) }
 
     // ===== PATIENTS =====
-    suspend fun getPatients(): Result<List<Patient>> = try {
-        val page = api.getPatients()
+    suspend fun getPatients(): Result<List<Patient>> = getPatients(null)
+
+    /**
+     * Patients with an optional server-side search term. An empty result on
+     * a *fresh* fetch is the server saying "no match"; on a network failure
+     * the Room copy is searched locally instead so quick search keeps
+     * working offline (by substring over the decrypted names the device
+     * already holds).
+     */
+    suspend fun getPatients(search: String?): Result<List<Patient>> = try {
+        val page = api.getPatients(search = search?.takeIf { it.isNotBlank() })
         val patients = page.results
         val entities = patients.map {
             PatientEntity(
@@ -343,9 +352,16 @@ class SecureMedRepository @Inject constructor(
         dao.insertPatients(entities)
         Result.success(patients)
     } catch (e: Exception) {
-        val entities = dao.getAllPatients()
-        if (entities.isNotEmpty()) {
-            val patients = entities.map {
+        // Offline, or the API is unreachable: fall back to the Room cache.
+        // A search term filters the local copy the same way the server
+        // would, so the user sees one consistent behaviour either way.
+        val local = if (search.isNullOrBlank()) dao.getAllPatients()
+        else dao.getAllPatients().filter {
+            it.fullName.contains(search.trim(), ignoreCase = true) ||
+                it.phone?.contains(search.trim(), ignoreCase = true) == true
+        }
+        if (local.isNotEmpty()) {
+            val patients = local.map {
                 Patient(
                     id = it.id,
                     fullName = it.fullName,
@@ -472,8 +488,8 @@ class SecureMedRepository @Inject constructor(
         }
     }
 
-    fun getPatientPagingSource(): com.securemed.app.data.paging.PatientPagingSource {
-        return com.securemed.app.data.paging.PatientPagingSource(api)
+    fun getPatientPagingSource(search: String? = null): com.securemed.app.data.paging.PatientPagingSource {
+        return com.securemed.app.data.paging.PatientPagingSource(api, search)
     }
 
     // ===== SECURITY =====

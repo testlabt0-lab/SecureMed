@@ -4,6 +4,52 @@ from django.conf import settings
 
 logger = logging.getLogger('security')
 
+
+def _send_html(title, body_html):
+    """Post one HTML message to the admin chat. Shared by all alert types.
+
+    Returns True only when Telegram accepted the message: callers decide for
+    themselves whether a failure is worth raising about, and everything here is
+    best-effort by design — a messaging outage must never break a login, a lab
+    result or a file download.
+    """
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', None)
+
+    if not bot_token or not chat_id:
+        logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_ADMIN_CHAT_ID not configured.")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": f"{title}\n\n{body_html}",
+        "parse_mode": "HTML",
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        if response.status_code != 200:
+            logger.error(f"Failed to send Telegram message: {response.text}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error sending Telegram message: {e}")
+        return False
+
+
+def send_critical_alert(title, lines):
+    """Send a critical operational alert to the admin chat.
+
+    Used for medical-critical events (a lab result flagged حرج, an urgent
+    channel) and for security anomaly detections that deserve a human glance.
+    `lines` is a list of already-formatted HTML strings; empty or None values
+    are dropped so callers can pass optional fields freely.
+    """
+    body = "\n".join(line for line in lines if line)
+    return _send_html(f"🚨 <b>{title}</b>", body)
+
+
 def send_device_approval_request(device):
     """
     Send a message to the Telegram Admin Chat to approve a new device.

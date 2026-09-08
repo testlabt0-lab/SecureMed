@@ -106,6 +106,14 @@ class ProtectedMediaView(APIView):
 
         if rel_path.startswith(MEDICAL_FILES_PREFIX):
             instance = self._authorise_medical_file(request, rel_path)
+            # Velocity anomaly detection: a bulk read pattern across the whole
+            # media namespace is exactly what the audit trail alone would only
+            # reveal after the exfiltration finished. Non-blocking — see
+            # apps.core.anomaly for why this alerts rather than refuses.
+            from apps.core.anomaly import record_phi_access
+            record_phi_access(
+                request.user, resource='medical_file', path=rel_path
+            )
             return _serve(
                 rel_path,
                 instance.mime_type or 'application/octet-stream',
@@ -186,6 +194,11 @@ class ProtectedMediaView(APIView):
         )
         if not allowed:
             raise PermissionDenied('غير مصرح لك بالوصول إلى هذا المرفق')
+
+        from apps.core.anomaly import record_phi_access
+        record_phi_access(
+            request.user, resource='consultation_attachment', path=rel_path
+        )
 
         log_security_event(
             user=request.user,

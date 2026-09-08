@@ -53,6 +53,8 @@ class MedicationsViewModel @Inject constructor(
         val medications: List<Medication> = emptyList(),
         val patients: List<Patient> = emptyList(),
         val adherence: AdherenceStats? = null,
+        val interactions: List<com.securemed.app.data.local.DrugInteractionChecker.Finding> = emptyList(),
+        val dailySeries: List<Float?> = emptyList(),
         val message: String? = null,
         val error: String? = null,
         val canPrescribe: Boolean = false
@@ -74,12 +76,30 @@ class MedicationsViewModel @Inject constructor(
             val adherence = repository.getAdherence()
 
             val role = com.securemed.app.data.local.SecurePreferences.userRole ?: ""
+
+            // Interaction screen + daily adherence series run on the plan
+            // list we already hold; both are pure functions of it, so they
+            // cost nothing extra to compute and stay in sync with every
+            // plan change.
+            val interactions = com.securemed.app.data.local.DrugInteractionChecker
+                .checkPlans(meds.getOrDefault(emptyList()))
+            val series = com.securemed.app.data.local.MedicationStore.loadLogs()
+                .filter { it.status == com.securemed.app.data.local.MedicationStore.STATUS_TAKEN }
+                .map { it.key }.toSet()
+                .let { takenKeys ->
+                    com.securemed.app.ui.components.buildDailySeries(
+                        takenKeys, meds.getOrDefault(emptyList())
+                    )
+                }
+
             _state.value = MedicationsState(
                 isLoading = false,
                 todayDoses = doses.getOrDefault(TodayDosesResponse()).doses,
                 medications = meds.getOrDefault(emptyList()),
                 patients = patients.getOrDefault(emptyList()),
                 adherence = adherence.getOrNull(),
+                interactions = interactions,
+                dailySeries = series,
                 canPrescribe = role in listOf(
                     "SUPER_ADMIN", "HOSPITAL_ADMIN", "DOCTOR"
                 ),
@@ -239,6 +259,53 @@ fun MedicationsScreen(
                 item { AdherenceCard(adherence) }
             }
 
+            // Daily adherence spark-line (last 14 days, gaps = no scheduled doses)
+            if (state.dailySeries.any { it != null }) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "الالتزام اليومي — آخر 14 يوماً",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            com.securemed.app.ui.components.AdherenceChart(
+                                perDay = state.dailySeries,
+                                days = 14,
+                            )
+                            Text(
+                                "الفجوات: أيام بلا جرعات مجدولة — ليست جرعات فائتة",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Drug-interaction warnings. MAJOR/MODERATE first; the screen
+            // shows the section only when there is something to say — an
+            // always-present "لا تفاعلات" banner would train users to
+            // ignore it.
+            if (state.interactions.isNotEmpty()) {
+                item {
+                    Text(
+                        "تفاعلات دوائية محتملة (${state.interactions.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                items(
+                    state.interactions.sortedByDescending { it.severity.ordinal },
+                    key = { it.drugA + "|" + it.drugB }
+                ) { finding ->
+                    InteractionCard(finding)
+                }
+            }
+
             // Today's doses
             item {
                 Text(
@@ -326,6 +393,66 @@ private fun MessageCard(
             IconButton(onClick = onDismiss) {
                 Icon(Icons.Default.Close, "إغلاق", tint = content)
             }
+        }
+    }
+}
+
+/**
+ * One drug-interaction finding. Colour carries the severity before the
+ * clinician reads a word — red for MAJOR, amber for MODERATE, neutral for
+ * MINOR — and the card always states both the effect and the action, since
+ * a warning that names the risk without naming the response gets ignored.
+ */
+@Composable
+private fun InteractionCard(finding: com.securemed.app.data.local.DrugInteractionChecker.Finding) {
+    val container = when (finding.severity) {
+        com.securemed.app.data.local.DrugInteractionChecker.Severity.MAJOR ->
+            MaterialTheme.colorScheme.errorContainer
+        com.securemed.app.data.local.DrugInteractionChecker.Severity.MODERATE ->
+            MaterialTheme.colorScheme.tertiaryContainer
+        com.securemed.app.data.local.DrugInteractionChecker.Severity.MINOR ->
+            MaterialTheme.colorScheme.surfaceVariant
+    }
+    val content = when (finding.severity) {
+        com.securemed.app.data.local.DrugInteractionChecker.Severity.MAJOR ->
+            MaterialTheme.colorScheme.onErrorContainer
+        com.securemed.app.data.local.DrugInteractionChecker.Severity.MODERATE ->
+            MaterialTheme.colorScheme.onTertiaryContainer
+        com.securemed.app.data.local.DrugInteractionChecker.Severity.MINOR ->
+            MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${finding.severity.label}: ",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = content
+                )
+                Text(
+                    "${finding.drugA} + ${finding.drugB}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = content
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                finding.effect,
+                style = MaterialTheme.typography.bodySmall,
+                color = content
+            )
+            Text(
+                "الإجراء: ${finding.advice}",
+                style = MaterialTheme.typography.bodySmall,
+                color = content,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

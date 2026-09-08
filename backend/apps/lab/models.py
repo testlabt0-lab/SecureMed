@@ -44,6 +44,20 @@ class LabTest (models .Model ):
         return f'{self .name } ({self .code })'
 
 
+    def loinc_coding (self ):
+        """FHIR CodeableConcept for this test, when a LOINC code exists."""
+        if not self .code :
+            return None 
+        return {
+        'coding':[{
+        'system':'http://loinc.org',
+        'code':self .code ,
+        'display':self .name ,
+        }],
+        'text':self .name ,
+        }
+
+
 class LabOrder (models .Model ):
     """A lab test order from a doctor for a patient."""
 

@@ -36,6 +36,26 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         basin_param =self .request .query_params .get ('basin')
         if basin_param :
             qs =qs .filter (basin_id =basin_param )
+        # Search (?search=): the identity columns are stored encrypted
+        # (apps.security.crypto — see the model's _full_name/_national_id
+        # fields), so an SQL LIKE cannot see inside them. Search therefore
+        # decrypts in Python after the basin scoping: for the page sizes this
+        # list serves (tens of patients per basin, not thousands) that is
+        # both correct and fast, and it cannot leak a patient outside the
+        # caller's basin because the scoping has already been applied.
+        search =self .request .query_params .get ('search','').strip()
+        if search :
+            needle =search .lower ()
+            kept =[]
+            for patient in qs :
+                hay =' '.join (filter (None ,[
+                patient .full_name or '' ,
+                patient .national_id or '' ,
+                patient .phone or '' ,
+                ])).lower ()
+                if needle in hay :
+                    kept .append (patient .pk )
+            qs =qs .filter (pk__in =kept )
         return qs 
 
     def create (self ,request ,*args ,**kwargs ):

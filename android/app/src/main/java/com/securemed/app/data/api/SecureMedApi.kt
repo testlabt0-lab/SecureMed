@@ -70,7 +70,10 @@ interface SecureMedApi {
 
     // ===== PATIENTS =====
     @GET("patients/")
-    suspend fun getPatients(@Query("page") page: Int = 1): PagedResponse<Patient>
+    suspend fun getPatients(
+        @Query("page") page: Int = 1,
+        @Query("search") search: String? = null
+    ): PagedResponse<Patient>
 
     @POST("patients/")
     suspend fun createPatient(@Body patient: PatientCreateRequest): Patient

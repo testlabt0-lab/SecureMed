@@ -151,6 +151,8 @@ class AuditLog (models .Model ):
 
         AI_ASSISTANT_QUERY ='AI_ASSISTANT_QUERY',_ ('استعلام المساعد الذكي')
         AI_ASSISTANT_FAILED ='AI_ASSISTANT_FAILED',_ ('فشل المساعد الذكي')
+        AI_INTERACTION_CHECKED ='AI_INTERACTION_CHECKED',_ ('فحص تداخلات دوائية آلي')
+        AI_INTERACTION_FAILED ='AI_INTERACTION_FAILED',_ ('فشل فحص التداخلات الدوائية')
         AI_SUMMARY_GENERATED ='AI_SUMMARY_GENERATED',_ ('توليد ملخص ذكي')
         AI_SUMMARY_FAILED ='AI_SUMMARY_FAILED',_ ('فشل توليد الملخص الذكي')
         AI_IMAGE_ANALYSIS ='AI_IMAGE_ANALYSIS',_ ('تحليل صورة طبية')

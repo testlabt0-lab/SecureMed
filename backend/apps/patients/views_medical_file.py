@@ -144,6 +144,9 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
             # Record access
         instance .record_access (request .user )
 
+        from apps .core .anomaly import record_phi_access
+        record_phi_access (request .user ,resource ='medical_file',path =instance .file .name )
+
         # Log access
         log_security_event (
         user =request .user ,
@@ -169,6 +172,9 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
 
             # Record access
         instance .record_access (request .user )
+
+        from apps .core .anomaly import record_phi_access
+        record_phi_access (request .user ,resource ='medical_file',path =instance .file .name )
 
         # Log download
         log_security_event (

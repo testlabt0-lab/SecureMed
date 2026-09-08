@@ -111,6 +111,44 @@ class NotificationPreference(models.Model):
         verbose_name_plural = _('تفضيلات الإشعارات')
 
 
+class PushToken(models.Model):
+    """FCM device token registered by a client for push delivery.
+
+    A device registers its token after login (and re-registers whenever FCM
+    rotates it). Delivery is best-effort and only happens when FCM credentials
+    are configured; the notification rows are the durable record either way.
+    Tokens are stored hashed-indexed but retrievable — FCM needs the literal
+    token to send — so uniqueness is enforced on the token itself and stale
+    rows are simply replaced on re-registration.
+    """
+    platform = models.CharField(
+        _('المنصة'), max_length=10,
+        choices=[('ANDROID', 'Android'), ('WEB', 'Web'), ('IOS', 'iOS')],
+        default='ANDROID',
+    )
+    token = models.TextField(_('رمز الإشعارات'), unique=True)
+    device_fingerprint = models.CharField(_('بصمة الجهاز'), max_length=255, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='push_tokens',
+        verbose_name=_('المستخدم'),
+    )
+    is_active = models.BooleanField(_('نشط'), default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('رمز إشعارات')
+        verbose_name_plural = _('رموز الإشعارات')
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f'{self.platform} → {self.user.email} ({self.token[:16]}…)'
+
+
 class EmailLog(models.Model):
     """Log of sent emails for audit purposes."""
     class Status(models.TextChoices):

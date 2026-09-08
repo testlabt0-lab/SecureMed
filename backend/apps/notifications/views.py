@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from django_filters import rest_framework as django_filters
 from django.utils import timezone
 
-from apps.notifications.models import Notification, NotificationPreference
+from apps.notifications.models import Notification, NotificationPreference, PushToken
 from apps.notifications.serializers import (
     NotificationSerializer, NotificationPreferenceSerializer
 )
@@ -105,6 +105,60 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             {'detail': 'فشل إرسال البريد — راجع إعدادات SMTP في السجل'},
             status=502,
         )
+
+
+class PushTokenRegisterView(generics.GenericAPIView):
+    """POST /api/v1/notifications/push/register/ — register an FCM device token.
+
+    The client (Android app, web push) calls this right after login and again
+    whenever FCM rotates its token. Re-registering an existing token re-binds
+    it to the current account and re-activates it, which covers a device that
+    logged out and back in, or moved between accounts.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        token = str(request.data.get('token') or '').strip()
+        platform = str(request.data.get('platform') or 'ANDROID').upper()
+        if not token or len(token) > 4096:
+            return Response(
+                {'detail': 'رمز الإشعارات مطلوب'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if platform not in ('ANDROID', 'WEB', 'IOS'):
+            platform = 'ANDROID'
+
+        from django.conf import settings as dj_settings
+        device_fingerprint = (
+            request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+            or request.data.get('device_fingerprint') or ''
+        )[:255]
+
+        obj, _created = PushToken.objects.update_or_create(
+            token=token,
+            defaults={
+                'user': request.user,
+                'platform': platform,
+                'device_fingerprint': device_fingerprint,
+                'is_active': True,
+            },
+        )
+        log_security_event(
+            user=request.user,
+            event_type='SYSTEM_EVENT',
+            request=request,
+            details={'action': 'push_token_registered', 'platform': platform},
+        )
+        return Response({'detail': 'تم تسجيل الجهاز للإشعارات'}, status=200)
+
+    def delete(self, request):
+        """Unregister (e.g. on logout): deactivate, keep the row for history."""
+        token = str(request.data.get('token') or '').strip()
+        if token:
+            PushToken.objects.filter(
+                token=token, user=request.user
+            ).update(is_active=False)
+        return Response({'detail': 'تم إلغاء تسجيل الإشعارات لهذا الجهاز'})
 
 
 class NotificationPreferenceView(generics.RetrieveUpdateAPIView):

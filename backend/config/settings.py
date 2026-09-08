@@ -741,6 +741,14 @@ CELERY_RESULT_BACKEND =config ('CELERY_RESULT_BACKEND',default ='redis://127.0.0
 # AI Settings
 GEMINI_API_KEY =config ('GEMINI_API_KEY',default ='')
 
+# ---------- FCM push notifications (optional) ----------
+# Both must be set for push delivery to activate. FCM_SERVICE_ACCOUNT_JSON is
+# either the raw JSON string of the service-account key or a path to it.
+# Without these, notifications still exist in-app and by email — push is an
+# additional channel, never a dependency.
+FCM_PROJECT_ID =config ('FCM_PROJECT_ID',default ='')
+FCM_SERVICE_ACCOUNT_JSON =config ('FCM_SERVICE_ACCOUNT_JSON',default ='')
+
 CELERY_ACCEPT_CONTENT =['json']
 CELERY_TASK_SERIALIZER ='json'
 CELERY_RESULT_SERIALIZER ='json'

@@ -150,3 +150,73 @@ class LabResult (models .Model ):
             if self .numeric_value >float (test .normal_range_max )*2 or self .numeric_value <float (test .normal_range_min )*0.5 :
                 self .is_critical =True 
         super ().save (*args ,**kwargs )
+
+    def to_fhir (self ):
+        """HL7 FHIR R4 Observation representation of this result.
+
+        Reads only order/test columns that carry no PHI of their own, so no
+        decryption happens here — the patient stays referenced by id, and the
+        Patient resource is the caller's separate, audited export.
+        """
+        test =self .order .test 
+        status =self ._STATUS_MAP .get (self .order .status ,'registered')
+
+        observation ={
+        'resourceType':'Observation',
+        'id':str (self .id ),
+        'status':status ,
+        'category':[{
+        'coding':[{
+        'system':'http://terminology.hl7.org/CodeSystem/observation-category',
+        'code':'laboratory',
+        }],
+        }],
+        'code':test .loinc_coding ()or {'text':test .name },
+        'subject':{'reference':f'Patient/{self .order .patient_id }'},
+        'effectiveDateTime':(
+        self .created_at .isoformat ()if self .created_at else None 
+        ),
+        'interpretation':[], 
+        }
+        if self .numeric_value is not None :
+            observation ['valueQuantity']={
+            'value':float (self .numeric_value ),
+            'unit':test .unit or '',
+            }
+        elif self .text_value :
+            observation ['valueString']=self .text_value 
+
+        if test .normal_range_min is not None or test .normal_range_max is not None :
+            reference ={
+            'text':(
+            f'{test .normal_range_min } - {test .normal_range_max }'
+            if test .normal_range_min is not None 
+            else f'≤ {test .normal_range_max }'
+            )
+            }
+            if test .unit :
+                reference ['low'if self .numeric_value is not None and test .normal_range_min is not None else 'high']={
+                'value':float (test .normal_range_min if test .normal_range_min is not None else test .normal_range_max ),
+                'unit':test .unit ,
+                }
+            observation ['referenceRange']=[reference ]
+
+        flags =[]
+        if self .is_critical :
+            flags .append ({
+            'coding':[{
+            'system':'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation',
+            'code':'HH'if (self .numeric_value is not None and test .normal_range_max is not None and self .numeric_value >float (test .normal_range_max ))else 'LL',
+            'display':'Above high critical'if 'HH'==flags_marker .get ('code')else 'Below low critical',
+            }],
+            })
+        if self .is_abnormal and not self .is_critical :
+            flags .append ({
+            'coding':[{
+            'system':'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation',
+            'code':'A',
+            'display':'Abnormal',
+            }],
+            })
+        observation ['interpretation']=flags 
+        return observation 

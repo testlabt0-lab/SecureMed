@@ -133,7 +133,7 @@ class MainActivity : FragmentActivity() {
                         when {
                             SecurePreferences.isLoggedIn() && openMedications -> Route.Medications.route
                             SecurePreferences.isLoggedIn() -> Route.Dashboard.route
-                            else -> Route.Login.route
+                            else -> Route.DeviceCheck.route
                         }
                     }
 
@@ -155,7 +155,7 @@ class MainActivity : FragmentActivity() {
                     // back press behind the login screen.
                     val signOut: (Boolean) -> Unit = { allDevices ->
                         authViewModel.logout(allDevices)
-                        navController.navigate(Route.Login.route) {
+                        navController.navigate(Route.DeviceCheck.route) {
                             popUpTo(0) { inclusive = true }
                         }
                     }
@@ -198,6 +198,16 @@ class MainActivity : FragmentActivity() {
                             popEnterTransition = { slideInHorizontally(initialOffsetX = { -1000 }) + fadeIn() },
                             popExitTransition = { slideOutHorizontally(targetOffsetX = { 1000 }) + fadeOut() }
                         ) {
+                            composable(Route.DeviceCheck.route) {
+                                DeviceCheckScreen(
+                                    viewModel = authViewModel,
+                                    onDeviceAuthorized = {
+                                        navController.navigate(Route.Login.route) {
+                                            popUpTo(Route.DeviceCheck.route) { inclusive = true }
+                                        }
+                                    }
+                                )
+                            }
                             composable(Route.Login.route) {
                                 LoginScreen(
                                     viewModel = authViewModel,

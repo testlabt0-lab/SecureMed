@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DatabaseBackup, Plus, Download, Trash2, ShieldCheck, HardDrive,
+  DatabaseBackup, Plus, Download, Trash2, ShieldCheck, HardDrive, RotateCcw
 } from 'lucide-react';
 import { backupsAPI } from '../api/client';
 import { downloadBlobResponse } from '../api/extendedApis';
@@ -57,6 +57,20 @@ export default function Backups() {
     },
   });
 
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => backupsAPI.restore(id, true), // force=true
+    onSuccess: () => {
+      toast.success('تم استعادة النسخة بنجاح! يرجى إعادة تسجيل الدخول.', { duration: 5000 });
+      // Force reload the page so the app re-fetches everything from the restored DB
+      setTimeout(() => {
+          window.location.href = '/login';
+      }, 3000);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'فشلت عملية الاستعادة');
+    },
+  });
+
   const backups = data?.data?.results || data?.data || [];
   const totalSize = backups.reduce((s: number, b: any) => s + (b.size_bytes || 0), 0);
 
@@ -101,7 +115,7 @@ export default function Backups() {
           <span>•</span>
           <span>يُحتفظ تلقائياً بآخر 14 نسخة</span>
           <span>•</span>
-          <span>للاستعادة: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">python manage.py restore_backup &lt;file.zip&gt;</code></span>
+          <span>للاستعادة: اختر أيقونة (الاستعادة) من الجدول أدناه (تحذير: سيتم مسح البيانات الحالية)</span>
         </div>
       </div>
 
@@ -157,6 +171,21 @@ export default function Backups() {
                         title="تنزيل"
                       >
                         <Download className="w-4 h-4 text-primary-600" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const conf = prompt(`تحذير خطير: استعادة النسخة «${b.filename}» ستقوم بمسح قاعدة البيانات الحالية بالكامل وإرجاعها لهذه النسخة.\nاكتب "تأكيد" للمتابعة:`);
+                          if (conf === 'تأكيد') {
+                              restoreMutation.mutate(b.id);
+                          } else if (conf !== null) {
+                              toast.error('تم إلغاء الاستعادة. الكلمة غير متطابقة.');
+                          }
+                        }}
+                        disabled={!b.exists_on_disk || restoreMutation.isPending}
+                        className="p-2 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg disabled:opacity-30"
+                        title="استعادة (تتطلب تأكيد)"
+                      >
+                        <RotateCcw className="w-4 h-4 text-orange-600" />
                       </button>
                       <button
                         onClick={() => {

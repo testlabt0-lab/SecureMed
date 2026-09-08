@@ -85,6 +85,9 @@ interface SecureMedApi {
     suspend fun createMedicalRecord(@Body record: MedicalRecordCreateRequest): MedicalRecord
 
     // ===== SECURITY =====
+    @POST("security/check-device/")
+    suspend fun checkDevice(@Body request: DeviceCheckRequest): DeviceCheckResponse
+
     @GET("security/dashboard/")
     suspend fun getSecurityDashboard(): JsonObject
 

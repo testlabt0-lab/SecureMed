@@ -171,6 +171,7 @@ export const backupsAPI = {
   create: (note?: string) => api.post('/backups/create_backup_action/', { note: note || '' }),
   download: (id: string) => api.get(`/backups/${id}/download/`, { responseType: 'blob' }),
   verify: (id: string) => api.get(`/backups/${id}/verify/`),
+  restore: (id: string, force: boolean) => api.post(`/backups/${id}/restore/`, { force }),
   delete: (id: string) => api.delete(`/backups/${id}/`),
 };
 
@@ -211,6 +212,8 @@ export const securityAPI = {
   dashboard: () => api.get('/security/dashboard/'),
   stats: () => api.get('/security/stats/'),
   activity: () => api.get('/security/activity/'),
+  checkDevice: (data: { email?: string; device_fingerprint?: string; mac_address?: string }) =>
+    api.post('/security/check-device/', data),
   // Enhanced Security features
   devices: {
     list: () => api.get('/security/devices/'),

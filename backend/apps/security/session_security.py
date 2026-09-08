@@ -10,14 +10,14 @@ logger =logging .getLogger ('security')
 class SessionManager :
     """Manages user sessions, concurrent limits, and session binding."""
 
-    MAX_CONCURRENT_SESSIONS =3 
+    MAX_CONCURRENT_SESSIONS = 1 
 
     @staticmethod 
     def register_session (user ,request ,token =None ):
-        """Register a new session for the user."""
+        """Register a new session for the user and terminate old ones."""
         if not user or not user .is_authenticated :
             return 
-
+            
         session_id =''
         if token is not None and isinstance (token ,dict ):
             session_id =str (token .get ('jti',''))
@@ -29,6 +29,13 @@ class SessionManager :
         cache_key =f'active_sessions:{user .id }'
         sessions =cache .get (cache_key ,[])
 
+        # Denylist existing sessions to enforce MAX_CONCURRENT_SESSIONS = 1
+        for old_session in sessions:
+            old_session_id = old_session.get('session_id')
+            if old_session_id and old_session_id != session_id:
+                cache.set(f'session_denylist:{old_session_id}', True, timeout=3600)
+                logger.info(f"Invalidated old session {old_session_id} for user {user.id}")
+
         # Add new session
         new_session ={
         'session_id':session_id ,
@@ -37,22 +44,8 @@ class SessionManager :
         'ip_address':get_client_ip (request )
         }
 
-        # Enforce max concurrent sessions limit
-        if len (sessions )>=SessionManager .MAX_CONCURRENT_SESSIONS :
-        # We would typically log out the oldest session here,
-        # but for simplicity, we just keep the newest ones.
-        # In a real app with stateful sessions, we would invalidate the old session token.
-            sessions =sorted (sessions ,key =lambda x :x ['timestamp'])
-            sessions =sessions [-(SessionManager .MAX_CONCURRENT_SESSIONS -1 ):]
-            logger .warning (f"User {user .id } exceeded concurrent session limit. Terminating oldest.")
-
-        sessions .append (new_session )
+        sessions = [new_session]
         cache .set (cache_key ,sessions ,timeout =86400 )# 24h
-        # NOTE: the force-logout marker is deliberately *not* cleared here. It
-        # records the moment revocation happened, and BoundJWTAuthentication only
-        # rejects tokens issued before it — so a fresh login works while the
-        # tokens that were revoked stay revoked. Deleting the marker instead made
-        # every previously stolen token valid again on the next login.
 
     @staticmethod
     def force_logout_user (user_id ):

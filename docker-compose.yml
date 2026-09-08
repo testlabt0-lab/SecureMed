@@ -1,263 +1,96 @@
-# =============================================================================
-#  SecureMed — Full Production Stack (Docker Compose v2)
-# =============================================================================
-#
-#  أوضاع التشغيل:
-#    1. عرض سريع (SQLite + بدون Redis):
-#         docker compose up backend
-#
-#    2. مع PostgreSQL:
-#         docker compose --profile db up
-#
-#    3. مكتمل للإنتاج (+ Redis + Celery + Nginx):
-#         docker compose --profile db --profile full up
-#
-#  متغيرات البيئة: backend/.env (راجع backend/.env.example)
-#
-#  المساعد الذكي يعمل داخل Django نفسه عبر GEMINI_API_KEY — لم تبقَ خدمة `ai`
-#  منفصلة (كانت خدمة Node على المنفذ 8100 ولم يعد أحد ينادِيها).
-# =============================================================================
+version: '3.8'
 
 services:
-
-  # ─────────────────────────────────────────────────── PostgreSQL ──────────────
-  postgres:
-    image: postgres:16-alpine
-    profiles: ["db", "full"]
+  db:
+    image: postgres:15-alpine
     environment:
       POSTGRES_DB: securemed
-      POSTGRES_USER: securemed
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securemed-db-pass-2026}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U securemed -d securemed"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
-  # ─────────────────────────────────────────────────── PgBouncer ───────────────
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    profiles: ["full"]
-    environment:
-      DB_USER: securemed
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-securemed-db-pass-2026}
-      DB_HOST: postgres
-      DB_NAME: securemed
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: 1000
-      DEFAULT_POOL_SIZE: 20
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "6432:6432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
+      - "5432:5432"
 
-  # ─────────────────────────────────────────────────── Redis ───────────────────
   redis:
     image: redis:7-alpine
-    profiles: ["full"]
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-securemed-redis-2026}
-    volumes:
-      - redisdata:/data
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-securemed-redis-2026}", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
+    ports:
+      - "6379:6379"
 
-  # ─────────────────────────────────────────────────── Backend ─────────────────
   backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    command: /app/entrypoint.sh
+    volumes:
+      - ./backend/media:/app/media
+      - ./backend/backups:/app/backups
+    environment:
+      - DEBUG=0
+      - SECRET_KEY=super-secret-production-key-2026-securemed
+      - ALLOWED_HOSTS=*
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/securemed
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USE_REDIS_CACHE=True
+      - CACHE_URL=redis://redis:6379/0
+      - ENCRYPTION_KEY=securemed-field-encryption-key-32-bytes!!
+      - TRUST_X_FORWARDED_FOR=True
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+
+  celery_worker:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A config worker -l INFO
+    volumes:
+      - ./backend/media:/app/media
+      - ./backend/backups:/app/backups
+    environment:
+      - DEBUG=0
+      - SECRET_KEY=super-secret-production-key-2026-securemed
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/securemed
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ENCRYPTION_KEY=securemed-field-encryption-key-32-bytes!!
+    depends_on:
+      - db
+      - redis
+      - backend
+
+  celery_beat:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A config beat -l INFO
+    environment:
+      - DEBUG=0
+      - SECRET_KEY=super-secret-production-key-2026-securemed
+      - DATABASE_URL=postgres://postgres:postgrespassword@db:5432/securemed
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ENCRYPTION_KEY=securemed-field-encryption-key-32-bytes!!
+    depends_on:
+      - db
+      - redis
+      - backend
+
+  frontend:
     build:
-      context: .
+      context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    env_file:
-      - path: backend/.env
-        required: false
-    environment:
-      # Compose owns these: they describe the topology inside the network and are
-      # meant to win over backend/.env.
-      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,${DOMAIN:-}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8000}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
-      # Pass-through only. Written as `- NAME` rather than `NAME: "${NAME:-}"`
-      # because the mapping form *always* sets the variable: with the shell value
-      # absent it set it to the empty string, which takes precedence over env_file
-      # and so silently blanked whatever backend/.env said. DATABASE_URL was the
-      # painful one — configuring the database in .env appeared to do nothing.
-      - GEMINI_API_KEY
-      - DATABASE_URL
-      - DB_HOST
-      - USE_S3_STORAGE
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_STORAGE_BUCKET_NAME
-      - AWS_S3_REGION_NAME
-    # The `ai` sidecar this used to wait on is gone, and with it a startup gate on
-    # a service nothing called: `docker compose up backend` could not start until a
-    # Node container answered a health check. Redis is only in the `full` profile,
-    # hence required: false — the dependency applies when it is actually running.
+      - "3000:80"
     depends_on:
-      redis:
-        condition: service_healthy
-        required: false
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 1G
-    healthcheck:
-      test: ["CMD-SHELL",
-             "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health/live/')\""]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 45s
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py collectstatic --noinput &&
-             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
-    restart: unless-stopped
-    volumes:
-      - media:/app/backend/media
-      - logs:/app/backend/logs
-
-  # ─────────────────────────────────────────────────── Celery Worker ────────────
-  celery-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    profiles: ["full"]
-    env_file:
-      - path: backend/.env
-        required: false
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
-      # Pass-through — see the note on the backend service.
-      - GEMINI_API_KEY
-      - DATABASE_URL
-      - DB_HOST
-      - USE_S3_STORAGE
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_STORAGE_BUCKET_NAME
-      - AWS_S3_REGION_NAME
-    depends_on:
-      backend:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-    command: >
-      celery -A config worker
-        --loglevel=info
-        --concurrency=2
-        --max-tasks-per-child=100
-    restart: unless-stopped
-    volumes:
-      - media:/app/backend/media
-      - logs:/app/backend/logs
-
-  # ─────────────────────────────────────────────────── Celery Beat ──────────────
-  celery-beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    profiles: ["full"]
-    env_file:
-      - path: backend/.env
-        required: false
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-securemed-redis-2026}@redis:6379/0
-      # Pass-through — see the note on the backend service.
-      - GEMINI_API_KEY
-      - DATABASE_URL
-      - DB_HOST
-      - USE_S3_STORAGE
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_STORAGE_BUCKET_NAME
-      - AWS_S3_REGION_NAME
-    depends_on:
-      backend:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-    command: >
-      celery -A config beat
-        --loglevel=info
-        --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    restart: unless-stopped
-
-  # ─────────────────────────────────────────────────── Nginx ───────────────────
-  nginx:
-    image: nginx:1.27-alpine
-    profiles: ["full"]
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./devsecops/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./backend/certs/server.crt:/etc/nginx/ssl/server.crt:ro
-      - ./backend/certs/server.key:/etc/nginx/ssl/server.key:ro
-      - media:/app/backend/media:ro
-    depends_on:
-      backend:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-    healthcheck:
-      test: ["CMD", "nginx", "-t"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+      - backend
 
 volumes:
-  pgdata:
-  redisdata:
-  media:
-  logs:
+  postgres_data:

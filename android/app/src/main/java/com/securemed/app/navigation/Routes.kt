@@ -9,6 +9,7 @@ package com.securemed.app.navigation
 sealed class Route(val route: String) {
 
     // ===== Auth =====
+    data object DeviceCheck : Route("device_check")
     data object Login : Route("login")
 
     // ===== Main tabs =====

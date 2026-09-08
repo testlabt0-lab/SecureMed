@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/authStore';
-import { authAPI } from '../api/client';
+import { authAPI, securityAPI } from '../api/client';
 import { mfaApi } from '../api/extendedApis';
 import {
   Stethoscope, Fingerprint, Mail, Lock, ShieldCheck, AlertCircle,
@@ -38,10 +38,70 @@ export default function Login() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [blockedAlert, setBlockedAlert] = useState<string | null>(null);
+  type DeviceState = 'loading' | 'authorized' | 'unknown' | 'pending' | 'blocked';
+  const [deviceState, setDeviceState] = useState<DeviceState>('loading');
+  const [deviceCheckMessage, setDeviceCheckMessage] = useState('');
+
 
   useEffect(() => {
-    getDeviceFingerprint().then((info) => setDeviceInfo(info)).catch(console.error);
+    getDeviceFingerprint()
+      .then((info) => {
+        setDeviceInfo(info);
+        return securityAPI.checkDevice({
+            device_fingerprint: info.device_fingerprint,
+            mac_address: info.mac_address
+        });
+      })
+      .then((res) => {
+        if (res.data.authorized) {
+            setDeviceState('authorized');
+        } else {
+            setDeviceState('pending');
+            setDeviceCheckMessage(res.data.detail);
+        }
+      })
+      .catch((err) => {
+        if (err.response?.status === 403) {
+            const detail = err.response.data.detail || '';
+            if (detail.includes('محظور')) {
+                setDeviceState('blocked');
+            } else if (detail.includes('بانتظار')) {
+                setDeviceState('pending');
+            } else {
+                setDeviceState('unknown');
+            }
+            setDeviceCheckMessage(detail);
+        } else {
+            setDeviceState('authorized'); // fallback if API is unreachable
+        }
+      });
   }, []);
+
+  const handleRequestAccess = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!email) {
+          toast.error('يرجى إدخال البريد الإلكتروني');
+          return;
+      }
+      setLoading(true);
+      try {
+          const res = await securityAPI.checkDevice({
+              email: email,
+              device_fingerprint: deviceInfo?.device_fingerprint,
+              mac_address: deviceInfo?.mac_address
+          });
+          if (res.data.authorized) setDeviceState('authorized');
+      } catch (err: any) {
+          if (err.response?.status === 403) {
+              setDeviceState('pending');
+              setDeviceCheckMessage(err.response.data.detail);
+              toast.success('تم إرسال طلب التفعيل إلى الإدارة');
+          }
+      } finally {
+          setLoading(false);
+      }
+  };
+
 
   // 2FA step state
   const [pendingMfaToken, setPendingMfaToken] = useState<string | null>(null);
@@ -173,6 +233,60 @@ export default function Login() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.65, delay: 0.12, ease: easing }}
           >
+            {deviceState === 'loading' && (
+                <div className="flex flex-col items-center justify-center py-10 space-y-4">
+                    <ScanFace className="w-12 h-12 text-primary-400 animate-pulse" />
+                    <p className="text-white font-bold">جاري التحقق من أمان الجهاز...</p>
+                </div>
+            )}
+            
+            {deviceState === 'blocked' && (
+                <div className="flex flex-col items-center justify-center py-10 space-y-4">
+                    <ShieldAlert className="w-16 h-16 text-red-500" />
+                    <h3 className="text-xl text-white font-bold">جهاز محظور</h3>
+                    <p className="text-red-200 text-center">{deviceCheckMessage}</p>
+                </div>
+            )}
+
+            {deviceState === 'pending' && (
+                <div className="flex flex-col items-center justify-center py-10 space-y-4">
+                    <Monitor className="w-16 h-16 text-amber-500" />
+                    <h3 className="text-xl text-white font-bold">جهاز غير مصرح</h3>
+                    <p className="text-amber-200 text-center">{deviceCheckMessage}</p>
+                    <p className="text-sm text-gray-400 text-center mt-2">يرجى الانتظار حتى يقوم مدير النظام بقبول طلبك عبر تيليجرام ثم قم بتحديث الصفحة.</p>
+                </div>
+            )}
+
+            {deviceState === 'unknown' && (
+                <div className="flex flex-col items-center justify-center py-6 space-y-4 w-full">
+                    <ShieldAlert className="w-12 h-12 text-blue-400" />
+                    <h3 className="text-lg text-white font-bold">تسجيل جهاز جديد</h3>
+                    <p className="text-blue-200 text-center text-sm mb-4">هذا الجهاز غير مسجل في النظام. أدخل بريدك الإلكتروني لطلب صلاحية الدخول.</p>
+                    <form onSubmit={handleRequestAccess} className="w-full space-y-4">
+                        <div className="relative group">
+                            <Mail className="input-icon group-focus-within:text-primary-500 dark:group-focus-within:text-primary-400" />
+                            <input
+                              type="email"
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                              required
+                              className="input-field pr-11 bg-white/95 text-gray-900 placeholder:text-gray-400 dark:bg-gray-800/95 dark:text-white"
+                              placeholder="doctor@securemed.app"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="btn-primary w-full flex items-center justify-center py-3 gap-2"
+                        >
+                            {loading ? 'جاري الطلب...' : 'إرسال طلب التفعيل'}
+                        </button>
+                    </form>
+                </div>
+            )}
+
+            {deviceState === 'authorized' && (
+
             <AnimatePresence mode="wait">
               {pendingMfaToken ? (
                 /* ===== 2FA verification step ===== */
@@ -506,6 +620,7 @@ export default function Login() {
                 </motion.div>
               )}
             </AnimatePresence>
+            )}
           </motion.div>
 
           <motion.p

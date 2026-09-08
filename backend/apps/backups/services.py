@@ -125,6 +125,24 @@ def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='')
                         zf .write (full ,arcname =str (arc ))
     finally :
         dump_file .unlink (missing_ok =True )
+        
+    # Encrypt the zip file
+    try:
+        import base64
+        import logging
+        from cryptography.fernet import Fernet
+        key = getattr(settings, 'BACKUP_ENCRYPTION_KEY', settings.SECRET_KEY).encode('utf-8')
+        if len(key) < 32: key = key.ljust(32, b'0')
+        key = base64.urlsafe_b64encode(key[:32])
+        fernet = Fernet(key)
+        
+        with open(out_path, 'rb') as f:
+            data = f.read()
+        encrypted_data = fernet.encrypt(data)
+        with open(out_path, 'wb') as f:
+            f.write(encrypted_data)
+    except Exception as e:
+        logging.getLogger('security').error(f"Failed to encrypt backup: {e}")
 
     duration_ms =int ((time .time ()-started )*1000 )
     record =BR .objects .create (
@@ -156,18 +174,61 @@ def _apply_retention ():
         rec .delete ()
 
 
+def _get_decrypted_backup(filepath: str):
+    """Return an open file-like handle on the unencrypted ZIP contents.
+
+    A Fernet token starts with the ASCII bytes ``gAAAAA`` and a ZIP starts
+    with ``PK\x03\x04``. Archives written by an older release (before
+    encryption was added) start with the ZIP signature, so when decryption
+    fails on such a file the right answer is to hand it back as-is instead
+    of telling the operator the backup is broken. A wrong key against a
+    truly encrypted archive also produces a "PK" magic — but only after
+    Fernet has rejected it, so the fallback runs *after* the explicit
+    Fernet failure and not on every file.
+    """
+    path = Path(filepath)
+    if not path.exists():
+        raise FileNotFoundError(f'الملف غير موجود: {filepath}')
+
+    import base64
+    from cryptography.fernet import Fernet, InvalidToken
+    from io import BytesIO
+
+    raw = path.read_bytes()
+    # Legacy plaintext archive — not encrypted at all, Fernet would just
+    # mangle the first few bytes if we tried.
+    if raw.startswith(b'PK\x03\x04'):
+        return BytesIO(raw)
+
+    secret = getattr(settings, 'BACKUP_ENCRYPTION_KEY', '') or settings.SECRET_KEY
+    key = secret.encode('utf-8')
+    if len(key) < 32:
+        key = key.ljust(32, b'0')
+    key = base64.urlsafe_b64encode(key[:32])
+    fernet = Fernet(key)
+
+    try:
+        return BytesIO(fernet.decrypt(raw))
+    except InvalidToken:
+        # Could be a legacy archive that does not start with PK for some
+        # reason (e.g. a backup that was appended to), or a key mismatch.
+        # Re-check the magic in case Fernet's exception masked it.
+        if raw.startswith(b'PK\x03\x04'):
+            return BytesIO(raw)
+        raise ValueError('فشل فك التشفير — مفتاح التشفير خاطئ أو الملف تالف')
+
+
 def verify_backup (filepath :str )->dict :
     """Open an archive and validate structure + checksum. Returns manifest."""
-    path =Path (filepath )
-    if not path .exists ():
-        raise FileNotFoundError (f'الملف غير موجود: {filepath }')
-    with zipfile .ZipFile (path )as zf :
+    decrypted_file = _get_decrypted_backup(filepath)
+    with zipfile .ZipFile (decrypted_file )as zf :
         names =set (zf .namelist ())
         if 'db.json'not in names or 'manifest.json'not in names :
             raise ValueError ('أرشيف غير صالح — db.json أو manifest.json مفقود')
         manifest =json .loads (zf .read ('manifest.json').decode ('utf-8'))
         expected =manifest .get ('checksum_sha256','')
         # extract db.json to temp and hash
+        path = Path(filepath)
         tmp =path .parent /f'_verify_{path .name }.json'
         try :
             with zf .open ('db.json')as src ,open (tmp ,'wb')as dst :
@@ -193,11 +254,12 @@ def restore_backup (filepath :str ,force :bool =False )->dict :
         'detail':'الأرشيف سليم — أعد التنفيذ مع force=True للاستعادة الفعلية',
         }
 
-    path =Path (filepath )
-    with zipfile .ZipFile (path )as zf :
+    decrypted_file = _get_decrypted_backup(filepath)
+    with zipfile .ZipFile (decrypted_file )as zf :
         db_json =zf .read ('db.json').decode ('utf-8')
 
         # write the dump to a temp fixture file (loaddata accepts paths)
+        path = Path(filepath)
         tmp_fixture =path .parent /f'_restore_{path .name }.json'
         tmp_fixture .write_text (db_json ,encoding ='utf-8')
         try :

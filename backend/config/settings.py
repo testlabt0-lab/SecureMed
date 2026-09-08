@@ -323,7 +323,8 @@ REST_FRAMEWORK ={
 'user':'1000/hour',
 'login':'5/minute',
 'biometric':'10/minute',
-'password_reset':'5/hour',
+        'password_reset':'5/hour',
+        'device_check':'30/minute',
 },
 'DEFAULT_RENDERER_CLASSES':(
 'rest_framework.renderers.JSONRenderer',
@@ -513,6 +514,33 @@ GEOIP_LOOKUP_URL =config ('GEOIP_LOOKUP_URL',default ='https://ip-api.com/json/{
 # ============================================
 BACKUP_DIR =Path (config ('BACKUP_DIR',default =str (BASE_DIR /'backups')))
 BACKUP_KEEP_COUNT =config ('BACKUP_KEEP_COUNT',default =14 ,cast =int )
+# Fernet key for encrypting backup archives at rest (AES-128-CBC + HMAC under
+# the hood). Falls back to SECRET_KEY so an existing deployment keeps producing
+# restorable archives, but a dedicated key means whoever leaks SECRET_KEY does
+# not automatically get every backup with it.
+BACKUP_ENCRYPTION_KEY =config ('BACKUP_ENCRYPTION_KEY',default ='')
+
+# ============================================
+# Telegram device-approval bot
+# ============================================
+# New devices are held untrusted until an admin taps Approve in the admin chat.
+# Leave both empty to disable the integration (approval then happens from the
+# admin panel). TELEGRAM_WEBHOOK_SECRET must be set in production: the webhook
+# endpoint answers anonymous POSTs and its approve action grants login access,
+# so without the shared secret anyone who learns the URL could approve devices.
+TELEGRAM_BOT_TOKEN =config ('TELEGRAM_BOT_TOKEN',default ='')
+TELEGRAM_ADMIN_CHAT_ID =config ('TELEGRAM_ADMIN_CHAT_ID',default ='')
+TELEGRAM_WEBHOOK_SECRET =config ('TELEGRAM_WEBHOOK_SECRET',default ='')
+
+# ============================================
+# Device authorization policy
+# ============================================
+# When True (the project requirement), a device that has never been trusted
+# cannot log in at all — the login is refused with a 403 and an approval
+# request is sent to the admin chat. When False, the historical adaptive-MFA
+# behaviour applies instead: an untrusted device may log in but must answer an
+# emailed one-time code.
+ENFORCE_DEVICE_AUTHORIZATION =config ('ENFORCE_DEVICE_AUTHORIZATION',default =True ,cast =bool )
 
 # Cache — Redis when REDIS_URL is set (multi-worker production),
 # otherwise a file-based shared cache: correct for gunicorn's multiple

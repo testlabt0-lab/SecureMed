@@ -1,6 +1,8 @@
 package com.securemed.app.security
 
+import android.content.Context
 import android.os.Build
+import com.securemed.app.data.local.SecurePreferences
 import java.io.File
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -86,4 +88,31 @@ object SecurityUtils {
                 || Build.PRODUCT.contains("emulator")
                 || Build.PRODUCT.contains("simulator")
     }
+
+    /**
+     * Stable per-install identifier used as the device fingerprint.
+     *
+     * Returns exactly the value the OkHttp interceptor sends in
+     * `X-Device-Fingerprint` on every request (`SecurePreferences.installId`).
+     * The pre-flight `security/check-device/` call has to use the same string
+     * the login headers do, otherwise the server would record the device
+     * under one fingerprint and the login would check it under another —
+     * admin approval would then apply to a row the login path never reads.
+     *
+     * The [context] parameter is accepted only for parity with the
+     * pre-existing call sites; [SecurePreferences] is already initialised at
+     * app start, so the value can be read without touching it.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun getDeviceFingerprint(context: Context): String = SecurePreferences.installId
+
+    /**
+     * MAC address of the device. Always returns `null` on Android 6+: the
+     * OS returns a per-app randomized MAC, so anything we sent would be a
+     * fiction, and a real MAC is a permanent hardware identifier we have no
+     * reason to hand over. The backend therefore never sees the header —
+     * same decision the OkHttp interceptor already encodes by omitting it.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun getMacAddress(context: Context): String? = null
 }

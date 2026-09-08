@@ -96,6 +96,17 @@ class SecureMedRepository @Inject constructor(
         }
     }
 
+    // ===== SECURITY =====
+    suspend fun checkDevice(
+        fingerprint: String,
+        macAddress: String?,
+        email: String? = null
+    ): Result<DeviceCheckResponse> = try {
+        Result.success(api.checkDevice(DeviceCheckRequest(fingerprint, macAddress, email)))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     // ===== AUTH =====
     /**
      * Password sign-in. May come back with a 2FA challenge instead of a

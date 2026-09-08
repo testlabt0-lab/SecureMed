@@ -205,17 +205,29 @@ class LoginView (APIView ):
         tracked =DeviceTracker .track_device (user ,request ,device_info )
         device ,is_new_device =tracked if tracked else (None ,False )
 
-        # Determine if we need MFA (TOTP enabled OR Adaptive Auth for untrusted/new device if enabled)
+        # Enforce Dr. Majed's requirement: No login from unauthorized devices.
+        # The setting exists so a deployment can opt out for testing without
+        # deleting the code path; the default is True (deny).
+        if getattr(settings, 'ENFORCE_DEVICE_AUTHORIZATION', True) and device and not device.is_trusted:
+            log_security_event(
+                user=user,
+                event_type='LOGIN_FAILED',
+                request=request,
+                details={'reason': 'untrusted_device', 'device_fingerprint': fingerprint},
+                severity='WARNING'
+            )
+            return Response(
+                {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.', 'authorized': False},
+                status=status.HTTP_403_FORBIDDEN
+        )
+
+        # Determine if we need MFA (TOTP enabled)
         needs_mfa =False 
         mfa_method ='none'
 
         if user .mfa_enabled and user .mfa_secret :
             needs_mfa =True 
             mfa_method ='totp'
-        elif getattr (settings ,'ADAPTIVE_MFA_ENABLED',False )and (is_new_device or (device and not device .is_trusted )):
-        # Adaptive Authentication: Untrusted device needs email OTP
-            needs_mfa =True 
-            mfa_method ='email'
 
         if needs_mfa :
             mfa_token =secrets .token_urlsafe (32 )
@@ -551,9 +563,24 @@ class BiometricLoginView (APIView ):
         'os_info':os_info,
         'browser_info':browser_info,
         }
-        DeviceTracker .track_device (user ,request ,device_info )
-        tokens =get_tokens_for_user (user ,request )
+        tracked = DeviceTracker.track_device(user, request, device_info)
+        device, _ = tracked if tracked else (None, False)
 
+        # Enforce Dr. Majed's requirement: No login from unauthorized devices
+        if getattr(settings, 'ENFORCE_DEVICE_AUTHORIZATION', True) and device and not device.is_trusted:
+            log_security_event(
+                user=user,
+                event_type='LOGIN_FAILED',
+                request=request,
+                details={'reason': 'untrusted_device_biometric', 'device_fingerprint': fingerprint},
+                severity='WARNING'
+            )
+            return Response(
+                {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.', 'authorized': False},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        tokens =get_tokens_for_user (user ,request )
         SessionManager .register_session (user ,request ,token =tokens )
         
         LoginHistory.objects.create(

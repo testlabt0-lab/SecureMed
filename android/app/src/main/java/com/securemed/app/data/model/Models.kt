@@ -299,6 +299,20 @@ data class MedicationDoseLog(
     @SerialName("logged_at") val loggedAt: String
 )
 
+@Serializable
+data class DeviceCheckRequest(
+    @SerialName("device_fingerprint") val deviceFingerprint: String,
+    @SerialName("mac_address") val macAddress: String? = null,
+    val email: String? = null
+)
+
+@Serializable
+data class DeviceCheckResponse(
+    val state: String? = null,
+    val authorized: Boolean,
+    val detail: String? = null
+)
+
 /** A single dose card shown in "today's doses". */
 @Serializable
 data class TodayDose(

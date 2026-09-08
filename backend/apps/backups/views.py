@@ -84,8 +84,15 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
             request=request,
             details={'filename': record.filename},
         )
+        # The file on disk is encrypted-at-rest. Streaming it as
+        # application/zip would hand the operator a blob they cannot open
+        # (and one that, since it lives in BACKUP_DIR, may also be the
+        # file that the next encrypted backup will overwrite). Decrypt it
+        # here so what reaches the browser is a real ZIP.
+        from apps.backups.services import _get_decrypted_backup
+        decrypted = _get_decrypted_backup(record.filepath)
         response = FileResponse(
-            open(record.filepath, 'rb'),
+            decrypted,
             content_type='application/zip',
             as_attachment=True,
             filename=record.filename,
@@ -108,6 +115,47 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response({'valid': True, 'manifest': manifest})
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        record = self.get_object()
+        if not record.exists_on_disk:
+            return Response(
+                {'detail': 'ملف النسخة غير موجود على القرص'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        
+        force_raw = request.data.get('force', False)
+        if isinstance(force_raw, str):
+            force = force_raw.strip().lower() in ('1', 'true', 'yes', 'on')
+        else:
+            force = bool(force_raw)
+        
+        try:
+            from apps.backups.services import restore_backup
+            result = restore_backup(record.filepath, force=force)
+            
+            if force:
+                log_security_event(
+                    user=request.user,
+                    event_type='BACKUP_RESTORED',
+                    request=request,
+                    details={'filename': record.filename, 'restored_media_files': result.get('restored_media_files', 0)},
+                    severity='CRITICAL',
+                )
+            return Response(result)
+        except Exception as e:
+            log_security_event(
+                user=request.user,
+                event_type='SYSTEM_EVENT',
+                request=request,
+                details={'action': 'RESTORE_FAILED', 'error': str(e)[:200]},
+                severity='ERROR',
+            )
+            return Response(
+                {'detail': f'فشلت الاستعادة: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def destroy(self, request, *args, **kwargs):
         record = self.get_object()

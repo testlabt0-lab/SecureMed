@@ -213,11 +213,68 @@ class AuthViewModel @Inject constructor(
         _uiState.value = AuthUiState.Idle
         _errorMessage.value = null
     }
+
+    fun checkDeviceAuthorization(
+        fingerprint: String,
+        macAddress: String? = null,
+        email: String? = null
+    ) {
+        _uiState.value = AuthUiState.CheckingDevice
+        viewModelScope.launch {
+            repository.checkDevice(fingerprint, macAddress, email)
+                .onSuccess { response ->
+                    when (response.state) {
+                        "authorized" -> _uiState.value = AuthUiState.DeviceAuthorized
+                        "blocked" -> _uiState.value = AuthUiState.DeviceUnauthorized(
+                            response.detail ?: "هذا الجهاز محظور"
+                        )
+                        "pending" -> _uiState.value = AuthUiState.DeviceUnauthorized(
+                            response.detail
+                                ?: "الجهاز غير مصرح، بانتظار موافقة الإدارة"
+                        )
+                        "unknown", null -> _uiState.value = AuthUiState.DeviceUnknown(
+                            response.detail
+                                ?: "الجهاز غير معروف. أدخل بريدك الإلكتروني لطلب التفعيل."
+                        )
+                        else -> _uiState.value = AuthUiState.DeviceUnauthorized(
+                            response.detail ?: "الجهاز غير مصرح به."
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    // Fail safe: a network error during a security check must
+                    // not silently degrade to "authorized". Show the same
+                    // unauthorized screen the user would see if the server
+                    // explicitly refused.
+                    _errorMessage.value = error.message ?: "فشل الاتصال بالخادم للتحقق من الجهاز"
+                    _uiState.value = AuthUiState.DeviceUnauthorized(
+                        "تعذر التحقق من الجهاز. يرجى التأكد من اتصالك بالإنترنت."
+                    )
+                }
+        }
+    }
 }
 
 sealed class AuthUiState {
     data object Idle : AuthUiState()
     data object Loading : AuthUiState()
+    data object CheckingDevice : AuthUiState()
+
+    /**
+     * The pre-flight device check came back trusted. Distinct from
+     * [Idle] because DeviceCheckScreen needs to navigate on this transition
+     * but *not* on the initial Idle (which is the state the ViewModel
+     * starts in, before any check has happened).
+     */
+    data object DeviceAuthorized : AuthUiState()
+
+    data class DeviceUnauthorized(val message: String) : AuthUiState()
+
+    /**
+     * The device is not on file and we need the user's email to register
+     * it. Mirrors the web client's "unknown device" form.
+     */
+    data class DeviceUnknown(val message: String) : AuthUiState()
 
     /** A challenge is in hand and the biometric prompt should now be shown. */
     data class AwaitingBiometric(val challenge: BiometricChallengeResponse) : AuthUiState()

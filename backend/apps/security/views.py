@@ -194,3 +194,240 @@ class SecurityDashboardView (APIView ):
         'debug_mode':settings .DEBUG ,
         }
 
+
+class CheckDeviceView(APIView):
+    """
+    Pre-flight device authorization check.
+
+    Three outcomes are conveyed via a `state` field so clients can render the
+    right message without pattern-matching on the localized `detail`:
+
+    * `authorized` — the fingerprint matches a trusted DeviceRegistry row.
+    * `blocked`   — the fingerprint is on the BlockedDevice list (WAF still
+                    enforces this independently; this answer is purely UX).
+    * `pending`   — a DeviceRegistry row exists but is not yet trusted. The
+                    user is told to wait for admin approval.
+    * `unknown`   — the fingerprint is not on file and either no email was
+                    supplied (the client must ask for one) or the email did
+                    not match a real user (so we will not silently register a
+                    device against a non-account). In both cases the client
+                    should re-call this endpoint with `email` set.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = []  # a per-scoped throttle is applied explicitly below
+    throttle_scope = 'device_check'
+
+    def _state(self, kind, authorized, detail, **extra):
+        body = {'state': kind, 'authorized': authorized, 'detail': detail}
+        body.update(extra)
+        return body
+
+    def post(self, request):
+        fingerprint = (request.data.get('device_fingerprint')
+                       or request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')).strip()
+        mac_address = (request.data.get('mac_address')
+                       or request.META.get('HTTP_X_MAC_ADDRESS', '')).strip()
+        email = (request.data.get('email') or '').strip().lower() or None
+
+        if not fingerprint:
+            return Response(self._state('unknown', False, 'معرف الجهاز مطلوب'),
+                            status=status.HTTP_400_BAD_REQUEST)
+        if len(fingerprint) > 255:
+            return Response(self._state('unknown', False, 'معرف الجهاز طويل جداً'),
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Per-device throttle: a single client making thousands of requests
+        # against one fingerprint must not be able to spam Telegram. Done here
+        # rather than via DRF's scope throttle because the key is the
+        # fingerprint, not the IP, and the rate lives under the same name so
+        # the throttle is visible in the operator's settings.
+        from django.core.cache import cache
+        rate_key = f'device_check:{fingerprint}'
+        recent = cache.get(rate_key, 0) + 1
+        cache.set(rate_key, recent, timeout=60)
+        if recent > 10:
+            return Response(self._state('pending', False, 'كثرة المحاولات، يرجى الانتظار قليلاً'),
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        from apps.security.models import DeviceRegistry, BlockedDevice
+        from apps.accounts.models import User
+        from apps.core.net import get_client_ip
+
+        if BlockedDevice.objects.enforceable().filter(device_fingerprint=fingerprint).exists():
+            return Response(self._state('blocked', False, 'هذا الجهاز محظور'),
+                            status=status.HTTP_403_FORBIDDEN)
+
+        user = User.objects.filter(email=email).first() if email else None
+
+        device = DeviceRegistry.objects.filter(device_fingerprint=fingerprint).first()
+
+        if device is not None:
+            if device.is_trusted:
+                return Response(self._state('authorized', True, 'الجهاز مصرح'))
+            return Response(self._state('pending', False,
+                                        'الجهاز غير مصرح، بانتظار موافقة الإدارة'),
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Unknown fingerprint. We never register a device row without a
+        # matching user account: a DeviceRegistry.user FK to nothing would
+        # either crash the insert or orphan the row, and an attacker calling
+        # this endpoint with random fingerprints would otherwise pollute the
+        # admin's Telegram. Returning `unknown` lets the client ask the user
+        # for an email and retry.
+        if user is None:
+            return Response(self._state('unknown', False,
+                                        'الجهاز غير معروف. يرجى إدخال بريدك الإلكتروني لطلب التفعيل.'),
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # get_or_create, not create: two parallel requests from the same new
+        # device would otherwise collide on the (user, device_fingerprint)
+        # unique constraint and 500 the user.
+        device, _ = DeviceRegistry.objects.get_or_create(
+            user=user,
+            device_fingerprint=fingerprint,
+            defaults={
+                'mac_address': mac_address,
+                'os_info': request.META.get('HTTP_X_OS_INFO', ''),
+                'browser_info': request.META.get('HTTP_X_BROWSER_INFO', ''),
+                'last_ip_address': get_client_ip(request),
+                'is_trusted': False,
+            },
+        )
+
+        log_security_event(
+            user=user,
+            event_type='DEVICE_REGISTRATION_REQUESTED',
+            request=request,
+            details={'device_id': str(device.id), 'device_fingerprint': fingerprint},
+            severity='INFO',
+        )
+
+        # Telegram is best-effort. A failure here must not 500 the response:
+        # the device is already recorded as pending and the admin can still
+        # approve from the dashboard.
+        try:
+            from apps.security.telegram_service import send_device_approval_request
+            send_device_approval_request(device)
+            telegram_sent = True
+        except Exception as e:
+            logger.error(f"Failed to send device approval Telegram: {e}")
+            telegram_sent = False
+
+        detail = ('تم إرسال طلب تفعيل للإدارة عبر تيليجرام'
+                  if telegram_sent else
+                  'الجهاز غير مصرح، يرجى التواصل مع الإدارة للتفعيل')
+        return Response(self._state('pending', False, detail),
+                        status=status.HTTP_403_FORBIDDEN)
+
+
+class TelegramWebhookView(APIView):
+    """
+    Receives approve/reject callbacks from the admin Telegram bot.
+
+    This endpoint grants login access, so it must verify that the request
+    actually came from Telegram. Two complementary controls:
+
+    * `X-Telegram-Bot-Api-Secret-Token` header is matched against
+      `TELEGRAM_WEBHOOK_SECRET` (Telegram sends it when the webhook was
+      registered with `setWebhook(secret_token=...)`).
+    * the `chat_id` in the callback is compared to `TELEGRAM_ADMIN_CHAT_ID`,
+      so even an attacker who guesses a valid callback id cannot replay an
+      approval from a chat they control.
+
+    If `TELEGRAM_WEBHOOK_SECRET` is unset the endpoint refuses everything —
+    an open callback endpoint is strictly worse than a broken one.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        expected = getattr(settings, 'TELEGRAM_WEBHOOK_SECRET', '')
+        if not expected:
+            logger.error('Telegram webhook called but TELEGRAM_WEBHOOK_SECRET is not configured')
+            return Response({'ok': False}, status=status.HTTP_403_FORBIDDEN)
+        provided = request.META.get('HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN', '')
+        if not provided or provided != expected:
+            logger.warning('Telegram webhook rejected: missing or wrong secret token')
+            return Response({'ok': False}, status=status.HTTP_403_FORBIDDEN)
+
+        from apps.security.telegram_service import answer_callback_query, edit_message_text
+        from apps.security.models import DeviceRegistry, BlockedDevice
+
+        update = request.data
+        callback_query = update.get('callback_query')
+        if not callback_query:
+            # Telegram also pings the webhook with the same endpoint on
+            # setWebhook(); respond OK so its health check is happy.
+            return Response({'ok': True})
+
+        admin_chat_id = str(getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', '') or '')
+        message = callback_query.get('message') or {}
+        chat_id = str((message.get('chat') or {}).get('id', ''))
+        if admin_chat_id and chat_id and chat_id != admin_chat_id:
+            logger.warning(f'Telegram webhook callback from non-admin chat {chat_id}')
+            return Response({'ok': False}, status=status.HTTP_403_FORBIDDEN)
+
+        callback_id = callback_query.get('id', '')
+        data = callback_query.get('data', '')
+        message_id = message.get('message_id')
+        original_text = message.get('text', '')
+
+        try:
+            if data.startswith('approve_'):
+                device_id = data[len('approve_'):]
+                device = DeviceRegistry.objects.filter(id=device_id).first()
+                if device is None:
+                    answer_callback_query(callback_id, 'الجهاز غير موجود', show_alert=True)
+                else:
+                    device.is_trusted = True
+                    device.save(update_fields=['is_trusted'])
+                    log_security_event(
+                        user=device.user,
+                        event_type='DEVICE_APPROVED_VIA_TELEGRAM',
+                        request=request,
+                        details={'device_id': str(device.id),
+                                 'device_fingerprint': device.device_fingerprint},
+                        severity='INFO',
+                    )
+                    answer_callback_query(callback_id, 'تم تفعيل الجهاز بنجاح')
+                    if message_id is not None:
+                        edit_message_text(chat_id, message_id,
+                                          f"{original_text}\n\n✅ <b>تم تفعيل الجهاز</b>")
+
+            elif data.startswith('reject_'):
+                device_id = data[len('reject_'):]
+                device = DeviceRegistry.objects.filter(id=device_id).first()
+                if device is None:
+                    answer_callback_query(callback_id, 'الجهاز غير موجود', show_alert=True)
+                else:
+                    BlockedDevice.objects.update_or_create(
+                        device_fingerprint=device.device_fingerprint,
+                        defaults={
+                            'reason': 'مرفوض من تيليجرام',
+                            'mac_address': device.mac_address,
+                            'is_active': True,
+                        },
+                    )
+                    log_security_event(
+                        user=device.user,
+                        event_type='DEVICE_REJECTED_VIA_TELEGRAM',
+                        request=request,
+                        details={'device_id': str(device.id),
+                                 'device_fingerprint': device.device_fingerprint},
+                        severity='WARNING',
+                    )
+                    answer_callback_query(callback_id, 'تم حظر الجهاز')
+                    if message_id is not None:
+                        edit_message_text(chat_id, message_id,
+                                          f"{original_text}\n\n❌ <b>تم حظر الجهاز</b>")
+            else:
+                answer_callback_query(callback_id, 'إجراء غير معروف', show_alert=True)
+        except Exception as e:
+            logger.error(f"Telegram webhook handler error: {e}")
+            try:
+                answer_callback_query(callback_id, 'خطأ في المعالجة', show_alert=True)
+            except Exception:
+                pass
+            return Response({'ok': False})
+
+        return Response({'ok': True})
+

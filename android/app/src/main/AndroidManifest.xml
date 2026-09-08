@@ -70,6 +70,19 @@
             android:name=".reminders.ReminderReceiver"
             android:exported="false" />
 
+        <!--
+            FCM push. Without google-services.json the Firebase SDK never
+            initializes and this service is simply never started — so the
+            registration is safe on every build configuration.
+        -->
+        <service
+            android:name=".push.SecureMedPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

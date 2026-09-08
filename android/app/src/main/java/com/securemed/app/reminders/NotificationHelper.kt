@@ -63,6 +63,65 @@ object NotificationHelper {
             NotificationManagerCompat.from(context).areNotificationsEnabled()
         }
 
+    const val CHANNEL_PUSH = "push_alerts"
+
+    fun showNotification(context: Context, title: String, body: String) {
+        ensureChannels(context)
+        ensurePushChannel(context)
+
+        val openApp = PendingIntent.getActivity(
+            context,
+            (title.hashCode() + body.hashCode()),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_PUSH)
+            .setSmallIcon(R.drawable.ic_medication)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(openApp)
+            // Push carries clinical summaries; the lock screen gets the bare
+            // existence signal, exactly like medication reminders.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(context, CHANNEL_PUSH)
+                    .setSmallIcon(R.drawable.ic_medication)
+                    .setContentTitle("إشعار من SecureMed")
+                    .setContentText("افتح التطبيق لعرض التفاصيل")
+                    .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                    .setAutoCancel(true)
+                    .setContentIntent(openApp)
+                    .build()
+            )
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(title.hashCode(), notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
+    private fun ensurePushChannel(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channel = NotificationChannel(
+            CHANNEL_PUSH,
+            "الإشعارات الفورية",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "تنبيهات النظام الطبية والأمنية الفورية"
+            enableVibration(true)
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+        }
+        manager.createNotificationChannel(channel)
+    }
+
     fun showMedicationReminder(
         context: Context,
         medicationName: String,

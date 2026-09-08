@@ -2,6 +2,7 @@ package com.securemed.app.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class User(
@@ -190,6 +191,53 @@ data class Channel(
     @SerialName("created_at") val createdAt: String
 )
 
+/** One message in a channel's secure discussion thread. */
+@Serializable
+data class ChannelMessage(
+    val id: String,
+    val channel: String,
+    val sender: String,
+    @SerialName("sender_name") val senderName: String = "",
+    @SerialName("sender_role_display") val senderRoleDisplay: String = "",
+    val body: String,
+    @SerialName("is_edited") val isEdited: Boolean = false,
+    @SerialName("is_system") val isSystem: Boolean = false,
+    @SerialName("created_at") val createdAt: String
+)
+
+/** Server twin of a device-local medication plan (pharmacy sync endpoint). */
+@Serializable
+data class MedicationPlanDto(
+    val id: String,
+    @SerialName("source_id") val sourceId: String? = null,
+    @SerialName("patient_id") val patientId: String,
+    @SerialName("patient_name") val patientName: String,
+    val name: String,
+    val dosage: String,
+    val times: List<String> = emptyList(),
+    @SerialName("start_date") val startDate: String,
+    @SerialName("end_date") val endDate: String? = null,
+    val instructions: String = "",
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("prescribed_by") val prescribedBy: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
+)
+
+/** Push body for pharmacy/medication-plans/ (upsert by source_id). */
+@Serializable
+data class MedicationPlanUpsert(
+    @SerialName("patient_id") val patientId: String,
+    val name: String,
+    val dosage: String,
+    val times: List<String>,
+    @SerialName("start_date") val startDate: String,
+    @SerialName("end_date") val endDate: String? = null,
+    val instructions: String = "",
+    @SerialName("source_id") val sourceId: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true
+)
+
 @Serializable
 data class Patient(
     val id: String,
@@ -218,7 +266,12 @@ data class MedicalRecord(
     val content: String,
     @SerialName("record_type") val recordType: String,
     @SerialName("record_type_display") val recordTypeDisplay: String,
-    @SerialName("created_by_name") val createdByName: String,
+    /**
+     * `created_by` on the server is nullable (a deleted or system actor), so
+     * `created_by_name` can arrive as null — as a required field that dropped
+     * every such record, then the whole list (م10).
+     */
+    @SerialName("created_by_name") val createdByName: String? = null,
     @SerialName("is_critical") val isCritical: Boolean = false,
     @SerialName("created_at") val createdAt: String
 )
@@ -233,7 +286,12 @@ data class Notification(
     val message: String,
     @SerialName("is_read") val isRead: Boolean = false,
     @SerialName("created_at") val createdAt: String,
-    val data: Map<String, String>? = null
+    /**
+     * The server column is a free JSONField — numbers or nested objects in it
+     * made the strict Map<String, String> throw and the whole list with it
+     * (م10). Parsed as a generic object instead.
+     */
+    val data: JsonObject? = null
 )
 
 @Serializable
@@ -356,5 +414,63 @@ data class MedicalRecordCreateRequest(
     val content: String,
     @SerialName("record_type") val recordType: String,
     @SerialName("is_critical") val isCritical: Boolean = false,
-    @SerialName("channel_id") val channelId: String? = null
+    /**
+     * The server field is `channel` (`MedicalRecordSerializer.Meta.fields`);
+     * this used to be sent as `channel_id`, which the serializer rejected with
+     * a 400 about the missing `channel` — every queued offline record failed
+     * forever.
+     */
+    val channel: String
+)
+
+/**
+ * `GET patients/{id}/profile/` — the patient-scoped aggregate.
+ *
+ * `records` holds only records of channels this patient actually belongs to
+ * and the caller may view (`PatientViewSet.profile` → `get_viewable_channels`),
+ * which is what makes the patient page attribute records correctly (ع6).
+ */
+@Serializable
+data class PatientProfileResponse(
+    val patient: Patient,
+    val records: List<MedicalRecord> = emptyList(),
+    val channels: List<Channel> = emptyList(),
+    val files: List<PatientFileInfo> = emptyList(),
+    val stats: PatientProfileStats? = null
+)
+
+@Serializable
+data class PatientFileInfo(
+    val id: String,
+    val title: String = "",
+    @SerialName("file_name") val fileName: String = "",
+    @SerialName("file_type") val fileType: String = "",
+    @SerialName("file_type_display") val fileTypeDisplay: String = "",
+    @SerialName("file_size") val fileSize: Long = 0,
+    @SerialName("is_critical") val isCritical: Boolean = false,
+    @SerialName("uploaded_at") val uploadedAt: String = ""
+)
+
+@Serializable
+data class PatientProfileStats(
+    @SerialName("total_records") val totalRecords: Int = 0,
+    @SerialName("total_channels") val totalChannels: Int = 0,
+    @SerialName("total_files") val totalFiles: Int = 0
+)
+
+/** Body of `POST appointments/` (`AppointmentCreateSerializer`). */
+@Serializable
+data class AppointmentCreateRequest(
+    val patient: String,
+    val doctor: String,
+    @SerialName("appointment_type") val appointmentType: String,
+    val priority: String = "MEDIUM",
+    val status: String = "SCHEDULED",
+    /** ISO-8601 local date-time, e.g. 2026-09-10T14:30:00 — must be in the future. */
+    @SerialName("scheduled_at") val scheduledAt: String,
+    @SerialName("duration_minutes") val durationMinutes: Int = 30,
+    val title: String = "",
+    val notes: String? = null,
+    val location: String? = null,
+    @SerialName("is_virtual") val isVirtual: Boolean = false
 )

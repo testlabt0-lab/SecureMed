@@ -174,6 +174,14 @@ echo -e "  ${GREEN}✓${NC} Migrations applied"
 
 # Create superuser
 echo -e "\n${YELLOW}Creating superuser...${NC}"
+# A fixed default password in setup.sh ends up in the README, the demo
+# screenshots, and eventually someone's leaked .env. Generate a random one
+# unless the operator explicitly opted in via INITIAL_ADMIN_PASSWORD.
+GENERATED_PASSWORD=""
+if [ -z "${INITIAL_ADMIN_PASSWORD:-}" ]; then
+    GENERATED_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+    export INITIAL_ADMIN_PASSWORD="$GENERATED_PASSWORD"
+fi
 python -c "
 import os
 import django
@@ -216,8 +224,12 @@ echo -e "  1. Backend:  cd backend && source venv/bin/activate && python manage.
 echo -e "  2. Frontend: cd frontend && npm run dev"
 echo -e "  3. Visit:    http://localhost:3000"
 echo -e ""
-echo -e "${YELLOW}Default admin login:${NC}"
-echo -e "  Email:    admin@securemed.app"
-echo -e "  Password: SecureMed@2026!"
+echo -e "${YELLOW}Admin login:${NC}"
+echo -e "  Email:    ${INITIAL_ADMIN_EMAIL:-admin@securemed.app}"
+if [ -n "${GENERATED_PASSWORD}" ]; then
+    echo -e "  Password: ${GENERATED_PASSWORD}  ${RED}(generated — save it now, shown once)${NC}"
+else
+    echo -e "  Password: (the INITIAL_ADMIN_PASSWORD you set in the environment)"
+fi
 echo -e ""
 echo -e "${BLUE}SecureMed${NC} - Stay secure! 🔒"

@@ -1,4 +1,127 @@
-# 🚀 SecureMed Development Log - Phase 2
+# 🚀 SecureMed Development Log
+
+---
+
+# Phase 4 — Feature Expansion (2026-09-08)
+
+> التحقق: **314 اختباراً ناجحاً** (296 سابقة + 18 جديدة في `tests/test_new_features.py`).
+> ترحيلات جديدة: `patients.0002_patient_user`، `pharmacy.0002_medicationplan`،
+> `notifications.0002_pushtoken`، `audit.0005_alter_auditlog_event_type`.
+> بناء الأندرويد: `compileDebugKotlin` ناجح.
+
+## ملاحظة تحقق مهمة
+
+بند التدقيق القديم (SECUREMED_AUDIT_2026-09-04) عن الكاش وخدمة الملفات
+والبحث العام وRefreshToken وسلسلة HMAC كانت **مُصلَحة بالفعل في الشجرة
+الحالية** قبل هذه الجلسة — تحقّقنا من كل بند بالقراءة المباشرة ولم تُعاد
+تنفيذه. الجديد في هذه الجلسة:
+
+## 1. أمن وتشغيل
+
+- ✅ **كشف السلوك الشاذ لسرعة الوصول للملفات** (`apps/core/anomaly.py`):
+  عدّادات نافذة منزلقة (5د/1س) على الكاش المشترك، كل قراءة ملف طبي عبر
+  `ProtectedMediaView` أو `MedicalFileViewSet` تُحتسب؛ تجاوز العتبة يولّد
+  `SUSPICIOUS_ACTIVITY` + تنبيه Telegram + إشعار للمدراء (بتبريد 10 دقائق).
+  عتبات قابلة للضبط عبر `PHI_ANOMALY_THRESHOLD_SCALE`.
+- ✅ **Telegram**: `send_critical_alert()` عامة؛ نتائج المختبر الحرجة تُرسل
+  فوراً لقناة الإدارة، وكل إشعار CRITICAL يُمْرَر تلقائياً إليها.
+- ✅ **حدث تدقيق** جديد: `AI_INTERACTION_CHECKED` / `AI_INTERACTION_FAILED`.
+
+## 2. الذكاء الاصطناعي
+
+- ✅ **فحص التداخلات الدوائية** (`POST /api/v1/ai/interactions-check/`):
+  محركان — قواعد `DrugInteraction` (مطابقة بالاسم، دائماً تعمل بلا مفتاح) +
+  مراجعة Gemini إضافية مع الحساسية والأدوية الحالية. التحقق من ملكية المريض
+  عبر `accessible_patients` — نفس قاعدة كل مسارات PHI.
+
+## 3. دردشة القنوات (Phase 4 من خارطة الأندرويد)
+
+- ✅ **خلفية**: `ChannelMessage` كانت موجودة، أُضيف `ChannelChatConsumer`
+  (`ws/channel_chat/<id>/`) بنفس قاعدة `can_view`، ويحفظ عبر مسار REST نفسه.
+- ✅ **أندرويد**: `ChannelChatScreen` مع جلب تدريجي `?after=` كل 5 ثوان،
+  محجوزة في `Routes.ChannelChat` ومربوطة من شاشة تفاصيل القناة.
+
+## 4. الإشعارات الفورية (FCM)
+
+- ✅ **خلفية**: موديل `PushToken` + `POST/DELETE /api/v1/notifications/push/register/`
+  + وحدة `apps/notifications/push.py` (FCM HTTP v1 عبر OAuth2 JWT — بلا
+  تبعيات جديدة). التسليم للأولوية HIGH/CRITICAL فقط مع احترام ساعات الهدوء،
+  وأفضل-جهد دائماً. إعداد: `FCM_PROJECT_ID` + `FCM_SERVICE_ACCOUNT_JSON`.
+- ✅ **أندرويد**: `SecureMedPushService` + قناة إشعارات مخصصة؛ الاعتمادية
+  `firebase-messaging` مضافة لكن التفعيل **اختياري** عبر
+  `-PSECUREMED_FCM=true` مع `google-services.json` — غيابها لا يعطّل شيئاً.
+
+## 5. بوابة المريض
+
+- ✅ **إصلاح جذري**: `Patient.user` (OneToOne) — كان `appointments/views`
+  يرشّح على `patient__user` وهو حقل غير موجود (FieldError لكل حساب PATIENT).
+- ✅ **نقاط نهاية ذاتية** (`apps/patients/portal.py`):
+  `GET /api/v1/patients/portal/` و`/portal/{appointments|invoices|lab-results|prescriptions|records}/`
+  — قراءة فقط، مرتبطة بسجل المريض المرتبط بالحساب حصراً، وقراءة نتائج
+  المختبر تُدقَّق.
+
+## 6. تكامل FHIR
+
+- ✅ **Observation** (`GET /api/v1/interoperability/fhir/Observation/`):
+  LOINC من كتالوج المختبر، `valueQuantity/valueString`، نطاق مرجعي،
+  تفسير HH/LL/A. **مقيّد دائماً** بعين المرضى المتاحين (الثغرة اكتُشفت
+  أثناء كتابة الاختبار وأُغلقت)، ونتائج غير COMPLETED/VALIDATED لا تُصدَّر.
+- ✅ `LabTest.loinc_coding()` و`LabResult.to_fhir()`.
+
+## 7. مزامنة خطط الدواء
+
+- ✅ **خلفية**: موديل `MedicationPlan` (الاسم مشفّر Fernet) +
+  `GET/POST /api/v1/pharmacy/medication-plans/` — upsert عبر `source_id`
+  (معرّف الخطة المحلية على الجهاز)، مقيّد بعين المرضى.
+- ✅ **أندرويد**: `syncMedicationPlans()` (سحب ثم دفع) تلقائياً عند فتح
+  شاشة الأدوية + يدوياً عبر التحديث؛ النسخة المحلية تبقى مصدر المنبهات.
+
+## 8. المراقبة
+
+- ✅ **Grafana + Prometheus**: provisioning جاهز في `deploy/grafana/` و
+  `deploy/prometheus/`، مفعّل عبر `docker compose --profile observe up`
+  (Grafana على 3001، لوحة "SecureMed — Operational Health").
+
+## ملفات جديدة/معدّلة رئيسية
+
+| الملف | التغيير |
+|---|---|
+| `apps/core/anomaly.py` | جديد — كشف السلوك الشاذ |
+| `apps/notifications/push.py` | جديد — FCM HTTP v1 |
+| `apps/notifications/models.py` | +PushToken |
+| `apps/notifications/views.py`, `urls.py` | +register endpoint |
+| `apps/notifications/utils.py` | +push/Telegram dispatch |
+| `apps/channels/consumers.py`, `routing.py` | جديد — دردشة WebSocket |
+| `apps/patients/portal.py` | جديد — بوابة المريض |
+| `apps/patients/models.py` | +Patient.user |
+| `apps/pharmacy/models.py` | +MedicationPlan |
+| `apps/pharmacy/views.py`, `urls.py` | +medication-plans |
+| `apps/lab/models.py` | +to_fhir, loinc_coding |
+| `apps/interoperability/views.py`, `urls.py` | +FHIRObservationViewSet |
+| `apps/ai/views.py`, `urls.py` | +interactions-check |
+| `apps/security/telegram_service.py` | +send_critical_alert |
+| `apps/audit/models.py` | +AI_INTERACTION_* events |
+| `config/settings.py` | +FCM_* settings |
+| `config/asgi.py` | +channels routing |
+| `docker-compose.yml` | +prometheus/grafana |
+| `android/.../push/SecureMedPushService.kt` | جديد |
+| `android/.../screens/ChannelChatScreen.kt` | جديد |
+| `android/.../Screens/medications sync` | Repository + ViewModel |
+| `backend/tests/test_new_features.py` | جديد — 18 اختباراً |
+
+## ما يحتاج إعداداً قبل التشغيل
+
+1. **FCM**: `FCM_PROJECT_ID` + `FCM_SERVICE_ACCOUNT_JSON` في الخلفية،
+   و`google-services.json` + `-PSECUREMED_FCM=true` في الأندرويد.
+2. **Telegram**: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ADMIN_CHAT_ID` (موجود
+   أصلاً في الإعداد).
+3. **عتبة السلوك الشاذ**: اضبط `PHI_ANOMALY_THRESHOLD_SCALE` في المنشآت
+   الغنية بالأشعة (قيمة أكبر = عتبات أعلى).
+4. `python manage.py migrate` بعد السحب.
+
+---
+
+# Phase 2 (سابق)
 
 ## Summary of Enhancements
 

@@ -57,6 +57,7 @@ class MedicationsViewModel @Inject constructor(
         val dailySeries: List<Float?> = emptyList(),
         val message: String? = null,
         val error: String? = null,
+        val syncMessage: String? = null,
         val canPrescribe: Boolean = false
     )
 
@@ -111,6 +112,37 @@ class MedicationsViewModel @Inject constructor(
             try {
                 scheduler.refreshFromCache()
             } catch (_: Exception) {
+            }
+
+            // Cloud sync is best-effort: the device-local store remains the
+            // source of truth for alarms, and a failure here must not fail
+            // the screen load.
+            try {
+                val synced = repository.syncMedicationPlans()
+                if (synced.isSuccess) {
+                    _state.value = _state.value.copy(
+                        syncMessage = synced.getOrNull()
+                    )
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Manual cloud sync (refresh button long-press / sync chip). */
+    fun syncNow() {
+        viewModelScope.launch {
+            val result = repository.syncMedicationPlans()
+            if (result.isSuccess) {
+                _state.value = _state.value.copy(
+                    message = result.getOrNull() ?: "تمت المزامنة مع الخادم",
+                    syncMessage = null
+                )
+                loadAll()
+            } else {
+                _state.value = _state.value.copy(
+                    error = "تعذر المزامنة مع الخادم — تحقق من الاتصال"
+                )
             }
         }
     }
@@ -176,6 +208,10 @@ class MedicationsViewModel @Inject constructor(
     fun clearMessage() {
         _state.value = _state.value.copy(message = null, error = null)
     }
+
+    fun clearSyncMessage() {
+        _state.value = _state.value.copy(syncMessage = null)
+    }
 }
 
 // ============================================================
@@ -238,6 +274,16 @@ fun MedicationsScreen(
                         container = MaterialTheme.colorScheme.errorContainer,
                         content = MaterialTheme.colorScheme.onErrorContainer,
                         onDismiss = { viewModel.clearMessage() }
+                    )
+                }
+            }
+            state.syncMessage?.let { syncMsg ->
+                item {
+                    MessageCard(
+                        text = "☁️ $syncMsg",
+                        container = MaterialTheme.colorScheme.secondaryContainer,
+                        content = MaterialTheme.colorScheme.onSecondaryContainer,
+                        onDismiss = { viewModel.clearSyncMessage() }
                     )
                 }
             }

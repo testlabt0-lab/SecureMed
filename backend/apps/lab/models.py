@@ -111,6 +111,15 @@ class LabOrder (models .Model ):
 class LabResult (models .Model ):
     """Result of a lab order — numeric or text value."""
 
+    _STATUS_MAP = {
+        'ORDERED': 'registered',
+        'SAMPLE_COLLECTED': 'registered',
+        'IN_PROGRESS': 'registered',
+        'COMPLETED': 'final',
+        'VALIDATED': 'final',
+        'CANCELLED': 'cancelled',
+    }
+
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
     order =models .OneToOneField (LabOrder ,on_delete =models .CASCADE ,related_name ='result',verbose_name =_ ('الطلب'))
     numeric_value =models .DecimalField (_ ('القيمة الرقمية'),max_digits =10 ,decimal_places =3 ,null =True ,blank =True )
@@ -176,7 +185,7 @@ class LabResult (models .Model ):
         'effectiveDateTime':(
         self .created_at .isoformat ()if self .created_at else None 
         ),
-        'interpretation':[], 
+        'interpretation':[],
         }
         if self .numeric_value is not None :
             observation ['valueQuantity']={
@@ -184,33 +193,33 @@ class LabResult (models .Model ):
             'unit':test .unit or '',
             }
         elif self .text_value :
-            observation ['valueString']=self .text_value 
+            observation ['valueString']=self .text_value
 
         if test .normal_range_min is not None or test .normal_range_max is not None :
             reference ={
             'text':(
             f'{test .normal_range_min } - {test .normal_range_max }'
-            if test .normal_range_min is not None 
+            if test .normal_range_min is not None and test .normal_range_max is not None
             else f'≤ {test .normal_range_max }'
+            if test .normal_range_max is not None
+            else f'≥ {test .normal_range_min }'
             )
             }
-            if test .unit :
-                reference ['low'if self .numeric_value is not None and test .normal_range_min is not None else 'high']={
-                'value':float (test .normal_range_min if test .normal_range_min is not None else test .normal_range_max ),
-                'unit':test .unit ,
-                }
             observation ['referenceRange']=[reference ]
 
         flags =[]
+        above_high =(self .numeric_value is not None 
+        and test .normal_range_max is not None 
+        and self .numeric_value >float (test .normal_range_max ))
         if self .is_critical :
             flags .append ({
             'coding':[{
             'system':'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation',
-            'code':'HH'if (self .numeric_value is not None and test .normal_range_max is not None and self .numeric_value >float (test .normal_range_max ))else 'LL',
-            'display':'Above high critical'if 'HH'==flags_marker .get ('code')else 'Below low critical',
+            'code':'HH'if above_high else 'LL',
+            'display':'Above high critical'if above_high else 'Below low critical',
             }],
             })
-        if self .is_abnormal and not self .is_critical :
+        elif self .is_abnormal :
             flags .append ({
             'coding':[{
             'system':'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation',

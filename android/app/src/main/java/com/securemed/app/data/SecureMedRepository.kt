@@ -16,6 +16,7 @@ import com.securemed.app.security.BiometricHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.work.WorkManager
@@ -24,6 +25,9 @@ import androidx.work.NetworkType
 import androidx.work.Constraints
 import com.securemed.app.data.local.room.PendingSyncActionEntity
 import com.securemed.app.data.sync.SyncWorker
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
 
 /**
@@ -117,6 +121,7 @@ class SecureMedRepository @Inject constructor(
         val response = api.login(LoginRequest(email, password))
         if (response.isAuthenticated) {
             storeSession(response)
+            registerCurrentFcmToken() // best-effort; no-op without Firebase config
         }
         Result.success(response)
     } catch (e: Exception) {
@@ -148,6 +153,7 @@ class SecureMedRepository @Inject constructor(
         // branch left to take, so a 200 without tokens is not a session.
         if (!response.isAuthenticated) error("تعذر إكمال التحقق بخطوتين")
         storeSession(response)
+        registerCurrentFcmToken() // best-effort; no-op without Firebase config
         Result.success(response)
     } catch (e: Exception) {
         // messageFor reads the error body once, so it is called once and the
@@ -197,6 +203,7 @@ class SecureMedRepository @Inject constructor(
         // not a session, so it must not be reported as a successful login.
         if (!response.isAuthenticated) error("تعذر إكمال الدخول بالبصمة")
         storeSession(response)
+        registerCurrentFcmToken() // best-effort; no-op without Firebase config
         Result.success(response)
     } catch (e: Exception) {
         Result.failure(e)
@@ -420,7 +427,7 @@ class SecureMedRepository @Inject constructor(
         )
         dao.insertPendingAction(action)
         scheduleSyncWorker()
-        
+
         // Return a simulated success.
         Result.success(MedicalRecord(
             id = "temp_${action.id}",
@@ -432,6 +439,48 @@ class SecureMedRepository @Inject constructor(
             isCritical = request.isCritical,
             createdAt = "Pending Sync"
         ))
+    }
+
+    /**
+     * The patient-scoped profile aggregate: this is the call that makes a
+     * patient page show *that patient's* records (ع6) — the server filters by
+     * the patient's channels intersected with the caller's access, which the
+     * global records list cannot express.
+     */
+    suspend fun getPatientProfile(patientId: String): Result<PatientProfileResponse> =
+        cached("patient_profile_$patientId", PatientProfileResponse.serializer()) {
+            api.getPatientProfile(patientId)
+        }
+
+    /** Upload a medical file into a channel (multipart, server caps at 20MB). */
+    suspend fun uploadMedicalFile(
+        fileBytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+        channelId: String,
+        patientId: String?,
+        title: String,
+        description: String?,
+        fileType: String
+    ): Result<MedicalFileDto> = try {
+        val mediaType = mimeType.toMediaTypeOrNull()
+            ?: "application/octet-stream".toMediaTypeOrNull()!!
+        val filePart = MultipartBody.Part.createFormData(
+            "file", fileName, fileBytes.toRequestBody(mediaType)
+        )
+        fun text(value: String) = value.toRequestBody("text/plain".toMediaTypeOrNull())
+        Result.success(
+            api.uploadMedicalFile(
+                file = filePart,
+                channel = text(channelId),
+                patient = patientId?.let(::text),
+                title = text(title),
+                description = description?.let(::text),
+                fileType = text(fileType)
+            )
+        )
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     private fun scheduleSyncWorker() {
@@ -459,7 +508,7 @@ class SecureMedRepository @Inject constructor(
                     content = it.content,
                     recordType = it.recordType,
                     recordTypeDisplay = it.recordTypeDisplay,
-                    createdByName = it.createdByName,
+                    createdByName = it.createdByName ?: "",
                     isCritical = it.isCritical,
                     createdAt = it.createdAt
                 )
@@ -476,7 +525,7 @@ class SecureMedRepository @Inject constructor(
                         content = it.content,
                         recordType = it.recordType,
                         recordTypeDisplay = it.recordTypeDisplay,
-                        createdByName = it.createdByName,
+                        createdByName = it.createdByName.ifBlank { null },
                         isCritical = it.isCritical,
                         createdAt = it.createdAt
                     )
@@ -576,6 +625,158 @@ class SecureMedRepository @Inject constructor(
         Result.failure(e)
     }
 
+    // ===== MEDICATION PLAN CLOUD SYNC =====
+
+    /**
+     * Push every device-local plan to the server (upsert by source_id).
+     *
+     * The plan id doubles as the server's source_id, so re-pushing the same
+     * plan updates rather than duplicates. Best-effort: the device-local copy
+     * is the source of truth for alarms; the cloud row is the durable twin
+     * that survives a reinstall. Returns the number of plans synced.
+     */
+    suspend fun pushMedicationPlans(): Result<Int> = try {
+        var pushed = 0
+        MedicationStore.loadPlans().forEach { plan ->
+            api.syncMedicationPlan(
+                MedicationPlanUpsert(
+                    patientId = plan.patientId,
+                    name = plan.name,
+                    dosage = plan.dosage,
+                    times = plan.times,
+                    startDate = plan.startDate,
+                    endDate = plan.endDate,
+                    instructions = plan.instructions,
+                    sourceId = plan.id,
+                    isActive = plan.isActive
+                )
+            )
+            pushed++
+        }
+        Result.success(pushed)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Pull the server's plans for the accessible patients and merge them into
+     * the local store: new server plans are added locally, existing ones are
+     * updated (the server copy wins — it is the care team's regimen), and
+     * local-only plans are kept for the next push. Returns the merged count.
+     */
+    suspend fun pullMedicationPlans(): Result<Int> = try {
+        val remote = api.getMedicationPlans()
+        val local = MedicationStore.loadPlans()
+        val localById = local.associateBy { it.id }
+        val merged = local.toMutableList()
+
+        remote.forEach { dto ->
+            val existing = localById[dto.sourceId]
+            if (existing != null) {
+                val idx = merged.indexOfFirst { it.id == existing.id }
+                merged[idx] = existing.copy(
+                    name = dto.name,
+                    dosage = dto.dosage,
+                    times = dto.times,
+                    startDate = dto.startDate,
+                    endDate = dto.endDate,
+                    instructions = dto.instructions,
+                    prescribedByName = dto.prescribedBy,
+                    isActive = dto.isActive
+                )
+            } else {
+                merged += Medication(
+                    id = dto.sourceId ?: dto.id,
+                    patientId = dto.patientId,
+                    patientName = dto.patientName,
+                    name = dto.name,
+                    dosage = dto.dosage,
+                    times = dto.times,
+                    startDate = dto.startDate,
+                    endDate = dto.endDate,
+                    instructions = dto.instructions,
+                    prescribedByName = dto.prescribedBy,
+                    isActive = dto.isActive,
+                    createdAt = dto.createdAt ?: java.time.LocalDateTime.now().toString()
+                )
+            }
+        }
+        MedicationStore.savePlans(merged)
+        Result.success(merged.size)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Two-way sync: pull first so the local list reflects the care team's
+     * updates, then push so the server holds every local plan. Returns a
+     * short human summary for the UI.
+     */
+    suspend fun syncMedicationPlans(): Result<String> = try {
+        val pulled = pullMedicationPlans().getOrDefault(-1)
+        val pushed = pushMedicationPlans().getOrDefault(-1)
+        Result.success(
+            "تمت المزامنة — خطط محلية بعد الدمج: ${pulled.coerceAtLeast(0)}، مُرسلة: ${pushed.coerceAtLeast(0)}"
+        )
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    // ===== CHANNEL MESSAGES (secure in-channel chat) =====
+
+    suspend fun getChannelMessages(
+        channelId: String,
+        after: String? = null
+    ): Result<List<ChannelMessage>> = try {
+        Result.success(api.getChannelMessages(channelId, after))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun sendChannelMessage(channelId: String, body: String): Result<ChannelMessage> = try {
+        Result.success(api.sendChannelMessage(channelId, mapOf("body" to body)))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    // ===== PUSH TOKEN REGISTRATION =====
+
+    suspend fun registerPushToken(token: String, platform: String = "ANDROID"): Result<Unit> = try {
+        api.registerPushToken(
+            mapOf(
+                "token" to token,
+                "platform" to platform,
+                "device_fingerprint" to (SecurePreferences.deviceId)
+            )
+        )
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    suspend fun unregisterPushToken(token: String): Result<Unit> = try {
+        api.unregisterPushToken(mapOf("token" to token))
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Push the current FCM token to the server after a successful login, when
+     * Firebase is actually provisioned. Missing google-services.json throws
+     * IllegalStateException inside the SDK — that is the "push not configured"
+     * case, swallowed deliberately; every other failure is reported.
+     */
+    suspend fun registerCurrentFcmToken(): Result<Unit> = try {
+        val t = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+        registerPushToken(t)
+    } catch (e: IllegalStateException) {
+        // Firebase not provisioned — push is optional, skip silently.
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     // ===== PHARMACY =====
     suspend fun getPrescriptions(): Result<List<Prescription>> =
         cachedPagedList("prescriptions", Prescription.serializer()) { api.getPrescriptions() }
@@ -594,6 +795,25 @@ class SecureMedRepository @Inject constructor(
     // ===== APPOINTMENTS =====
     suspend fun getAppointments(): Result<List<Appointment>> =
         cachedPagedList("appointments", Appointment.serializer()) { api.getAppointments() }
+
+    /** Book an appointment. The server rejects past times and doctor conflicts (400). */
+    suspend fun createAppointment(request: AppointmentCreateRequest): Result<Appointment> = try {
+        Result.success(api.createAppointment(request))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** Cancel an appointment — `POST appointments/{id}/cancel/`, optional reason. */
+    suspend fun cancelAppointment(id: String, reason: String?): Result<Appointment> = try {
+        val body = if (reason.isNullOrBlank()) emptyMap() else mapOf("reason" to reason)
+        Result.success(api.cancelAppointment(id, body))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** Active doctors bookable by the caller (basin-scoped on the server). */
+    suspend fun getDoctors(): Result<List<User>> =
+        cachedPagedList("doctors", User.serializer()) { api.getUsersByRole("DOCTOR") }
 
     // ===== TELEMEDICINE =====
     suspend fun getTelemedicineSessions(): Result<List<TelemedicineSession>> =

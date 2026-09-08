@@ -7,6 +7,15 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
+// FCM push is opt-in so the build never depends on a secret: drop a real
+// google-services.json into android/app/ (and optionally build with
+// -PSECUREMED_FCM=true) to activate. The firebase-messaging *dependency* is
+// always present — it is inert without the config — so the code compiles and
+// degrades to in-app notifications when push is not provisioned.
+if (project.findProperty("SECUREMED_FCM") == "true") {
+    apply(plugin = "com.google.gms.google-services")
+}
+
     android {
     namespace = "com.securemed.app"
     compileSdk = 35
@@ -160,6 +169,10 @@ dependencies {
     // Biometric
     implementation("androidx.biometric:biometric:1.1.0")
 
+    // FCM push — inert without google-services.json + SECUREMED_FCM=true;
+    // SecureMedPushService registers only when Firebase initializes.
+    implementation("com.google.firebase:firebase-messaging:24.0.0")
+
     // Networking
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.11.0")
@@ -173,6 +186,8 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // await() over Play-services Tasks (FirebaseMessaging.token)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")

@@ -269,6 +269,19 @@ class MainActivity : FragmentActivity() {
                                 val id = backStackEntry.arguments?.getString("id") ?: ""
                                 ChannelDetailScreen(
                                     channelId = id,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenChat = {
+                                        navController.navigate(
+                                            Route.ChannelChat.createRoute(id)
+                                        )
+                                    }
+                                )
+                            }
+                            composable(Route.ChannelChat.route) { backStackEntry ->
+                                val id = backStackEntry.arguments?.getString("id") ?: ""
+                                ChannelChatScreen(
+                                    channelId = id,
+                                    channelName = backStackEntry.arguments?.getString("name") ?: "",
                                     onBack = { navController.popBackStack() }
                                 )
                             }

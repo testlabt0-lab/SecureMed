@@ -6,6 +6,7 @@ from .views import (
     MedicationViewSet,
     DrugInteractionViewSet,
     PrescriptionViewSet,
+    MedicationPlanSyncView,
     PharmacyStatsView,
 )
 
@@ -13,6 +14,7 @@ router = DefaultRouter()
 router.register(r'medications', MedicationViewSet, basename='medication')
 router.register(r'interactions', DrugInteractionViewSet, basename='drug-interaction')
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
+router.register(r'medication-plans', MedicationPlanSyncView, basename='medication-plan')
 router.register(r'stats', PharmacyStatsView, basename='pharmacy-stats')
 
 urlpatterns = [

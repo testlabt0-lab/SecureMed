@@ -23,6 +23,8 @@ backend/venv/
 .env.production
 !.env.example
 !.env.production.example
+!.env.docker.example
+backend/.env.docker
 .z-ai-config
 **/.z-ai-config
 # NOT a blanket `*.txt`: that pattern silently swallowed requirements.txt and any

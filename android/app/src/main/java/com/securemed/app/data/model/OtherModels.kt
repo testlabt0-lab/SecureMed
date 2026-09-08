@@ -58,6 +58,28 @@ data class Appointment(
 )
 
 /**
+ * A medical file row — `POST/GET patients/files/` (`MedicalFileSerializer`).
+ *
+ * `file` itself is write-only on the server (downloads go through the
+ * authenticated `files/{id}/download/` action), so only metadata comes back.
+ * Every field except [id] defaults, matching the "one renamed column
+ * degrades one label" policy of this file.
+ */
+@Serializable
+data class MedicalFileDto(
+    val id: String,
+    val channel: String = "",
+    val patient: String = "",
+    val title: String = "",
+    @SerialName("original_filename") val originalFilename: String = "",
+    @SerialName("file_type") val fileType: String = "",
+    @SerialName("file_type_display") val fileTypeDisplay: String? = null,
+    @SerialName("file_size") val fileSize: Long = 0,
+    @SerialName("is_critical") val isCritical: Boolean = false,
+    @SerialName("created_at") val createdAt: String = ""
+)
+
+/**
  * A telemedicine consultation — `GET telemedicine/consultations/`
  * (`ConsultationSerializer`).
  *

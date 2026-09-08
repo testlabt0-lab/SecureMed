@@ -207,13 +207,21 @@ class Patient (models .Model ):
     related_name ='patient_record',verbose_name =_ ('حساب المريض'),
     )
 
-    created_at =models .DateTimeField (auto_now_add =True )
+    created_at =models .DateTimeField (auto_now_add =True ,db_index =True )
     updated_at =models .DateTimeField (auto_now =True )
 
     class Meta :
         verbose_name =_ ('مريض')
         verbose_name_plural =_ ('المرضى')
         ordering =['-created_at']
+        # Patient list pages (PatientViewSet) and the audit pages all sort by
+        # -created_at, and the basin-scoped filter is the most common WHERE.
+        # Without these indexes Postgres falls back to a seq scan + sort as
+        # soon as a basin has more than a few hundred patients.
+        indexes =[
+        models .Index (fields =['basin','-created_at']),
+        models .Index (fields =['-created_at']),
+        ]
 
     def __str__ (self ):
         return f'مريض: {self .full_name } ({self .date_of_birth })'

@@ -3,20 +3,35 @@ package com.securemed.app.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securemed.app.data.SecureMedRepository
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.model.Appointment
+import com.securemed.app.data.model.Patient
+import com.securemed.app.data.model.User
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class AppointmentsUiState(
+    val isLoading: Boolean = true,
+    val appointments: List<Appointment> = emptyList(),
+    val errorMessage: String? = null,
+    val actionInProgress: Boolean = false,
+    val message: String? = null,
+    val isError: Boolean = false
+)
+
 @HiltViewModel
 class AppointmentsViewModel @Inject constructor(
     private val repository: SecureMedRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<AppointmentsUiState>(AppointmentsUiState.Loading)
+    private val _uiState = MutableStateFlow(AppointmentsUiState())
     val uiState: StateFlow<AppointmentsUiState> = _uiState
+
+    private var loadedPatients: List<Patient> = emptyList()
+    private var loadedDoctors: List<User> = emptyList()
 
     init {
         loadAppointments()
@@ -24,25 +39,114 @@ class AppointmentsViewModel @Inject constructor(
 
     fun loadAppointments() {
         viewModelScope.launch {
-            _uiState.value = AppointmentsUiState.Loading
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             try {
                 val result = repository.getAppointments()
                 if (result.isSuccess) {
-                    _uiState.value = AppointmentsUiState.Success(result.getOrNull() ?: emptyList())
+                    _uiState.value = AppointmentsUiState(
+                        isLoading = false,
+                        appointments = result.getOrNull() ?: emptyList()
+                    )
                 } else {
-                    _uiState.value = AppointmentsUiState.Error(
-                        result.exceptionOrNull()?.message ?: "حدث خطأ أثناء جلب المواعيد"
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        errorMessage = result.exceptionOrNull()
+                            ?.let { ApiErrors.messageFor(it, "حدث خطأ أثناء جلب المواعيد") }
+                            ?: "حدث خطأ أثناء جلب المواعيد"
                     )
                 }
             } catch (e: Exception) {
-                _uiState.value = AppointmentsUiState.Error(e.localizedMessage ?: "حدث خطأ غير معروف")
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = e.localizedMessage ?: "حدث خطأ غير معروف"
+                )
             }
         }
     }
-}
 
-sealed class AppointmentsUiState {
-    object Loading : AppointmentsUiState()
-    data class Success(val appointments: List<Appointment>) : AppointmentsUiState()
-    data class Error(val message: String) : AppointmentsUiState()
+    /** Prefetch the lists the booking dialog needs (best-effort). */
+    fun prepareBookingData(onReady: (List<Patient>, List<User>) -> Unit) {
+        viewModelScope.launch {
+            if (loadedPatients.isEmpty()) {
+                loadedPatients = repository.getPatients().getOrDefault(emptyList())
+            }
+            if (loadedDoctors.isEmpty()) {
+                loadedDoctors = repository.getDoctors().getOrDefault(emptyList())
+            }
+            onReady(loadedPatients, loadedDoctors)
+        }
+    }
+
+    /**
+     * Book an appointment. The server validates the future time, doctor
+     * conflicts and caller permissions — its message comes back through
+     * [ApiErrors] (400 past time/conflict, 403 role).
+     */
+    fun createAppointment(
+        patientId: String,
+        doctorId: String,
+        appointmentType: String,
+        priority: String,
+        scheduledAt: String,
+        durationMinutes: Int,
+        title: String,
+        notes: String?
+    ) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(actionInProgress = true, message = null, isError = false)
+            val result = repository.createAppointment(
+                com.securemed.app.data.model.AppointmentCreateRequest(
+                    patient = patientId,
+                    doctor = doctorId,
+                    appointmentType = appointmentType,
+                    priority = priority,
+                    scheduledAt = scheduledAt,
+                    durationMinutes = durationMinutes,
+                    title = title,
+                    notes = notes?.takeIf { it.isNotBlank() }
+                )
+            )
+            if (result.isSuccess) {
+                loadAppointments()
+                _uiState.value = _uiState.value.copy(
+                    actionInProgress = false,
+                    message = "تم حجز الموعد بنجاح"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    actionInProgress = false,
+                    message = result.exceptionOrNull()
+                        ?.let { ApiErrors.messageFor(it, "تعذر حجز الموعد") }
+                        ?: "تعذر حجز الموعد",
+                    isError = true
+                )
+            }
+        }
+    }
+
+    fun cancelAppointment(appointmentId: String, reason: String?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(actionInProgress = true, message = null, isError = false)
+            val result = repository.cancelAppointment(appointmentId, reason)
+            if (result.isSuccess) {
+                loadAppointments()
+                _uiState.value = _uiState.value.copy(
+                    actionInProgress = false,
+                    message = "تم إلغاء الموعد"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    actionInProgress = false,
+                    message = result.exceptionOrNull()
+                        ?.let { ApiErrors.messageFor(it, "تعذر إلغاء الموعد") }
+                        ?: "تعذر إلغاء الموعد",
+                    isError = true
+                )
+            }
+        }
+    }
+
+    fun clearMessage() {
+        _uiState.value = _uiState.value.copy(message = null)
+    }
 }

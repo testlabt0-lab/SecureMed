@@ -1,6 +1,8 @@
 package com.securemed.app.data.api
 
 import com.securemed.app.data.model.*
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import kotlinx.serialization.json.JsonObject
 import retrofit2.http.*
 
@@ -68,6 +70,20 @@ interface SecureMedApi {
     @GET("channels/{id}/members/")
     suspend fun getChannelMembers(@Path("id") id: String): PagedResponse<ChannelMembership>
 
+    /** In-channel secure chat (polling; ?after=<iso> for incremental fetch). */
+    @GET("channels/{id}/messages/")
+    suspend fun getChannelMessages(
+        @Path("id") id: String,
+        @Query("after") after: String? = null,
+        @Query("limit") limit: Int = 200
+    ): List<ChannelMessage>
+
+    @POST("channels/{id}/messages/")
+    suspend fun sendChannelMessage(
+        @Path("id") id: String,
+        @Body body: Map<String, String>
+    ): ChannelMessage
+
     // ===== PATIENTS =====
     @GET("patients/")
     suspend fun getPatients(
@@ -86,6 +102,33 @@ interface SecureMedApi {
 
     @POST("patients/records/")
     suspend fun createMedicalRecord(@Body record: MedicalRecordCreateRequest): MedicalRecord
+
+    /**
+     * The patient-scoped aggregate (`PatientViewSet.profile`): the patient,
+     * the records of *their* channels only (access-checked via
+     * `get_viewable_channels`), their channels, files and counts. This is the
+     * endpoint that makes a patient page show that patient's records — the
+     * global `patients/records/` list cannot do that because `MedicalRecord`
+     * carries no patient field.
+     */
+    @GET("patients/{id}/profile/")
+    suspend fun getPatientProfile(@Path("id") id: String): PatientProfileResponse
+
+    /**
+     * Upload a medical file into a channel (`MedicalFileViewSet`, multipart).
+     * The server validates the extension (jpg/jpeg/png/gif/pdf/dicom/dcm),
+     * sniffs the signature and caps the size at 20MB.
+     */
+    @Multipart
+    @POST("patients/files/")
+    suspend fun uploadMedicalFile(
+        @Part file: MultipartBody.Part,
+        @Part("channel") channel: RequestBody,
+        @Part("patient") patient: RequestBody?,
+        @Part("title") title: RequestBody,
+        @Part("description") description: RequestBody?,
+        @Part("file_type") fileType: RequestBody
+    ): MedicalFileDto
 
     // ===== SECURITY =====
     @POST("security/check-device/")
@@ -118,6 +161,24 @@ interface SecureMedApi {
     @POST("pharmacy/prescriptions/{id}/dispense/")
     suspend fun dispensePrescription(@Path("id") id: String, @Body body: Map<String, String> = emptyMap()): Prescription
 
+    /** Server twin of device-local medication plans (pull half of the sync). */
+    @GET("pharmacy/medication-plans/")
+    suspend fun getMedicationPlans(
+        @Query("patient") patientId: String? = null,
+        @Query("active") active: String? = null
+    ): List<MedicationPlanDto>
+
+    /** Push one plan (upsert by source_id). */
+    @POST("pharmacy/medication-plans/")
+    suspend fun syncMedicationPlan(@Body request: MedicationPlanUpsert): MedicationPlanDto
+
+    // ===== PUSH =====
+    @POST("notifications/push/register/")
+    suspend fun registerPushToken(@Body body: Map<String, String>): Map<String, String>
+
+    @DELETE("notifications/push/register/")
+    suspend fun unregisterPushToken(@Body body: Map<String, String>): Map<String, String>
+
     // ===== LAB =====
     // Router basename is `orders` (apps/lab/urls.py); `lab/requests/` was a 404.
     @GET("lab/orders/")
@@ -126,6 +187,21 @@ interface SecureMedApi {
     // ===== APPOINTMENTS =====
     @GET("appointments/")
     suspend fun getAppointments(@Query("page") page: Int = 1): PagedResponse<Appointment>
+
+    /** Create an appointment (server runs it through `AppointmentCreateSerializer`). */
+    @POST("appointments/")
+    suspend fun createAppointment(@Body request: AppointmentCreateRequest): Appointment
+
+    /** Cancel an appointment: `POST appointments/{id}/cancel/` with an optional reason. */
+    @POST("appointments/{id}/cancel/")
+    suspend fun cancelAppointment(
+        @Path("id") id: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Appointment
+
+    /** Doctors bookable by the current user (basin-scoped server-side). */
+    @GET("auth/users/")
+    suspend fun getUsersByRole(@Query("role") role: String): PagedResponse<User>
 
     // ===== TELEMEDICINE =====
     // Router basename is `consultations`; `telemedicine/sessions/` was a 404.

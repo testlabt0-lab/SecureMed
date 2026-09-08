@@ -67,24 +67,27 @@ class FHIRObservationViewSet(viewsets.ViewSet):
 
     def _results(self, request):
         from apps.lab.models import LabResult
+        # Scoped ALWAYS, not only when a patient filter is present: without
+        # this, an authenticated caller could fetch any Observation by
+        # guessing ids, bypassing the channel/basin model entirely.
+        from django.db.models import Q
+        scoped = self._patient_queryset(request).values_list('id', flat=True)
         qs = LabResult.objects.select_related(
             'order__test', 'order__patient'
         ).filter(
+            Q(order__patient_id__in=scoped[:500]),
             order__status__in=('COMPLETED', 'VALIDATED'),
         ).order_by('-created_at')
 
         patient_id = request.query_params.get('patient')
         if patient_id:
-            scoped = self._patient_queryset(request)
-            # uuid() rather than a bare get_object_or_404: a malformed patient
-            # query value is a bad request, not a missing row.
             try:
                 uuid.UUID(str(patient_id))
             except (ValueError, AttributeError):
                 return None, Response(
                     {'detail': 'patient id غير صالح'}, status=400
                 )
-            if not scoped.filter(pk=patient_id).exists():
+            if not self._patient_queryset(request).filter(pk=patient_id).exists():
                 # Same 404-not-403 rule as the Patient endpoint.
                 return None, Response(status=404)
             qs = qs.filter(order__patient_id=patient_id)

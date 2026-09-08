@@ -11,8 +11,13 @@ from rest_framework .decorators import action
 from rest_framework .response import Response 
 
 from apps .audit .utils import log_security_event 
+from apps .core .mixins import accessible_patients 
+from apps .patients .models import Patient 
 
-from .models import Medication ,DrugInteraction ,Prescription ,PrescriptionItem 
+from .models import (
+Medication ,DrugInteraction ,Prescription ,PrescriptionItem ,
+MedicationPlan ,
+)
 from .serializers import (
 MedicationSerializer ,
 DrugInteractionSerializer ,
@@ -238,6 +243,140 @@ class PrescriptionViewSet (viewsets .ModelViewSet ):
         prescription .status ='CANCELLED'
         prescription .save (update_fields =['status'])
         return Response (PrescriptionSerializer (prescription ).data )
+
+
+class MedicationPlanSyncView (viewsets .ViewSet ):
+    """Server twin of the Android app's device-local medication plans.
+
+    GET  /api/v1/pharmacy/medication-plans/?patient=<id>
+         Plans the caller may see for one patient (or all their accessible
+         patients when patient is omitted) — the pull half of the sync.
+
+    POST /api/v1/pharmacy/medication-plans/
+         Upsert one plan by `source_id`: the Android client's local plan UUID.
+         Re-pushing the same plan updates instead of duplicating.
+
+    The Android client keeps plans locally so alarms fire offline; these rows
+    are the durable copy that survives a reinstall and lets the care team
+    adjust a regimen centrally. Plan names are encrypted at rest.
+    """
+    permission_classes =[permissions .IsAuthenticated ]
+
+    def _scoped_patients (self ,request ):
+        return accessible_patients (Patient .objects .all (),request .user )
+
+    def list (self ,request ):
+        patient_param =request .query_params .get ('patient')
+        qs =MedicationPlan .objects .select_related ('patient','created_by')
+        if patient_param :
+            try :
+                patient_qs =self ._scoped_patients (request ).filter (pk =patient_param )
+            except Exception :
+                return Response ({'detail':'معرف مريض غير صالح'},status =400 )
+            if not patient_qs .exists ():
+                # Same 404-not-403 contract as the FHIR endpoints.
+                return Response ({'detail':'غير موجود'},status =404 )
+            qs =qs .filter (patient_id =patient_param )
+        else :
+            patient_ids =list (
+            self ._scoped_patients (request ).values_list ('id',flat =True )[:500 ]
+            )
+            qs =qs .filter (patient_id__in =patient_ids )
+
+        active =request .query_params .get ('active')
+        if active is not None :
+            qs =qs .filter (is_active =(active .lower ()=='true'))
+
+        qs =qs .order_by ('-created_at')[:200 ]
+        return Response ([self ._serialize (p )for p in qs ])
+
+    def create (self ,request ):
+        data =request .data 
+        patient_id =data .get ('patient_id')
+        if not patient_id :
+            return Response ({'detail':'patient_id مطلوب'},status =400 )
+        try :
+            patient =self ._scoped_patients (request ).get (pk =patient_id )
+        except Patient .DoesNotExist :
+            return Response ({'detail':'غير مصرح أو غير موجود'},status =404 )
+
+        name =str (data .get ('name')or '').strip ()
+        dosage =str (data .get ('dosage')or '').strip ()
+        times =data .get ('times')or []
+        if not name or not dosage or not data .get ('start_date'):
+            return Response (
+            {'detail':'الاسم والجرعة وتاريخ البدء مطلوبة'},status =400 
+            )
+        if not isinstance (times ,list )or len (times )>12 :
+            return Response ({'detail':'قائمة الأوقات غير صالحة'},status =400 )
+        times =sorted ({str (t )[:5 ]for t in times })
+
+        # Coerce before save: a DateField holds the raw string until it is
+        # written to the database, so serialising a freshly-created object in
+        # the same request would otherwise call .isoformat() on a str.
+        import datetime as _dt 
+        try :
+            start_date =_dt .date .fromisoformat (str (data ['start_date']))
+        except (TypeError ,ValueError ):
+            return Response ({'detail':'صيغة تاريخ البدء غير صالحة (YYYY-MM-DD)'},status =400 )
+        end_date =data .get ('end_date')or None 
+        if end_date :
+            try :
+                end_date =_dt .date .fromisoformat (str (end_date ))
+            except (TypeError ,ValueError ):
+                return Response ({'detail':'صيغة تاريخ الانتهاء غير صالحة (YYYY-MM-DD)'},status =400 )
+
+        source_id =data .get ('source_id')or None 
+        plan =None 
+        is_update =False 
+        if source_id :
+            plan =MedicationPlan .objects .filter (
+            patient =patient ,source_id =source_id 
+            ).first ()
+            is_update =plan is not None 
+
+        if plan is None :
+            plan =MedicationPlan (
+            patient =patient ,
+            created_by =request .user ,
+            source_id =source_id ,
+            name =name ,
+            )
+        plan .dosage =dosage 
+        plan .times =times 
+        plan .start_date =start_date 
+        plan .end_date =end_date 
+        plan .instructions =str (data .get ('instructions')or '')[:2000 ]
+        plan .is_active =bool (data .get ('is_active',True ))
+        plan .save ()
+
+        log_security_event (
+        user =request .user ,
+        event_type ='DATA_MODIFIED'if is_update else 'DATA_CREATED',
+        request =request ,
+        details ={'plan_id':str (plan .id ),'patient_id':str (patient .id ),
+        'via':'medication_plan_sync'},
+        )
+        return Response (self ._serialize (plan ),status =200 if is_update else 201 )
+
+    @staticmethod 
+    def _serialize (plan ):
+        return {
+        'id':str (plan .id ),
+        'source_id':str (plan .source_id )if plan .source_id else None ,
+        'patient_id':str (plan .patient_id ),
+        'patient_name':plan .patient .full_name ,
+        'name':plan .name ,
+        'dosage':plan .dosage ,
+        'times':plan .times ,
+        'start_date':plan .start_date .isoformat ()if plan .start_date else None ,
+        'end_date':plan .end_date .isoformat ()if plan .end_date else None ,
+        'instructions':plan .instructions ,
+        'is_active':plan .is_active ,
+        'prescribed_by':plan .created_by .full_name ,
+        'created_at':plan .created_at .isoformat ()if plan .created_at else None ,
+        'updated_at':plan .updated_at .isoformat ()if plan .updated_at else None ,
+        }
 
 
 class PharmacyStatsView (viewsets .ViewSet ):

@@ -991,3 +991,19 @@ if not DEBUG and not _TESTING:
             "JWT_PRIVATE_KEY_PATH / JWT_PUBLIC_KEY_PATH at existing PEM files. "
             "Unset JWT_ALGORITHM to use HS256 with SECRET_KEY instead."
         )
+
+    # ---------- Well-known seed passwords ----------
+    # backend/scripts/seed_data.py creates 10 demo users with passwords that are
+    # literally in the repo (admin@securemed.app / Admin@2026!, doctor.* /
+    # Doctor@2026!, etc.). SEED_DEMO_DATA is the documented opt-in for that
+    # path; allowing it on a deployment that real users can reach would leave
+    # every demo account as a published login. Refuse the combination rather
+    # than one of them, because the meaningful mistake is enabling the seed
+    # outside of a dev environment, not choosing a particular password.
+    if config('SEED_DEMO_DATA', default='0').lower() in ('1', 'true', 'yes', 'on'):
+        print(
+            "WARNING: ImproperlyConfigured - SEED_DEMO_DATA is enabled in production. "
+            "backend/scripts/seed_data.py will create 10 accounts whose passwords "
+            "are committed to the repo (admin@securemed.app / Admin@2026!, "
+            "doctor.* / Doctor@2026!, etc.). Set SEED_DEMO_DATA=0 before deploying."
+        )

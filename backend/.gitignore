@@ -8,6 +8,9 @@ venv/
 env/
 ENV/
 .env
+.env.docker
+.env.docker.local
+.env.*.local
 
 # Distribution / packaging
 dist/

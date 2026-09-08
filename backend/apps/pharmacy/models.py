@@ -2,6 +2,7 @@ import uuid
 from django .db import models 
 from django .conf import settings 
 from django .utils .translation import gettext_lazy as _ 
+from apps .security .crypto import encrypt_field ,decrypt_field 
 
 class Medication (models .Model ):
     """Pharmacy inventory and drug catalog."""
@@ -138,3 +139,73 @@ class PrescriptionItem (models .Model ):
 
     def __str__ (self ):
         return f"{self .medication .name } - {self .dosage }"
+
+
+class MedicationPlan (models .Model ):
+    """Synced medication plan — the server twin of the Android app's local plan.
+
+    The Android client keeps plans in device-local encrypted storage so dose
+    alarms survive offline; this row is the durable, shareable copy that
+    outlives a reinstall and lets the care team update a regimen centrally.
+    The plan name is encrypted at rest like every other PHI column. `source_id`
+    is the Android plan's local UUID: re-pushing the same plan updates instead
+    of duplicating, and the client dedupes on it after a fetch.
+    """
+
+    class ScheduleType (models .TextChoices ):
+        DAILY ='DAILY',_ ('يومي')
+        WEEKLY ='WEEKLY',_ ('أسبوعي')
+        AS_NEEDED ='AS_NEEDED',_ ('عند الحاجة')
+
+    id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
+    patient =models .ForeignKey (
+    'patients.Patient',on_delete =models .CASCADE ,
+    related_name ='medication_plans',verbose_name =_ ('المريض'),
+    )
+    created_by =models .ForeignKey (
+    settings .AUTH_USER_MODEL ,on_delete =models .PROTECT ,
+    related_name ='medication_plans',verbose_name =_ ('أنشأه'),
+    )
+    channel =models .ForeignKey (
+    'app_channels.Channel',on_delete =models .SET_NULL ,
+    null =True ,blank =True ,related_name ='medication_plans',
+    verbose_name =_ ('القناة'),
+    )
+
+    _name =models .TextField (_ ('اسم الدواء المشفر'),db_column ='name')
+    dosage =models .CharField (_ ('الجرعة'),max_length =255 )
+    times =models .JSONField (_ ('أوقات الجرعات'),default =list )
+    start_date =models .DateField (_ ('تاريخ البدء'))
+    end_date =models .DateField (_ ('تاريخ الانتهاء'),null =True ,blank =True )
+    instructions =models .TextField (_ ('تعليمات'),blank =True )
+    schedule_type =models .CharField (
+    _ ('نمط الجدولة'),max_length =20 ,
+    choices =ScheduleType .choices ,default =ScheduleType .DAILY ,
+    )
+    source_id =models .UUIDField (
+    _ ('معرف المصدر'),null =True ,blank =True ,db_index =True ,
+    help_text =_ ('معرّف الخطة المحلية على جهاز العميل لمنع التكرار'),
+    )
+    is_active =models .BooleanField (_ ('نشطة'),default =True )
+    created_at =models .DateTimeField (auto_now_add =True )
+    updated_at =models .DateTimeField (auto_now =True )
+
+    class Meta :
+        verbose_name =_ ('خطة دواء')
+        verbose_name_plural =_ ('خطط الأدوية')
+        ordering =['-created_at']
+        indexes =[
+        models .Index (fields =['patient','is_active']),
+        models .Index (fields =['created_by','-created_at']),
+        ]
+
+    def __str__ (self ):
+        return f'{self .name } — {self .patient .full_name }'
+
+    @property 
+    def name (self ):
+        return decrypt_field (self ._name )
+
+    @name .setter 
+    def name (self ,value ):
+        self ._name =encrypt_field (value )

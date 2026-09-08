@@ -40,11 +40,12 @@ sealed class Route(val route: String) {
 
     // ===== Channel sub-screens =====
     /**
-     * Reserved for the channel chat screen (roadmap Phase 4). Declared but
-     * not yet registered in the NavHost — navigating to it would throw, so
-     * it must stay unused until ChannelChatScreen exists.
+     * In-channel secure chat (Phase 4). `name` is an optional query argument
+     * carrying the channel title so the chat bar renders it before the
+     * channel request resolves; the ViewModel re-fetches regardless.
      */
-    data object ChannelChat : Route("channel/{id}/chat") {
-        fun createRoute(id: String) = "channel/$id/chat"
+    data object ChannelChat : Route("channel/{id}/chat?name={name}") {
+        fun createRoute(id: String, name: String = "") =
+            "channel/$id/chat?name=${android.net.Uri.encode(name)}"
     }
 }

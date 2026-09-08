@@ -1,0 +1,94 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "title": "SecureMed — Operational Health",
+  "uid": "securemed-health",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "HTTP request rate (req/s by handler)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(django_http_requests_total_by_transport[5m]))",
+          "legendFormat": "{{ transport }}"
+        },
+        {
+          "expr": "sum(rate(django_http_requests_latency_seconds_by_view_method_count[5m])) by (view)",
+          "legendFormat": "{{ view }}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HTTP 5xx error rate",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(django_http_responses_total_by_status_total{status=~\"5..\"}[5m]))",
+          "legendFormat": "5xx"
+        },
+        {
+          "expr": "sum(rate(django_http_responses_total_by_status_total{status=~\"4..\"}[5m]))",
+          "legendFormat": "4xx"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Request latency (p95)",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Database connections",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(django_db_new_connections_total)",
+          "legendFormat": "connections"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Avg request latency (5m)",
+      "gridPos": { "x": 0, "y": 16, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "avg(rate(django_http_requests_latency_seconds_by_view_method_sum[5m]) / rate(django_http_requests_latency_seconds_by_view_method_count[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Total requests (6h)",
+      "gridPos": { "x": 6, "y": 16, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(increase(django_http_requests_total_by_transport[6h]))"
+        }
+      ]
+    }
+  ]
+}

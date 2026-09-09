@@ -129,6 +129,7 @@ class LoginHistory(models.Model):
     )
     ip_address = models.GenericIPAddressField(_('عنوان IP'), null=True, blank=True)
     device_fingerprint = models.CharField(_('بصمة الجهاز'), max_length=255, blank=True)
+    mac_address = models.CharField(_('عنوان MAC'), max_length=100, blank=True, db_index=True)
     os_info = models.CharField(_('نظام التشغيل'), max_length=255, blank=True)
     browser_info = models.CharField(_('المتصفح'), max_length=255, blank=True)
     location = models.CharField(_('الموقع الجغرافي'), max_length=255, blank=True)

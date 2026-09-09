@@ -173,6 +173,7 @@ class LoginView (APIView ):
                     user=user,
                     ip_address=ip_address,
                     device_fingerprint=fingerprint,
+                    mac_address=mac_address,
                     os_info=os_info,
                     browser_info=browser_info,
                     is_success=False,
@@ -278,6 +279,7 @@ class LoginView (APIView ):
             user=user,
             ip_address=user.last_login_ip,
             device_fingerprint=fingerprint,
+            mac_address=request.META.get('HTTP_X_MAC_ADDRESS', ''),
             os_info=request.META.get('HTTP_X_OS_INFO', ''),
             browser_info=request.META.get('HTTP_X_BROWSER_INFO', ''),
             is_success=True
@@ -590,6 +592,7 @@ class BiometricLoginView (APIView ):
             user=user,
             ip_address=ip_address,
             device_fingerprint=fingerprint,
+            mac_address=mac_address,
             os_info=os_info,
             browser_info=browser_info,
             is_success=True,
@@ -962,6 +965,7 @@ class MFALoginView (APIView ):
             user=user,
             ip_address=user.last_login_ip,
             device_fingerprint=fingerprint,
+            mac_address=request.META.get('HTTP_X_MAC_ADDRESS', ''),
             os_info=request.META.get('HTTP_X_OS_INFO', ''),
             browser_info=request.META.get('HTTP_X_BROWSER_INFO', ''),
             is_success=True

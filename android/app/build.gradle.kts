@@ -16,6 +16,13 @@ detekt {
     parallel = true
 }
 
+// detekt's embedded compiler inherits the running JVM's target unless pinned.
+// A dev machine on JDK 24 would hand it --jvm-target 24 (unsupported in
+// detekt 1.23.x); pinning to 17 matches the Kotlin build target everywhere.
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    jvmTarget = "17"
+}
+
 // FCM push is opt-in so the build never depends on a secret: drop a real
 // google-services.json into android/app/ (and optionally build with
 // -PSECUREMED_FCM=true) to activate. The firebase-messaging *dependency* is

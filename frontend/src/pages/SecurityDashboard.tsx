@@ -161,6 +161,41 @@ export default function SecurityDashboard() {
           </div>
         </Link>
 
+        <div className="card flex items-center gap-4 border border-gray-100 dark:border-gray-800">
+          <div className="w-12 h-12 bg-cyan-50 dark:bg-cyan-900/30 rounded-2xl flex items-center justify-center flex-shrink-0">
+            <CloudUpload className="w-6 h-6 text-cyan-600 dark:text-cyan-400" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-bold text-gray-900 dark:text-white">بوابات النسخ والتسليم</h3>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {(() => {
+                const f = dashboardData?.data?.security_features;
+                if (!f) return <span className="text-xs text-gray-400">...</span>;
+                const gates: { label: string; ok: boolean }[] = [];
+                const bo = f.backup_offsite_delivery;
+                if (bo) {
+                  gates.push({ label: 'نسخ تلقائي', ok: true });
+                  if (bo.telegram_enabled) gates.push({ label: 'تلجرام', ok: bo.telegram_ready });
+                  if (bo.cloud_enabled) gates.push({ label: 'سحابي', ok: bo.cloud_ready });
+                  if (!bo.telegram_enabled && !bo.cloud_enabled)
+                    gates.push({ label: 'التسليم معطل', ok: false });
+                }
+                if ('telegram_webhook_protected' in f)
+                  gates.push({ label: 'حماية webhook', ok: f.telegram_webhook_protected });
+                return gates.map((g, i) => (
+                  <span
+                    key={i}
+                    className={`badge text-[10px] ${g.ok ? 'badge-success' : 'badge-warning'}`}
+                  >
+                    {g.ok ? '✓' : '⚠'} {g.label}
+                  </span>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>
+      </div>
+
         <Link
           to="/security/settings"
           className="card hover:shadow-lg transition-all flex items-center gap-4 cursor-pointer group border border-gray-100 dark:border-gray-800"

@@ -37,3 +37,26 @@ data class Prescription(
     val items: List<PrescriptionItem> = emptyList(),
     @SerialName("created_at") val createdAt: String
 )
+
+/** Body of `POST pharmacy/prescriptions/` (`PrescriptionCreateSerializer`). */
+@Serializable
+data class PrescriptionCreateRequest(
+    val patient: String,
+    @SerialName("diagnosis_code") val diagnosisCode: String? = null,
+    val notes: String? = null,
+    val items: List<PrescriptionItemRequest>
+)
+
+/**
+ * One drug line of a prescription. `medication` references the pharmacy
+ * catalog (`pharmacy/medications/`), not a free-text name — the server
+ * rejects unknown ids.
+ */
+@Serializable
+data class PrescriptionItemRequest(
+    val medication: String,
+    val dosage: String,
+    val frequency: String,
+    @SerialName("duration_days") val durationDays: Int,
+    val quantity: Int
+)

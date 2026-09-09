@@ -26,7 +26,12 @@ class DashboardViewModel @Inject constructor(
         val patients: List<Patient> = emptyList(),
         val medicationsCount: Int = 0,
         val usersCount: Int = 0,
-        val error: String? = null
+        val error: String? = null,
+        /**
+         * The audit-trail card is admin/auditor-only — hidden, not disabled,
+         * for everyone else (3-6: a gate you can see but never pass is noise).
+         */
+        val showAudit: Boolean = false
     )
 
     private val _state = MutableStateFlow(DashboardState())
@@ -46,7 +51,9 @@ class DashboardViewModel @Inject constructor(
             val medicationsCount = MedicationStore.loadPlans().count { it.isActive }
             var usersCount = 0
             if (SecurePreferences.userRole in ADMIN_ROLES) {
-                repository.getUsers().getOrNull()?.let { usersCount = it.size }
+                // The envelope's count, not page-1 rows — the old approach
+                // read the first 20 users and called that the total.
+                usersCount = repository.getUsersTotalCount().getOrDefault(0)
             }
 
             _state.value = DashboardState(
@@ -55,8 +62,11 @@ class DashboardViewModel @Inject constructor(
                 patients = patientsResult.getOrDefault(emptyList()),
                 medicationsCount = medicationsCount,
                 usersCount = usersCount,
-                error = if (channelsResult.isFailure && patientsResult.isFailure) "فشل تحميل البيانات" else null
+                error = if (channelsResult.isFailure && patientsResult.isFailure) "فشل تحميل البيانات" else null,
+                showAudit = SecurePreferences.userRole in ADMIN_AUDIT_ROLES
             )
         }
     }
 }
+
+private val ADMIN_AUDIT_ROLES = listOf("SUPER_ADMIN", "HOSPITAL_ADMIN", "AUDITOR")

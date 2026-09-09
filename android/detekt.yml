@@ -1,0 +1,42 @@
+# detekt config for the release pipeline (4-2). The defaults carry most of
+# the weight; only the rules that genuinely fit this codebase differently are
+# written down. Silent in effect, loud in CI: detekt failures block the tag.
+
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    # Compose screens with dialogs read as long functions by design; the
+    # dialogs are one function on purpose (state locality).
+    threshold: 220
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    active: false
+  CyclomaticComplexMethod:
+    threshold: 25
+
+style:
+  MagicNumber:
+    # Numbers like IV_BYTES, colors, dp values, status codes are contextual.
+    active: false
+  UnusedPrivateMember:
+    ignoreAnnotated: ['Preview']
+  MaxLineLength:
+    maxLineLength: 160
+  ReturnCount:
+    active: false
+  ThrowsCount:
+    active: false
+  DestructuringDeclarationWithTooManyEntries:
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
+    # The app's I/O boundary deliberately catches Throwable/Exception: a
+    # cache miss or network failure must degrade, never crash. Callers that
+    # can surface an error do; the rest degrade by design.
+    active: false
+  SwallowedException:
+    active: false

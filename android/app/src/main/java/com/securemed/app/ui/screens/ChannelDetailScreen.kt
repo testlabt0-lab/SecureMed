@@ -402,6 +402,7 @@ private data class PickedDocument(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UploadFileDialog(
     picked: PickedDocument,

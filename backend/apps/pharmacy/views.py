@@ -170,6 +170,25 @@ class PrescriptionViewSet (viewsets .ModelViewSet ):
             return PrescriptionCreateSerializer 
         return PrescriptionSerializer 
 
+    def perform_create (self ,serializer ):
+        """Create a prescription — the doctor is the caller.
+
+        The serializer already sets `doctor = request.user`; the audit event
+        was the missing half: creation was the only prescription lifecycle
+        step (dispense, cancel) with no trail.
+        """
+        prescription =serializer .save ()
+        log_security_event (
+        user =self .request .user ,
+        event_type ='PRESCRIPTION_CREATED',
+        request =self .request ,
+        details ={
+        'prescription_id':str (prescription .id ),
+        'patient':str (prescription .patient_id ),
+        'items_count':prescription .items .count (),
+        },
+        )
+
     def get_queryset (self ):
         qs =super ().get_queryset ()
         status_filter =self .request .query_params .get ('status')

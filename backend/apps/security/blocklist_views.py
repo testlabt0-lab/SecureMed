@@ -42,14 +42,91 @@ class DeviceRegistryViewSet (viewsets .ReadOnlyModelViewSet ):
 
     @action (detail =True ,methods =['post'])
     def trust (self ,request ,pk =None ):
-        """Mark a device as trusted (requires auth)."""
+        """Mark a device as trusted (requires auth).
+
+        Two guards keep this from becoming a self-service activation hole in
+        Dr. Majed's licensing policy:
+
+        * a blocked device cannot trust its way back in — lifting a block is
+          a separate admin action (unblock). Tapping "trust" on a blacklisted
+          device used to silently revoke the WAF's answer for it.
+        * under ENFORCE_DEVICE_AUTHORIZATION (the default), activation comes
+          from the admin (Telegram/dashboard) only. A user with one trusted
+          device could otherwise mint trusted=1 for every new device they
+          own without ever seeing an approval flow. Self-trust stays
+          available in the lenient adaptive-auth mode.
+        """
         device =self .get_object ()
         if device .user !=request .user and request .user .role not in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             return Response ({'detail':'غير مصرح'},status =status .HTTP_403_FORBIDDEN )
 
+        from django .conf import settings 
+        from apps .security .models import BlockedDevice 
+
+        if BlockedDevice .objects .enforceable ().filter (
+        device_fingerprint =device .device_fingerprint 
+        ).exists ()or BlockedDevice .objects .enforceable ().filter (
+        mac_address =device .mac_address 
+        ).exists ():
+            return Response (
+            {'detail':'هذا الجهاز في القائمة السوداء — لا يمكن توثيقه حتى يُرفع الحظر'},
+            status =status .HTTP_403_FORBIDDEN ,
+            )
+
+        is_admin =request .user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']
+        self_trust =device .user ==request .user 
+        if (
+        self_trust and not is_admin
+        and getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True )
+        and not device .is_trusted 
+        ):
+            return Response (
+            {'detail':'تفعيل الأجهزة يتطلب موافقة الإدارة (تلجرام أو لوحة التحكم)'},
+            status =status .HTTP_403_FORBIDDEN ,
+            )
+
         device .is_trusted =True 
         device .save (update_fields =['is_trusted'])
+        from apps .audit .utils import log_security_event 
+        log_security_event (
+        user =device .user ,
+        event_type ='DEVICE_TRUSTED',
+        request =request ,
+        details ={'device_id':str (device .id ),
+                 'device_fingerprint':device .device_fingerprint,
+                 'granted_by':'self'if self_trust else request .user .email },
+        )
         return Response ({'detail':'تم تعيين الجهاز كموثوق'})
+
+    @action (detail =True ,methods =['post'])
+    def deactivate (self ,request ,pk =None ):
+        """إلغاء تفعيل جهاز موثوق: revoke + blocklist + session kill.
+
+        Mirrors the Telegram `deactivate_` callback exactly (both call
+        apps.security.views._deactivate_device) so the two control surfaces
+        cannot drift apart.
+
+        Self-service: the owner may deactivate *their own* device — trust
+        revoked and its session killed, but without a blacklist entry, so
+        they can request activation for it again later ("إزالة جهازي").
+        Deactivating anyone else's device is admin-only and blacklists it.
+        """
+        device =self .get_object ()
+        is_admin =request .user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']
+        self_deactivate =device .user ==request .user and not is_admin 
+        if device .user !=request .user and not is_admin :
+            return Response ({'detail':'غير مصرح'},status =status .HTTP_403_FORBIDDEN )
+
+        from apps .security .views import _deactivate_device
+        _deactivate_device (
+        device ,request ,
+        via ='self'if self_deactivate else 'dashboard',
+        block =not self_deactivate ,
+        notify_owner =not self_deactivate ,
+        )
+        detail =('تم إزالة الجهاز من حسابك — يمكنك طلب تفعيله مجدداً لاحقاً'
+                 if self_deactivate else 'تم إلغاء تفعيل الجهاز وحظره')
+        return Response ({'detail':detail})
 
     @action (detail =True ,methods =['post'])
     def activate_module (self ,request ,pk =None ):

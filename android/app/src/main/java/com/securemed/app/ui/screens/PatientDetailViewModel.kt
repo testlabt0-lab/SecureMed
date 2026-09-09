@@ -57,9 +57,12 @@ class PatientDetailViewModel @Inject constructor(
      */
     fun createRecord(patientId: String, channelId: String, title: String, content: String, recordType: String, isCritical: Boolean) {
         viewModelScope.launch {
-            _uiState.value = (_uiState.value as? PatientDetailUiState.Success)?.copy(
-                actionInProgress = true, actionMessage = null
-            ) ?: _uiState.value
+            val current = _uiState.value as? PatientDetailUiState.Success
+            if (current != null) {
+                _uiState.value = current.copy(
+                    actionInProgress = true, actionMessage = null
+                )
+            }
             val result = repository.createMedicalRecord(
                 com.securemed.app.data.model.MedicalRecordCreateRequest(
                     title = title,
@@ -72,21 +75,124 @@ class PatientDetailViewModel @Inject constructor(
             if (result.isSuccess) {
                 // Reload so the new record comes back in the server-attributed list.
                 loadPatient(patientId)
-                _uiState.value = (_uiState.value as? PatientDetailUiState.Success)?.copy(
-                    actionMessage = "تم إنشاء السجل الطبي"
-                )
+                val after = _uiState.value as? PatientDetailUiState.Success
+                if (after != null) {
+                    _uiState.value = after.copy(actionMessage = "تم إنشاء السجل الطبي")
+                }
             } else {
                 val message = result.exceptionOrNull()?.let { ApiErrors.messageFor(it, "تعذر إنشاء السجل") }
                     ?: "تعذر إنشاء السجل"
-                _uiState.value = (_uiState.value as? PatientDetailUiState.Success)?.copy(
-                    actionInProgress = false, actionMessage = message
-                )
+                val after = _uiState.value as? PatientDetailUiState.Success
+                if (after != null) {
+                    _uiState.value = after.copy(
+                        actionInProgress = false, actionMessage = message
+                    )
+                }
             }
         }
     }
 
     fun clearActionMessage() {
-        _uiState.value = (_uiState.value as? PatientDetailUiState.Success)?.copy(actionMessage = null)
+        val current = _uiState.value as? PatientDetailUiState.Success
+        if (current != null) {
+            _uiState.value = current.copy(actionMessage = null)
+        }
+    }
+
+    /**
+     * Update a record. The server applies the same EDITOR-or-higher channel
+     * gate as creation; a 403 arrives as its own Arabic message.
+     */
+    fun updateRecord(patientId: String, recordId: String, title: String, content: String, recordType: String, isCritical: Boolean) {
+        viewModelScope.launch {
+            beginAction()
+            val result = repository.updateMedicalRecord(
+                id = recordId,
+                title = title,
+                content = content,
+                recordType = recordType,
+                isCritical = isCritical
+            )
+            finishAction(result, "تم تحديث السجل", "تعذر تعديل السجل", patientId)
+        }
+    }
+
+    /** Delete a record — a 403 for viewers arrives as the server's message. */
+    fun deleteRecord(patientId: String, recordId: String) {
+        viewModelScope.launch {
+            beginAction()
+            val result = repository.deleteMedicalRecord(recordId)
+            finishAction(result, "تم حذف السجل", "تعذر حذف السجل", patientId)
+        }
+    }
+
+    /**
+     * Book an appointment for THIS patient (3-1: booking from the patient
+     * page). Doctors load best-effort for the picker; the server validates
+     * the future time and doctor conflicts and its message surfaces via
+     * [ApiErrors].
+     */
+    fun prepareBookingData(onReady: (List<com.securemed.app.data.model.User>) -> Unit) {
+        viewModelScope.launch {
+            onReady(repository.getDoctors().getOrDefault(emptyList()))
+        }
+    }
+
+    fun createAppointment(
+        patientId: String,
+        doctorId: String,
+        appointmentType: String,
+        priority: String,
+        scheduledAt: String,
+        durationMinutes: Int,
+        title: String,
+        notes: String?
+    ) {
+        viewModelScope.launch {
+            beginAction()
+            val result = repository.createAppointment(
+                com.securemed.app.data.model.AppointmentCreateRequest(
+                    patient = patientId,
+                    doctor = doctorId,
+                    appointmentType = appointmentType,
+                    priority = priority,
+                    scheduledAt = scheduledAt,
+                    durationMinutes = durationMinutes,
+                    title = title,
+                    notes = notes?.takeIf { it.isNotBlank() }
+                )
+            )
+            finishAction(result, "تم حجز الموعد", "تعذر حجز الموعد", patientId)
+        }
+    }
+
+    private fun beginAction() {
+        val current = _uiState.value as? PatientDetailUiState.Success
+        if (current != null) {
+            _uiState.value = current.copy(actionInProgress = true, actionMessage = null)
+        }
+    }
+
+    /**
+     * Success reloads the server-attributed list and shows [successMessage];
+     * failure keeps the list untouched and surfaces the server's own message.
+     */
+    private fun finishAction(result: kotlin.Result<*>, successMessage: String, failureFallback: String, patientId: String) {
+        if (result.isSuccess) {
+            loadPatient(patientId)
+            val after = _uiState.value as? PatientDetailUiState.Success
+            if (after != null) {
+                _uiState.value = after.copy(actionMessage = successMessage)
+            }
+        } else {
+            val message = result.exceptionOrNull()
+                ?.let { ApiErrors.messageFor(it, failureFallback) }
+                ?: failureFallback
+            val current = _uiState.value as? PatientDetailUiState.Success
+            if (current != null) {
+                _uiState.value = current.copy(actionInProgress = false, actionMessage = message)
+            }
+        }
     }
 }
 

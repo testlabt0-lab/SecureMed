@@ -2,21 +2,23 @@ package com.securemed.app.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.cachedIn
 import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.model.Appointment
 import com.securemed.app.data.model.Patient
 import com.securemed.app.data.model.User
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class AppointmentsUiState(
-    val isLoading: Boolean = true,
-    val appointments: List<Appointment> = emptyList(),
-    val errorMessage: String? = null,
     val actionInProgress: Boolean = false,
     val message: String? = null,
     val isError: Boolean = false
@@ -30,39 +32,22 @@ class AppointmentsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AppointmentsUiState())
     val uiState: StateFlow<AppointmentsUiState> = _uiState
 
+    /**
+     * The list itself is paged (3-3); reads happen through
+     * [appointmentsPagingFlow] and the Pager follows the server envelope.
+     * Write operations that change the list emit here and the screen calls
+     * `refresh()` on its LazyPagingItems.
+     */
+    val appointmentsPagingFlow = Pager(
+        config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+        pagingSourceFactory = { repository.getAppointmentsPagingSource() }
+    ).flow.cachedIn(viewModelScope)
+
+    private val _refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val refreshRequests: SharedFlow<Unit> = _refreshRequests
+
     private var loadedPatients: List<Patient> = emptyList()
     private var loadedDoctors: List<User> = emptyList()
-
-    init {
-        loadAppointments()
-    }
-
-    fun loadAppointments() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            try {
-                val result = repository.getAppointments()
-                if (result.isSuccess) {
-                    _uiState.value = AppointmentsUiState(
-                        isLoading = false,
-                        appointments = result.getOrNull() ?: emptyList()
-                    )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = result.exceptionOrNull()
-                            ?.let { ApiErrors.messageFor(it, "حدث خطأ أثناء جلب المواعيد") }
-                            ?: "حدث خطأ أثناء جلب المواعيد"
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = e.localizedMessage ?: "حدث خطأ غير معروف"
-                )
-            }
-        }
-    }
 
     /** Prefetch the lists the booking dialog needs (best-effort). */
     fun prepareBookingData(onReady: (List<Patient>, List<User>) -> Unit) {
@@ -107,7 +92,7 @@ class AppointmentsViewModel @Inject constructor(
                 )
             )
             if (result.isSuccess) {
-                loadAppointments()
+                requestRefresh()
                 _uiState.value = _uiState.value.copy(
                     actionInProgress = false,
                     message = "تم حجز الموعد بنجاح"
@@ -129,7 +114,7 @@ class AppointmentsViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(actionInProgress = true, message = null, isError = false)
             val result = repository.cancelAppointment(appointmentId, reason)
             if (result.isSuccess) {
-                loadAppointments()
+                requestRefresh()
                 _uiState.value = _uiState.value.copy(
                     actionInProgress = false,
                     message = "تم إلغاء الموعد"
@@ -144,6 +129,10 @@ class AppointmentsViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    private fun requestRefresh() {
+        _refreshRequests.tryEmit(Unit)
     }
 
     fun clearMessage() {

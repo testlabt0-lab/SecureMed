@@ -2,7 +2,7 @@ package com.securemed.app.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class User(
@@ -289,9 +289,9 @@ data class Notification(
     /**
      * The server column is a free JSONField — numbers or nested objects in it
      * made the strict Map<String, String> throw and the whole list with it
-     * (م10). Parsed as a generic object instead.
+     * (م10). Parsed as a generic element so any JSON value decodes.
      */
-    val data: JsonObject? = null
+    val data: JsonElement? = null
 )
 
 @Serializable
@@ -421,6 +421,15 @@ data class MedicalRecordCreateRequest(
      * forever.
      */
     val channel: String
+)
+
+/** Partial update of `PATCH patients/records/{id}/` — all fields optional. */
+@Serializable
+data class MedicalRecordUpdateRequest(
+    val title: String? = null,
+    val content: String? = null,
+    @SerialName("record_type") val recordType: String? = null,
+    @SerialName("is_critical") val isCritical: Boolean? = null
 )
 
 /**

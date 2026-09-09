@@ -2,6 +2,466 @@
 
 ---
 
+# Phase 4j — إغلاق 4-1: اختبار قاعدة «الجلسة الخاصة» (2026-09-09)
+
+> التحقق: **364 اختباراً خادمياً ناجحاً** (12 جديدة في
+> `tests/test_session_security.py`). الأندرويد لم يُمَس.
+
+## 1. القاعدة التي اختُبرت
+
+`SessionManager.is_session_valid` تقارن بصمة الطلب **بجلسة المتصل وحدها**
+(عبر `session_id`) — لا بكل جلسات المستخدم الحية. المقارنة الجَمعية كانت
+تجعل دخولاً ثانياً (يُخلِّي جلسة المتصل بحدّ الجلسة المتزامنة = 1) أو
+تفريغ الكاش يبدوان سرقة، و`reject_if_hijacked` يجيب الخلل بـ
+`force_logout_user` — أي خروج الحساب كله من جهاز لهاتفه. لا اختبار في
+المستودع كان يمسّ `SessionManager` قبل هذا الملف.
+
+## 2. ما يثبته الاختبار (12 حالة)
+
+- ✅ المطابقة بجلسة المتصل → صالحة، و`reject_if_hijacked` لا يرفض.
+- ✅ عدم المطابقة → رفض + إبطال كامل (مسح `active_sessions` + تسجيل
+  زمن الإبطال في `token_denylist` الذي يفرّق التوكنات الملغاة من
+  اللاحقة لها).
+- ✅ **الانحدار الرئيسي**: جلسة مُخلَّاة بحدّ الجلسة المتزامنة → صالحة
+  (المقارنة الجَمعية كانت ترفضها وتخرج الحساب كله).
+- ✅ تفريغ الكاش بعد التسجيل → صالحة. غياب ترويسة البصمة → صالحة
+  (ربط JWT يغطي). جلسة بلا بصمة مسجَّلة → صالحة. متصل غير مصادق → صالح.
+- ✅ دورة الحياة: `register_session` يحجب الجلسة السابقة (الحد = 1)،
+  `end_session` ينهي جلسة الخيار ويُبقي الأخرى **بلا** تماس
+  `force_logout_user`، يفرّغ المفتاح عند آخر جلسة، ويبقى no-op بلا
+  معرّف. و`force_logout_user` يُسجل الإبطال ويُفرغ الجلسات.
+
+## 3. ملف جديد
+
+| الملف | المحتوى |
+|---|---|
+| `backend/tests/test_session_security.py` | 12 اختباراً لقاعدة الجلسة الخاصة ودورة حياة الجلسات |
+
+**بند 4-1 مُغلق** (الباقي الوحيد كان هذا الاختبار؛ «تشغيل الحزمة في CI»
+مصيره بند 4-2 خط الإصدار). المجموعة الخادمية: 352 → 364.
+
+---
+
+# Phase 4i — تغطية بنود 4-1 الثلاثة (2026-09-09)
+
+> التحقق: `compileDebugKotlin` + `testDebugUnitTest` (**59 اختباراً**: 46 + 13
+> جديدة في 3 أصناف) + `lintDebug` خضراء. لا تغييرات خادمية.
+
+## 1. طبقة التشفير — `CacheCryptoTest` (5 اختبارات)
+
+- ✅ الخيط المفصلي: منطق غلاف SMEDC1 سُحب من دوال Keystore إلى
+  `seal`/`open` بمفتاح صريح — الصيغة على القرص كاملةً قابلة للاختبار
+  بمفتاح برمجي، وطبقة Keystore تظل رقيقة.
+- ✅ مثبَّت: دورة تشفير/فك، تمييز ملف قديم نصي (بلا غلاف)، رفض تلاعب
+  بالـ GCM tag، مفتاح لا يطابق، غلاف مقطوع — والعقد «null لا throw».
+
+## 2. الموديلات مقابل أجسام خادمية حقيقية — `ModelDeserializationTest` (5)
+
+- ✅ أجسام JSON بأسماء حقول المُسلسلات الفعلية (وليس أمنيات العميل):
+  `MedicalRecord` بـ `created_by_name: null` وحقل مجهول مستقبلي،
+  `Notification` بحمولة `data` **رقمية**، `Appointment` بالأسماء
+  الصحيحة، `RefreshResponse` بلا `refresh`، وطلب مختبر كامل.
+- ✅ **كشف مباشر أثناء الكتابة**: `Notification.data` بصيغة `JsonObject`
+  كان سيرفض رقماً حتى بعد إصلاح م10 (الرقم ليس كائناً) — صارت
+  `JsonElement` فتقبل أي قيمة JSON. الاختبار أثبت قيمته فوراً.
+
+## 3. عقد تجديد التوكن — `RefreshContractTest` (3)
+
+- ✅ الأجسام الثلاثة الموثقة لـ `auth/refresh/`: دوران كامل (access+refresh)،
+  بلا دوران (الجسم الذي كان يمحو جلسة مستخدم — درس 2-7)، وسلسلة فارغة.
+  كلها تفك بنجاح، وعقد «الجلسة تبقى عند غياب الدوران» مثبَّت.
+
+## الباقي من 4-1
+
+- اختبار Django لقاعدة «الجلسة الخاصة» في `SessionManager` (خادمي).
+- تشغيل الحزمة في CI.
+
+## ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `data/local/CacheCrypto.kt` | +seal/open بمفتاح صريح (المنطق مفصلي) |
+| `app/src/test/.../CacheCryptoTest.kt` | جديد — 5 |
+| `app/src/test/.../ModelDeserializationTest.kt` | جديد — 5 |
+| `app/src/test/.../RefreshContractTest.kt` | جديد — 3 |
+| `data/model/Models.kt` | Notification.data: JsonObject → JsonElement |
+
+---
+
+# Phase 4h — نقل التخزين المحلي إلى Room (إغلاق 3-4) (2026-09-09)
+
+> التحقق: الأندرويد `compileDebugKotlin` + `testDebugUnitTest` (**46 اختباراً**:
+> 43 + 3 في `MedicationPlanEntityTest`) + `lintDebug` خضراء.
+
+## 1. جداول الأدوية في Room (الإصدار 2→3)
+
+- ✅ `MedicationPlanEntity` + `DoseLogEntity` في `data/local/room/` مع
+  `MedicationDao` — البيانات الوحيدة التي كانت تُكتب دائماً في
+  `LocalCache` صارت بمخطَّط واستعلامات، داخل قاعدة SQLCipher المشفَّرة.
+- ✅ `MedicationStore` أعيد بناؤه فوق DAO **بنفس واجهته العامة** —
+  `ReminderScheduler` ومسارات الإشعارات والمستقبلات لم تتغير، وأثر
+  الترحيل محصور في طبقة التخزين.
+- ✅ `SecureMedDatabase` → الإصدار 3 مع `medicationDao()` وثابت
+  `MIGRATION_TARGET_VERSION`.
+
+## 2. هجرة JSON→Room لمرة واحدة
+
+- ✅ `MedicationStore.migrateFromLocalCache()` في `SecureMedApp.onCreate`
+  — **قبل** أي فتح آخر للقاعدة: يقرأ ملفي الخطط والجرعات المشفَّرين
+  (فكّ `CacheCrypto` صار مسؤولاً عن الترقية فقط كما طلب البند)،
+  يستورد الصفوف إلى Room، ثم يحذف الملفين — الحذف بعد نجاح الاستيراد
+  يجعل التهجئة idempotent.
+- ✅ ترتيب الإقلاع مضبوط صراحة: `LocalCache.init` ثم `MedicationStore.init`
+  ثم التهجئة ثم بقية التهيئة.
+- ✅ `LocalCache.delete(key)` أُضيفت لسحب ملف مستورد بعينه.
+
+## 3. إحكامات مصاحبة
+
+- ✅ `logout` → `clearAll` يمسح جدولي الأدوية الآن — الخطط تحمل أسماء
+  مرضى، ومسح الـ JSON عند الخروج كان يجب أن يتبع البيانات إلى Room.
+- ✅ `logDose` كان يعيد كتابة كل سجل الجرعات لحفظ سطر واحد؛ الآن
+  `INSERT ... REPLACE` على المفتاح الأساسي (planId|scheduledFor).
+- ✅ عمود `times` المدمج (HH:mm مفصولة بفواصل) مع round-trip
+  اختبارات — القائمة تُقرأ دائماً كاملة فلم تستحق جدولاً جانبياً.
+- ✅ `DatabaseModule`: التعليق محدَّث — الإصدار ≥ 3 لم يعد محصَّناً بـ
+  fallback تحريبي بالكامل (الصفوف الجهازية غير قابلة لإعادة الجلب)،
+  فأي رفع إصدار لاحق يستوجب هجرات حقيقية وexportSchema.
+
+## ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `data/local/room/MedicationEntities.kt` | جديد — جدولا + DAO |
+| `data/local/room/SecureMedDatabase.kt` | v3 + medicationDao |
+| `data/local/room/SecureMedDao.kt` | clearAll يغطي جداول الأدوية |
+| `data/local/MedicationStore.kt` | معاد البناء فوق Room + تهجرة |
+| `data/local/LocalCache.kt` | +delete(key) |
+| `SecureMedApp.kt` | تسلسل الإقلاع + التهجرة قبل أي فتح |
+| `di/DatabaseModule.kt` | تعليق سياسة الإصدارات محدَّث |
+| `app/src/test/.../MedicationPlanEntityTest.kt` | جديد — 3 اختبارات |
+
+**المرحلة 3 مكتملة بالكامل (3-1 حتى 3-6).**
+
+---
+
+# Phase 4g — عمليات الكتابة للشاشات الجديدة (2026-09-09)
+
+> التحقق: الأندرويد `compileDebugKotlin` + `testDebugUnitTest` + `lintDebug` خضراء؛
+> الخادم **344 اختباراً ناجحاً** (بلا تغييرات خادمية — التأكيد فقط).
+
+## 1. ثلاث عمليات كتابة تكمل الشاشات الأربع (3-6)
+
+- ✅ **إدخال نتيجة مختبر** — FAB في شاشة النتائج، حوار بمعرّف الطلب
+  والقيمة (رقمية أو نصية أو كليهما — الرقمية تتفوق) وملاحظات؛
+  `performed_by` هو المتصل، وعلامتا الحرج/غير الطبيعي تُحسبان خادمياً
+  من مدى المرجع فلا يخمّن العميل علامة سريرية.
+- ✅ **إدخال مريض لسرير** — زر «إدخال» على بطاقات الأسرّة **الحرة فقط**
+  (حالة FREE)، حوار مريض (قائمة مرضى مُجلبَة مسبقاً) + تشخيص الدخول؛
+  الرفض الخادمي لسرير غير حر أو مريض منوَّم يصل برسالته العربية،
+  والنجاح يحدّث قائمتي الأسرّة والأقسام معاً (إشارة تحديث مزدوجة).
+- ✅ **إنشاء فاتورة** — FAB في شاشة الفواتير: مريض + خصم + استحقاق +
+  بنود متعددة (وصف/كمية/سعر وحدة) بتحقق محلي كامل؛ عرض حيّ للإجمالي
+  التقديري مع تنبيه صريح أن الإجمالي النهائي والضريبة وتغطية التأمين
+  تُحسب خادمياً.
+
+## 2. البنية
+
+- ✅ `OperationUiState` مشتركة (تقدم/رسالة/خطأ) + `OperationSnackbar`
+  في الهيكل المشترك `PagedListScaffold` (وسيطا FAB وsnackbarHost
+  اختياريان) — الشاشات الأربع تشارك نمط الكتابة والقراءة معاً.
+- ✅ `PagedListScaffold` استقبل وسطاء كتابة بدون أن يكسر أي شاشة قراءة
+  خالصة (التدقيق بلا FAB ورسائل).
+- ✅ الواجهات الخادمية المستعملة: `LabResultCreateSerializer` (حقول
+  order/numeric_value/text_value/notes)، `BedAssignmentCreateSerializer`
+  (bed/patient/diagnosis_on_admission — bed وpatient إلزاميان)،
+  `InvoiceCreateSerializer` (patient/discount/due_date/items ببنود
+  description/quantity/unit_price).
+
+## ملفات معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `data/api/SecureMedApi.kt` | +createLabResult +assignBed +createInvoice +getActiveAssignments |
+| `data/model/OperationsModels.kt` | +3 نماذج طلبات +BedAssignment |
+| `data/SecureMedRepository.kt` | +3 عمليات كتابة +مصنع الإسنادات النشطة |
+| `ui/screens/OperationsViewModels.kt` | حالة كتابة مشتركة + create flows |
+| `ui/screens/OperationsScreens.kt` | حوارات الإدخال الثلاثة + ربط FAB/Snackbar |
+
+**المتبقي من 3-6:** شاشة التقارير فقط.
+
+---
+
+# Phase 4f — الشاشات الناقصة: نتائج المختبر والأسرّة والفواتير والتدقيق (2026-09-09)
+
+> التحقق: الأندرويد `compileDebugKotlin` + `testDebugUnitTest` + `lintDebug` خضراء؛
+> الخادم **339 اختباراً ناجحاً** (بلا تغييرات خادمية — التأكيد فقط).
+
+## 1. هيكل مشترك للقوائم المقروءة
+
+- ✅ `PagedListScaffold`/`PagedListContent` في `OperationsScreens.kt`:
+  تحميل أولي، خطأ الصفحة الأولى برسالة الخادم عبر `ApiErrors` + إعادة
+  محاولة، فراغ، ومؤشر تقدم عند التمرير — نمط 3-3 نفسه لكل شاشة جديدة.
+
+## 2. أربع شاشات جديدة (3-6)
+
+- ✅ **نتائج المختبر** — `lab/results/` كانت نقطة ميتة كما وثّق البند؛ الآن
+  قائمة مُرقَّمة تعرض القيمة، الحكم الخادمي (حرج/غير طبيعي/طبيعي) بلون
+  كل صف، اسم من صادق على النتيجة، والملاحظات. الصف الحرج مظلَّل بالكامل
+  وشارة «حرج».
+- ✅ **الأقسام والأسرّة** — شريط أقسام بإشغال كل قسم (occupied/total من
+  الخادم) فوق قائمة أسرّة مرقَّمة بألوان الحالات (متاح/مشغول/صيانة/
+  تنظيف/محجوز). سؤال «أين يمكن إدخال هذا المريض؟» يُجاب من الشاشة.
+- ✅ **الفواتير** — المريض والإجمالي مع الضريبة والمستحق وحالة السداد
+  بلونها.
+- ✅ **سجل التدقيق** — للمشرف والمدقق: بطاقته في لوحة التحكم **مُخفية
+  لا معطَّلة** لغيرهم (`showAudit` من الدور: SUPER_ADMIN/HOSPITAL_ADMIN/
+  AUDITOR)، ومن يدخل المسار مباشرة ترسم رسالة 403 الخادمية كحالة
+  الشاشة — معيار القبول «تنجح في أدوارها وتعطي رسالة واضحة في غيرها»
+  مستوفى بلا أي قفل إضافي في العميل.
+- ✅ نمذجة: `OperationsModels.kt` (LabResult/Ward/Bed/Invoice/
+  AuditLogEntry) — المعرَّف قاطع وبقية الحقول افتراضية، وفقاً لسياسة
+  «عمود مُعاد تسميته يُسقط تسمية لا شاشة».
+
+## 3. ملاحظات تنفيذ
+
+- التنقل: 4 مسارات جديدة (LabResults/Wards/Invoices/Audit) و
+  7 بطاقات خدمات على لوحة التحكم.
+- ما بقي من البند: شاشة التقارير، وعمليات الكتابة (حجز سرير، فاتورة،
+  إدخال نتيجة).
+
+## ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `data/model/OperationsModels.kt` | جديد — 5 نماذج |
+| `data/api/SecureMedApi.kt` | +lab/results +wards +beds +invoices +audit/logs |
+| `data/SecureMedRepository.kt` | +5 مصانع ترقيم |
+| `ui/screens/OperationsViewModels.kt` | جديد — 4 ViewModels |
+| `ui/screens/OperationsScreens.kt` | جديد — هيكل مشترك + 4 شاشات |
+| `navigation/Routes.kt` + `MainActivity.kt` | +4 مسارات |
+| `ui/screens/Dashboard*.kt` | +7 بطاقات + showAudit |
+
+---
+
+# Phase 4e — ترقيم صفحات حقيقي للقوائم (إغلاق 3-3) (2026-09-09)
+
+> التحقق: الأندرويد `compileDebugKotlin` + `testDebugUnitTest` (**43 اختباراً**:
+> 40 سابقة + 3 جديدة في `ApiPagingSourceTest`) + `lintDebug` خضراء.
+> لا تغييرات خادمية في هذه الجلسة.
+
+## 1. مصدر ترقيم عام
+
+- ✅ `data/paging/ApiPagingSource.kt` — مصدر Paging 3 واحد لكل قوائم الخادم:
+  `loadPage: (page) -> PagedResponse<T>` والمفتاح التالي من غلاف `has_next`،
+  بنفس عقيدة `PatientPagingSource` (واختباراته الجديدة تثبت: اشتقاق
+  المفتاح التالي، توقف عند الصفحة الأخيرة، مرور الاستثناء إلى
+  `LoadState.Error`).
+
+## 2. ست قوائم حُوّلت
+
+- ✅ الوصفات، المختبر، المواعيد، الاستشارات، الإشعارات، المستخدمون —
+  كلها تابِع التحميل عند التمرير (مؤشر تقدم أسفل القائمة)، وإعادة محاولة
+  عند فشل الصفحة الأولى برسالة الخادم عبر `ApiErrors`.
+- ✅ الكتابة داخلها (حجز/إلغاء، صرف/إنشاء وصفة، تعليم مقروء، تفعيل/إيقاف)
+  تُصدر `refreshRequests` والشاشة تنادي `refresh()` — الصفحات المُخزَّنة
+  في `cachedIn` لا تتحديث وحدها.
+- ✅ إشعارات: شارة غير المقروء صارت من `unread_count/` الخادمي — عدّها من
+  قائمة مُرقَّمة كان سيبلّغ ناقصاً.
+- ✅ لوحة التحكم: عدد المستخدمين من `count` الغلاف لا صفوف الصفحة الأولى.
+
+## 3. ما بقي عمداً
+
+- السجلات الطبية: صفحة المريض تقرأ التجميعة المقطوعة 100 سجل (ليست قائمة
+  مُرقَّمة)، وقائمة القناة نادرة الطول فبقيت على القراءة المخزَّنة.
+- القوائم المُحوَّلة شبكية بحت (ثمن الترقيم الموثق في البند)؛ قائمة
+  المرضى وحدها تعمل دون اتصال من Room كما كانت.
+
+## ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `data/paging/ApiPagingSource.kt` | جديد — مصدر عام |
+| `app/src/test/.../ApiPagingSourceTest.kt` | جديد — 3 اختبارات |
+| `SecureMedApi.kt` | +page لـ users/notifications/records |
+| `SecureMedRepository.kt` | +7 مصانع ترقيم +getUsersTotalCount |
+| `Lab/Telemedicine/Appointments/Pharmacy/Notifications/Users` ViewModels+Screens | تحويل إلى LazyPagingItems |
+| `android/DEVELOPMENT_PLAN.md` | 3-3 [x] |
+
+---
+
+# Phase 4d — إغلاق بندي 3-1 و3-5 (2026-09-09)
+
+> التحقق: الأندرويد `compileDebugKotlin` + `testDebugUnitTest` + `lintDebug` خضراء.
+> لا تغييرات خادمية في هذه الجلسة.
+
+## 1. حجز موعد من صفحة المريض (آخر بند مفتوح في 3-1)
+
+- ✅ أيقونة تقويم في الشريط العلوي لصفحة المريض تفتح `BookingDialog` بمريض
+  **مقفل** — اسمه يُعرض نصاً ثابتاً بدل قائمة الاختيار، فالحوار من هذا
+  الموضع يختار الطبيب والنوع والأولوية والوقت فقط.
+- ✅ `BookingDialog` صار `internal` بوسيط `lockedPatient` اختياري — شاشة
+  المواعيد تستعمله كما هي بلا قفل، وصفحة المريض تمرر المريض الحالي.
+- ✅ الأطباء يُجلبون قبل فتح الحوار (`prepareBookingData`) فلا يفتح الحوار
+  على قائمة فارغة؛ وإن فشل الجلب فالحوار يظهر والرسالة الخادمية تشرح عند
+  الإرسال.
+
+## 2. إعلان مصير خطط الأدوية (إغلاق 3-5 وقرار «ب»)
+
+- ✅ بطاقة إعلان فوق قائمة الخطط في شاشة الأدوية: «خطط الأدوية تتزامن مع
+  الخادم ويراها فريق الرعاية. أما سجل الجرعات والالتزام فمحفوظ على هذا
+  الجهاز فقط ولا يُشارك» — معيار القبول «لا تبقى ميزة تبدو مشتركة وهي محلية»
+  مستوفى.
+- ✅ ثمن قرار «ب» زال بحد ذاته: الخطط صارت نسخة مُزامَنة قابلة للاسترجاع
+  من الخادم، فمحوها عند الخروج لم يعد فقداً بلا رجعة.
+
+## ملفات معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `android/.../screens/AppointmentsScreen.kt` | BookingDialog → internal + lockedPatient |
+| `android/.../screens/PatientDetailScreen.kt` | +أيقونة حجز + ربط الحوار المقفل |
+| `android/.../screens/PatientDetailViewModel.kt` | +createAppointment +prepareBookingData |
+| `android/.../screens/MedicationsScreen.kt` | +بطاقة الإعلان (تزامن الخطط / محلية الجرعات) |
+| `android/DEVELOPMENT_PLAN.md` | 3-1 [x]، 3-5 [x] |
+
+**المرحلة 3 صارت مكتملة عدا 3-3 (ترقيم الصفحات — نصفها منجز) و3-4 (نقل
+التخزين إلى Room).**
+
+---
+
+# Phase 4c — إكمال عمليات الكتابة: الوصفات وتعديل/حذف السجلات (2026-09-09)
+
+> التحقق: **325 اختباراً خادمياً ناجحاً** (6 جديدة في `tests/test_medical_record_writes.py`)
+> والأندرويد: `compileDebugKotlin` + `testDebugUnitTest` + `lintDebug` خضراء.
+> (`test_backups.py` يبقى خارج الحساب — أعطاله بيئية على Windows وليست من الشيفرة.)
+
+## 1. ثغرة خادمية أُغلقت قبل كشف التعديل/الحذف من التطبيق
+
+- ✅ `MedicalRecordViewSet` لم يكن يعرّف `perform_update`/`perform_destroy` — الافتراضي
+  في ModelViewSet لا يفحص شيئاً، فأي مستخدم مجازٍ للقراءة (بما فيهم دور VIEWER)
+  كان يستطيع `PATCH`/`DELETE` أي سجل تراه قنواته. الحرس الجديد `_can_modify_record`
+  يطبق قاعدة الإنشاء نفسها: مدراء دائماً، وإلا محرر أو أعلى في قناة السجل،
+  والسجل بلا قناة (بعد حذفها SET_NULL) لا يُعدَّل إلا من مدراء.
+- ✅ أحداث تدقيق جديدة: `MEDICAL_RECORD_UPDATED` و`MEDICAL_RECORD_DELETED`
+  (وهذا الأخير يُسجَّل قبل الحذف حتى تبقى التفاصيل) و`PRESCRIPTION_CREATED` —
+  الإنشاء كان خطوة دورة حياة الوصفة الوحيدة بلا أثر تدقيق. هجرة `audit.0006`.
+
+## 2. إصلاح خادمي مصاحب: ردّ إنشاء الوصفة
+
+- ✅ `PrescriptionCreateSerializer.Meta.fields` لم يكن يضم `id`، فجسم 201 كان
+  بلا هوية ولا يمكن للعميل أن يعرف ما أنشأه إلا بإعادة جلب القائمة. أُضيف
+  `id` (read-only).
+
+## 3. الأندرويد — بند 3-1 أُكمل
+
+- ✅ **إنشاء وصفة طبية** من شاشة الصيدلية (FAB): مريض من قائمة المرضى، وبنود
+  أدوية متعددة تُبنى من فهرس الصيدلية `GET pharmacy/medications/` (نقطة كانت
+  بلا أي مستهلك أندرويدي) — لكل بند: دواء بالمعرّف (الخادم يرفض الأسماء
+  الحرة)، جرعة، تكرار، مدة بالأيام، كمية. التحقق محلي قبل الإرسال، والرسائل
+  الخادمية عبر `ApiErrors`.
+- ✅ **تعديل السجلات** (`PATCH patients/records/{id}/`): زر «تعديل» على كل
+  بطاقة سجل يفتح حواراً محمّلاً بالقيم الحالية (النوع يُسترجع من التسمية
+  المعربة مع سقوط إلى القيمة الخام).
+- ✅ **حذف السجلات** (`DELETE`): زر «حذف» بلون الخطأ مع حوار تأكيد يذكر أن
+  الحذف يُدقَّق — رسالة 403 لغير المصرّح تصل من الخادم، وفشل أي عملية لا
+  يكتب شيئاً في الذاكرة المؤقتة (النجاح يعيد الجلب من التجميعة).
+- ✅ `PharmacyViewModel` أعيدت كتابتها بنمط الحالة المسطحة (تقدم/رسالة/خطأ)
+  بدل `runCatching` الصامت الذي كان يبتلع فشل الصرف.
+
+## 4. ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `backend/apps/patients/views.py` | +`_can_modify_record`/`perform_update`/`perform_destroy` |
+| `backend/apps/pharmacy/views.py` | +`perform_create` بتدقيق `PRESCRIPTION_CREATED` |
+| `backend/apps/pharmacy/serializers.py` | +`id` في ردّ إنشاء الوصفة |
+| `backend/apps/audit/models.py` + هجرة 0006 | +3 أحداث |
+| `backend/tests/test_medical_record_writes.py` | جديد — 6 اختبارات |
+| `android/.../api/SecureMedApi.kt` | +PATCH/DELETE records +createPrescription +getMedications |
+| `android/.../model/Models.kt` | +MedicalRecordUpdateRequest |
+| `android/.../model/PharmacyModels.kt` | +PrescriptionCreateRequest +PrescriptionItemRequest |
+| `android/.../SecureMedRepository.kt` | +updateMedicalRecord +deleteMedicalRecord +createPrescription +getMedicationCatalog |
+| `android/.../screens/Pharmacy*.kt` | حوار إنشاء وصفة ببنود + حالة مسطحة |
+| `android/.../screens/PatientDetail*.kt` | أزرار تعديل/حذف + حواران |
+
+## ما يحتاج جهازاً أو خادماً حياً
+
+- دورة صرف وصفة أُنشئت من التطبيق: خصم مخزون فعلي ورسالة المخزون الناقص.
+- سلوك 403 فعلي لمستخدم VIEWER عند محاولة تعديل/حذف من الواجهة.
+
+---
+
+# Phase 4b — عمليات الكتابة وإصلاح الإسناد السريري (2026-09-08)
+
+> التحقق: **320 اختباراً خادمياً ناجحاً** (315 سابقة + 5 جديدة في
+> `tests/test_patient_profile.py`؛ 8 أخطاء بيئية قديمة في `test_backups.py`
+> — أذونات مجلد temp على Windows وقفل مجلد خارجي — تثبت على الشجرة النظيفة
+> أنها ليست من شيفرة هذا العمل). الأندرويد: `compileDebugKotlin` +
+> `testDebugUnitTest` + `lintDebug` خضراء.
+
+## 1. إصلاح ع6 — إسناد السجلات في صفحة المريض (بند 3-2)
+
+- ✅ صفحة المريض كانت تنادي `getMedicalRecords(null)` — القائمة العامة — فتعرض
+  سجلات كل المرضى تحت اسم أي مريض. صارت تقرأ التجميعة الخادمية
+  `GET patients/{id}/profile/` التي تقيّد السجلات بقنوات المريض × امتيازات
+  المتصل (`PatientViewSet.profile` → `get_viewable_channels`).
+- ✅ العميل: `PatientProfileResponse` (patient/records/channels/files/stats)،
+  `SecureMedRepository.getPatientProfile` (قراءة مخزَّنة)، و
+  `PatientDetailViewModel` معاد البناء على التجميعة مع قسم ملفات طبية جديد.
+- ✅ **قفل القاعدة بخمسة اختبارات** (`tests/test_patient_profile.py`):
+  سجلات مريضٍ آخر لا تظهر، تجميعة عدة قنوات لمريض واحد، منع اللاعضو،
+  عضوٌ لا يرى قناة بلا عضوية، وتطابق كتلة `stats` مع الجسم.
+- ✅ قرار (أ) في خطة الأندرويد أُغلق بخيار التجميعة الموجودة — بلا هجرة
+  وبلا تعديل في `MedicalRecordViewSet`.
+
+## 2. بند 3-1 — أول عمليات الكتابة من التطبيق
+
+- ✅ **إصلاح مسبق حرج**: `MedicalRecordCreateRequest` كان يرسل `channel_id`
+  والمُسلسِل يقبل `channel` — كل سجل معلّق كان يُرفض 400 للأبد. الحقل صار
+  `channel`.
+- ✅ **إنشاء سجل طبي** من صفحة المريض: حوار يقرأ قنوات المريض من التجميعة،
+  أنواع `RecordType` الثمانية، حالة حرجة، وحالة تحميل — ورسائل 403 من
+  `ApiErrors` بجسم الخادم العربي.
+- ✅ **حجز موعد وإلغاؤه**: `POST appointments/` + `POST appointments/{id}/cancel/`
+  مع حوار حجز (مريض/طبيب/نوع/أولوية/تاريخ/وقت/مدة) يجمّع المرضى
+  والأطباء (`auth/users/?role=DOCTOR`)، وحوار إلغاء بسبب اختياري.
+  رفض الوقت الماضي وتعارض الطبيب يصلان برسالة الخادم.
+- ✅ **رفع ملف طبي** من تفاصيل القناة: `@Multipart POST patients/files/` عبر
+  `OpenDocument`، بتحقق عميل من الامتدادات (jpg/jpeg/png/gif/pdf/dicom/dcm)
+  وحدّ 20MB قبل الإرسال، وحوار بيانات وصفية (نوع/عنوان/وصف)، وSnackbar
+  للنتيجة — فشل الرفع لا يكتب شيئاً في الذاكرة المؤقتة.
+- ✅ `getDoctors()` — `auth/users/?role=DOCTOR` مقصور خادمياً بالنطاق الحوضي.
+
+## 3. إصلاح م10 — حقولا تحطّم التحويل عند الحدّية
+
+- ✅ `Notification.data`: `Map<String, String>?` → `JsonObject?` — حقل JSON
+  حرّ على الخادم، وقيمة رقمية كانت تُسقط قائمة الإشعارات كلها (بلا أي
+  مستهلك للحقول اليوم).
+- ✅ `MedicalRecord.createdByName` صار قابلاً للإسناد الفارغ — `created_by`
+  على الخادم قد يكون فارغاً — والموضعان اللذان يعرضانه يعرضان «غير معروف».
+
+## 4. ملفات جديدة/معدَّلة رئيسية
+
+| الملف | التغيير |
+|---|---|
+| `backend/tests/test_patient_profile.py` | جديد — 5 اختبارات إسناد |
+| `android/.../api/SecureMedApi.kt` | +profile +upload multipart +create/cancel appointment +users?role |
+| `android/.../model/Models.kt` | +PatientProfileResponse +AppointmentCreateRequest؛ إصلاح م10؛ channel_id→channel |
+| `android/.../model/OtherModels.kt` | +MedicalFileDto |
+| `android/.../SecureMedRepository.kt` | +getPatientProfile +uploadMedicalFile +create/cancelAppointment +getDoctors |
+| `android/.../screens/PatientDetail*.kt` | معاد البناء على التجميعة + حوار إنشاء سجل + ملفات |
+| `android/.../screens/Appointments*.kt` | حوار حجز + إلغاء + رسائل خادم |
+| `android/.../screens/ChannelDetail*.kt` / `ChannelsViewModel.kt` | رفع ملفات + حالة رفع |
+| `android/DEVELOPMENT_PLAN.md` | 3-2 [x]، 3-1 [~]، إغلاق قرار (أ)، م10 أُصلح |
+
+## ما يحتاج جهازاً أو خادماً حياً (لم يُتحقَّق منه)
+
+- دورة الحجز الفعلية مقابل خادم حيّ: تعارض الطبيب والوقت الماضي برسالة عربية.
+- رفع ملف DICOM حقيقي يمر توقيع الملف الخادمي (sniffing).
+- عدد سجلات صفحة المريض مقابل الويب لحساب حقيقي (معيار قبول 3-2).
+
+---
+
 # Phase 4 — Feature Expansion (2026-09-08)
 
 > التحقق: **314 اختباراً ناجحاً** (296 سابقة + 18 جديدة في `tests/test_new_features.py`).

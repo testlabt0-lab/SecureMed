@@ -38,6 +38,12 @@ sealed class Route(val route: String) {
     data object Analytics : Route("analytics")
     data object Settings : Route("settings")
 
+    // ===== Operations screens (3-6) =====
+    data object LabResults : Route("lab_results")
+    data object Wards : Route("wards")
+    data object Invoices : Route("invoices")
+    data object Audit : Route("audit")
+
     // ===== Channel sub-screens =====
     /**
      * In-channel secure chat (Phase 4). `name` is an optional query argument

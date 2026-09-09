@@ -32,10 +32,18 @@ app .conf .beat_schedule ={
 'schedule':crontab (minute =0 ,hour ='*'),
 'kwargs':{'hours_before':1 },
 },
-# Daily scheduled backup at 2 AM
+# Daily database-only backup at 2 AM — small enough for the Telegram
+# 50 MB document channel, covers the data that changes every day
 'daily-backup':{
 'task':'apps.backups.tasks.run_scheduled_backup',
 'schedule':crontab (minute =0 ,hour =2 ),
+'kwargs':{'scope':'DATABASE' },
+},
+# Weekly full archive (media included) — Friday 3 AM
+'weekly-full-backup':{
+'task':'apps.backups.tasks.run_scheduled_backup',
+'schedule':crontab (minute =0 ,hour =3 ,day_of_week ='friday' ),
+'kwargs':{'scope':'FULL' },
 },
 # Cleanup expired JWT tokens from blacklist daily at 3 AM
 'cleanup-expired-tokens':{
@@ -60,6 +68,22 @@ app .conf .beat_schedule ={
 'security-digest':{
 'task':'apps.audit.tasks.send_security_digest',
 'schedule':crontab (minute =0 ,hour =8 ),
+},
+# Audit hash-chain tamper check — daily at 4 AM, alerts on problems
+'verify-audit-chain':{
+'task':'apps.audit.tasks.verify_audit_chain_task',
+'schedule':crontab (minute =0 ,hour =4 ),
+'kwargs':{'days':2 },
+},
+# Expire stale blocklist rows + untrust long-idle devices — weekly
+'cleanup-blocklists':{
+'task':'apps.security.tasks.cleanup_blocklists_task',
+'schedule':crontab (minute =30 ,hour =5 ,day_of_week =0 ),
+},
+# Pending-device approvals digest — daily 9 AM (catches pushes Telegram missed)
+'pending-devices-digest':{
+'task':'apps.security.tasks.send_pending_devices_digest_task',
+'schedule':crontab (minute =0 ,hour =9 ),
 },
 'check-pharmacy-inventory':{
 'task':'apps.pharmacy.tasks.check_pharmacy_inventory',

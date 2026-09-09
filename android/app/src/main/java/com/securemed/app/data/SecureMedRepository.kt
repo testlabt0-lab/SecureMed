@@ -452,6 +452,42 @@ class SecureMedRepository @Inject constructor(
             api.getPatientProfile(patientId)
         }
 
+    /**
+     * Update a record. The server applies the create-time channel-role gate
+     * (EDITOR-or-higher) to updates too; a 403 arrives as its Arabic message.
+     * No cache write on failure, and a success overwrites nothing locally —
+     * the caller reloads from the server.
+     */
+    suspend fun updateMedicalRecord(
+        id: String,
+        title: String?,
+        content: String?,
+        recordType: String?,
+        isCritical: Boolean?
+    ): Result<MedicalRecord> = try {
+        Result.success(
+            api.updateMedicalRecord(
+                id,
+                MedicalRecordUpdateRequest(
+                    title = title,
+                    content = content,
+                    recordType = recordType,
+                    isCritical = isCritical
+                )
+            )
+        )
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** Delete a record — server-gated the same way; 403 for viewers. */
+    suspend fun deleteMedicalRecord(id: String): Result<Unit> = try {
+        api.deleteMedicalRecord(id)
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     /** Upload a medical file into a channel (multipart, server caps at 20MB). */
     suspend fun uploadMedicalFile(
         fileBytes: ByteArray,
@@ -539,6 +575,92 @@ class SecureMedRepository @Inject constructor(
 
     fun getPatientPagingSource(search: String? = null): com.securemed.app.data.paging.PatientPagingSource {
         return com.securemed.app.data.paging.PatientPagingSource(api, search)
+    }
+
+    // ===== PAGING FACTORIES (3-3: one generic source per server list) =====
+    // Each returns a fresh PagingSource; a screen's ViewModel wraps it in a
+    // Pager. Note these go straight to the API — the *cached* read paths
+    // above stay for screens that need offline fallback (patients).
+
+    fun getPrescriptionsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getPrescriptions(page) }
+
+    fun getLabOrdersPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getLabRequests(page) }
+
+    fun getAppointmentsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getAppointments(page) }
+
+    fun getTelemedicinePagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getTelemedicineSessions(page) }
+
+    fun getNotificationsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getNotifications(page) }
+
+    fun getUsersPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getUsers(page) }
+
+    /** The envelope's authoritative total (dashboards), not page-1 row count. */
+    suspend fun getUsersTotalCount(): Result<Int> = try {
+        Result.success(api.getUsers(1).count)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    fun getMedicalRecordsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getMedicalRecords(page = page) }
+
+    fun getLabResultsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getLabResults(page) }
+
+    fun getWardsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getWards(page) }
+
+    fun getBedsPagingSource(status: String? = null) =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getBeds(page, status) }
+
+    fun getInvoicesPagingSource(status: String? = null) =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getInvoices(page, status) }
+
+    fun getAuditLogsPagingSource(severity: String? = null) =
+        com.securemed.app.data.paging.ApiPagingSource { page -> api.getAuditLogs(page, severity) }
+
+    fun getActiveAssignmentsPagingSource() =
+        com.securemed.app.data.paging.ApiPagingSource { page ->
+            api.getActiveAssignments(page = page)
+        }
+
+    // ===== OPERATION WRITES (3-6) =====
+
+    /**
+     * Enter a lab result. `is_abnormal`/`is_critical` are computed and saved
+     * server-side from the test's reference range — the client never guesses
+     * clinical flags.
+     */
+    suspend fun createLabResult(request: LabResultCreateRequest): Result<LabResult> = try {
+        Result.success(api.createLabResult(request))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Admit a patient into a bed. The server rejects a non-FREE bed and a
+     * patient already admitted — both arrive as its own Arabic messages.
+     */
+    suspend fun assignBed(request: BedAssignmentCreateRequest): Result<BedAssignment> = try {
+        Result.success(api.assignBed(request))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Create an invoice. Totals, VAT and insurance coverage are computed
+     * server-side; the response carries the final patient-payable figure.
+     */
+    suspend fun createInvoice(request: InvoiceCreateRequest): Result<Invoice> = try {
+        Result.success(api.createInvoice(request))
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     // ===== SECURITY =====
@@ -780,6 +902,17 @@ class SecureMedRepository @Inject constructor(
     // ===== PHARMACY =====
     suspend fun getPrescriptions(): Result<List<Prescription>> =
         cachedPagedList("prescriptions", Prescription.serializer()) { api.getPrescriptions() }
+
+    /** Catalog rows a prescription's items reference by id. */
+    suspend fun getMedicationCatalog(): Result<List<InventoryMedication>> =
+        cachedPagedList("medication_catalog", InventoryMedication.serializer()) { api.getMedications() }
+
+    /** Create a prescription (the server sets the doctor to the caller). */
+    suspend fun createPrescription(request: PrescriptionCreateRequest): Result<Prescription> = try {
+        Result.success(api.createPrescription(request))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
 
     suspend fun dispensePrescription(id: String): Result<Prescription> = try {
         val result = api.dispensePrescription(id)

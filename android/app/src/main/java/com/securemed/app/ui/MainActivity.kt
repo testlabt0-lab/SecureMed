@@ -251,6 +251,10 @@ class MainActivity : FragmentActivity() {
                                     onNavigateToLab = { navController.navigate(Route.Lab.route) },
                                     onNavigateToTelemedicine = { navController.navigate(Route.Telemedicine.route) },
                                     onNavigateToAnalytics = { navController.navigate(Route.Analytics.route) },
+                                    onNavigateToLabResults = { navController.navigate(Route.LabResults.route) },
+                                    onNavigateToWards = { navController.navigate(Route.Wards.route) },
+                                    onNavigateToInvoices = { navController.navigate(Route.Invoices.route) },
+                                    onNavigateToAudit = { navController.navigate(Route.Audit.route) },
                                     onLogout = { signOut(false) }
                                 )
                             }
@@ -323,6 +327,18 @@ class MainActivity : FragmentActivity() {
                             }
                             composable(Route.Telemedicine.route) {
                                 TelemedicineScreen(onBack = { navController.popBackStack() })
+                            }
+                            composable(Route.LabResults.route) {
+                                LabResultsScreen(onBack = { navController.popBackStack() })
+                            }
+                            composable(Route.Wards.route) {
+                                WardsScreen(onBack = { navController.popBackStack() })
+                            }
+                            composable(Route.Invoices.route) {
+                                InvoicesScreen(onBack = { navController.popBackStack() })
+                            }
+                            composable(Route.Audit.route) {
+                                AuditScreen(onBack = { navController.popBackStack() })
                             }
                             composable(Route.Analytics.route) {
                                 AnalyticsScreen(onBack = { navController.popBackStack() })

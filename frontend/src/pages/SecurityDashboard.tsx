@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Shield, Scan, AlertTriangle, CheckCircle, XCircle,
   Fingerprint, Lock, Cookie, Network, Bug, Activity, MonitorSmartphone, ScrollText, Settings,
-  ShieldCheck, RefreshCw, Cpu, Server, Terminal, Check
+  ShieldCheck, RefreshCw, Cpu, Server, Terminal, Check, CloudUpload
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { securityAPI } from '../api/client';
@@ -84,6 +84,22 @@ export default function SecurityDashboard() {
       status: 'active',
       requirement: '#6',
       details: 'تشفير الاتصال بين مخدم التطبيق وقاعدة البيانات ومصادقة الشهادات',
+    },
+    {
+      icon: CloudUpload,
+      title: 'النسخ الاحتياطي الخارجي',
+      description: 'نسخة يومية مشفّرة تلجرام/سحابة',
+      status: 'active',
+      requirement: '#7',
+      details: 'نسخ تلقائي يومي مشفّر Fernet مع تسليم خارجي عبر تلجرام (حد 50MB) أو دلو S3-متوافق مع SSE',
+    },
+    {
+      icon: ShieldCheck,
+      title: 'سجل تدقيق موقّع',
+      description: 'سلسلة HMAC يومية + فحص تلاعب',
+      status: 'active',
+      requirement: '#8',
+      details: 'كل حدث يُوقّع ببصمة ماك أدرس، والسلسلة تُفحص يومياً 4 صباحاً مع تنبيه تلجرام عند أي تلاعب',
     },
   ];
 

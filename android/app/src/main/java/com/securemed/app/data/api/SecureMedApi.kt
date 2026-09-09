@@ -43,7 +43,7 @@ interface SecureMedApi {
     suspend fun getCurrentUser(): User
 
     @GET("auth/users/")
-    suspend fun getUsers(): PagedResponse<User>
+    suspend fun getUsers(@Query("page") page: Int = 1): PagedResponse<User>
 
     @POST("auth/users/{id}/activate/")
     suspend fun activateUser(@Path("id") id: String): Map<String, String>
@@ -98,10 +98,23 @@ interface SecureMedApi {
     suspend fun getPatient(@Path("id") id: String): Patient
 
     @GET("patients/records/")
-    suspend fun getMedicalRecords(@Query("channel") channelId: String? = null): PagedResponse<MedicalRecord>
+    suspend fun getMedicalRecords(
+        @Query("channel") channelId: String? = null,
+        @Query("page") page: Int = 1
+    ): PagedResponse<MedicalRecord>
 
     @POST("patients/records/")
     suspend fun createMedicalRecord(@Body record: MedicalRecordCreateRequest): MedicalRecord
+
+    /** Update a record — the server enforces the same channel-role rule as create. */
+    @PATCH("patients/records/{id}/")
+    suspend fun updateMedicalRecord(
+        @Path("id") id: String,
+        @Body record: MedicalRecordUpdateRequest
+    ): MedicalRecord
+
+    @DELETE("patients/records/{id}/")
+    suspend fun deleteMedicalRecord(@Path("id") id: String): Unit
 
     /**
      * The patient-scoped aggregate (`PatientViewSet.profile`): the patient,
@@ -139,7 +152,7 @@ interface SecureMedApi {
 
     // ===== NOTIFICATIONS =====
     @GET("notifications/")
-    suspend fun getNotifications(): PagedResponse<Notification>
+    suspend fun getNotifications(@Query("page") page: Int = 1): PagedResponse<Notification>
 
     @GET("notifications/unread_count/")
     suspend fun getUnreadCount(): Map<String, Int>
@@ -158,8 +171,16 @@ interface SecureMedApi {
     @GET("pharmacy/prescriptions/")
     suspend fun getPrescriptions(@Query("page") page: Int = 1): PagedResponse<Prescription>
 
+    /** Create a prescription (doctor = caller, items persist as `PrescriptionItem` rows). */
+    @POST("pharmacy/prescriptions/")
+    suspend fun createPrescription(@Body request: PrescriptionCreateRequest): Prescription
+
     @POST("pharmacy/prescriptions/{id}/dispense/")
     suspend fun dispensePrescription(@Path("id") id: String, @Body body: Map<String, String> = emptyMap()): Prescription
+
+    /** Pharmacy catalog — the medication ids a prescription's items reference. */
+    @GET("pharmacy/medications/")
+    suspend fun getMedications(@Query("page") page: Int = 1): PagedResponse<InventoryMedication>
 
     /** Server twin of device-local medication plans (pull half of the sync). */
     @GET("pharmacy/medication-plans/")
@@ -182,7 +203,55 @@ interface SecureMedApi {
     // ===== LAB =====
     // Router basename is `orders` (apps/lab/urls.py); `lab/requests/` was a 404.
     @GET("lab/orders/")
-    suspend fun getLabRequests(@Query("page") page: Int = 1): PagedResponse<LabTestRequest>
+    suspend fun getLabRequests(
+        @Query("page") page: Int = 1,
+        @Query("status") status: String? = null
+    ): PagedResponse<LabTestRequest>
+
+    @GET("lab/results/")
+    suspend fun getLabResults(@Query("page") page: Int = 1): PagedResponse<LabResult>
+
+    /** Enter a result — `performed_by` is the caller; abnormal/critical are server-computed. */
+    @POST("lab/results/")
+    suspend fun createLabResult(@Body result: LabResultCreateRequest): LabResult
+
+    // ===== WARDS & BEDS =====
+    @GET("wards/wards/")
+    suspend fun getWards(@Query("page") page: Int = 1): PagedResponse<Ward>
+
+    @GET("wards/beds/")
+    suspend fun getBeds(
+        @Query("page") page: Int = 1,
+        @Query("status") status: String? = null
+    ): PagedResponse<Bed>
+
+    /** Admit a patient to a FREE bed — server rejects occupied beds and double admissions. */
+    @POST("wards/assignments/")
+    suspend fun assignBed(@Body request: BedAssignmentCreateRequest): BedAssignment
+
+    @GET("wards/assignments/")
+    suspend fun getActiveAssignments(
+        @Query("page") page: Int = 1,
+        @Query("active") active: String = "true"
+    ): PagedResponse<BedAssignment>
+
+    // ===== BILLING =====
+    @GET("billing/invoices/")
+    suspend fun getInvoices(
+        @Query("page") page: Int = 1,
+        @Query("status") status: String? = null
+    ): PagedResponse<Invoice>
+
+    /** Create an invoice — totals, VAT and insurance coverage are server-computed. */
+    @POST("billing/invoices/")
+    suspend fun createInvoice(@Body request: InvoiceCreateRequest): Invoice
+
+    // ===== AUDIT (admin/auditor — server returns 403 otherwise) =====
+    @GET("audit/logs/")
+    suspend fun getAuditLogs(
+        @Query("page") page: Int = 1,
+        @Query("severity") severity: String? = null
+    ): PagedResponse<AuditLogEntry>
 
     // ===== APPOINTMENTS =====
     @GET("appointments/")

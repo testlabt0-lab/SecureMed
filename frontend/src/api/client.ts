@@ -168,11 +168,14 @@ export const basinsAPI = {
 // ============== Backups (النسخ الاحتياطي) ==============
 export const backupsAPI = {
   list: (params?: any) => api.get('/backups/', { params }),
-  create: (note?: string) => api.post('/backups/create_backup_action/', { note: note || '' }),
+  create: (note?: string, scope?: string) =>
+    api.post('/backups/create_backup_action/', { note: note || '', scope: scope || 'FULL' }),
   download: (id: string) => api.get(`/backups/${id}/download/`, { responseType: 'blob' }),
   verify: (id: string) => api.get(`/backups/${id}/verify/`),
   restore: (id: string, force: boolean) => api.post(`/backups/${id}/restore/`, { force }),
   delete: (id: string) => api.delete(`/backups/${id}/`),
+  deliverOffsite: (id: string) => api.post(`/backups/${id}/deliver_offsite/`),
+  deliveryStatus: () => api.get('/backups/delivery_status/'),
 };
 
 export const channelsAPI = {
@@ -218,6 +221,12 @@ export const securityAPI = {
   devices: {
     list: () => api.get('/security/devices/'),
     trust: (id: string) => api.post(`/security/devices/${id}/trust/`),
+    deactivate: (id: string) => api.post(`/security/devices/${id}/deactivate/`),
+  },
+  sessions: {
+    list: () => api.get('/security/sessions/'),
+    end: (sessionId: string) =>
+      api.delete('/security/sessions/', { data: { session_id: sessionId } }),
   },
   deviceTypes: {
     list: () => api.get('/security/device-types/'),

@@ -18,6 +18,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.model.Appointment
 import com.securemed.app.data.model.Patient
 import com.securemed.app.data.model.User
@@ -54,8 +57,15 @@ fun AppointmentsScreen(
     viewModel: AppointmentsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val appointments = viewModel.appointmentsPagingFlow.collectAsLazyPagingItems()
     var showBookingDialog by remember { mutableStateOf(false) }
     var cancellingAppointment by remember { mutableStateOf<Appointment?>(null) }
+
+    // A booking/cancel that succeeded must be visible in the list; the Pager
+    // caches its flow, so an explicit refresh invalidates the source.
+    LaunchedEffect(Unit) {
+        viewModel.refreshRequests.collect { appointments.refresh() }
+    }
 
     Scaffold(
         topBar = {
@@ -69,13 +79,11 @@ fun AppointmentsScreen(
             )
         },
         floatingActionButton = {
-            if (!uiState.isLoading && uiState.errorMessage == null) {
-                ExtendedFloatingActionButton(
-                    onClick = { viewModel.clearMessage(); showBookingDialog = true },
-                    icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
-                    text = { Text("موعد جديد") }
-                )
-            }
+            ExtendedFloatingActionButton(
+                onClick = { viewModel.clearMessage(); showBookingDialog = true },
+                icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                text = { Text("موعد جديد") }
+            )
         }
     ) { paddingValues ->
         Box(
@@ -83,23 +91,27 @@ fun AppointmentsScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            val refreshError = appointments.loadState.refresh as? LoadState.Error
             when {
-                uiState.isLoading && uiState.appointments.isEmpty() -> {
+                appointments.loadState.refresh is LoadState.Loading && appointments.itemCount == 0 -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
-                uiState.errorMessage != null && uiState.appointments.isEmpty() -> {
+                refreshError != null && appointments.itemCount == 0 -> {
                     Column(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(uiState.errorMessage ?: "", color = MaterialTheme.colorScheme.error)
+                        Text(
+                            ApiErrors.messageFor(refreshError.error, "حدث خطأ أثناء جلب المواعيد"),
+                            color = MaterialTheme.colorScheme.error
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Button(onClick = { viewModel.loadAppointments() }) { Text("إعادة المحاولة") }
+                        Button(onClick = { appointments.retry() }) { Text("إعادة المحاولة") }
                     }
                 }
                 else -> {
                     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                        if (uiState.appointments.isEmpty()) {
+                        if (appointments.itemCount == 0) {
                             Text(
                                 "لا توجد مواعيد حالياً.",
                                 modifier = Modifier.padding(16.dp),
@@ -107,16 +119,26 @@ fun AppointmentsScreen(
                             )
                         } else {
                             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                items(uiState.appointments, key = { it.id }) { appointment ->
-                                    AppointmentCard(
-                                        appointment = appointment,
-                                        onCancel = {
-                                            if (appointment.status in CANCELLABLE_STATUSES) {
-                                                viewModel.clearMessage()
-                                                cancellingAppointment = appointment
+                                items(appointments.itemCount) { index ->
+                                    appointments[index]?.let { appointment ->
+                                        AppointmentCard(
+                                            appointment = appointment,
+                                            onCancel = {
+                                                if (appointment.status in CANCELLABLE_STATUSES) {
+                                                    viewModel.clearMessage()
+                                                    cancellingAppointment = appointment
+                                                }
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
+                                }
+                                if (appointments.loadState.append is LoadState.Loading) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) { CircularProgressIndicator() }
+                                    }
                                 }
                             }
                         }
@@ -178,6 +200,7 @@ fun AppointmentsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppointmentOptionDropdown(
     label: String,
@@ -210,12 +233,19 @@ private fun AppointmentOptionDropdown(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BookingDialog(
+internal fun BookingDialog(
     inProgress: Boolean,
     onDismiss: () -> Unit,
     onLoadOptions: ((List<Patient>, List<User>) -> Unit) -> Unit,
-    onSubmit: (patientId: String, doctorId: String, type: String, priority: String, scheduledAt: String, durationMinutes: Int, title: String, notes: String?) -> Unit
+    onSubmit: (patientId: String, doctorId: String, type: String, priority: String, scheduledAt: String, durationMinutes: Int, title: String, notes: String?) -> Unit,
+    /**
+     * When booking *from a patient page* the patient is fixed — their name
+     * renders read-only and the patient dropdown disappears, so the only
+     * choices left are clinical ones.
+     */
+    lockedPatient: Patient? = null
 ) {
     var patients by remember { mutableStateOf<List<Patient>>(emptyList()) }
     var doctors by remember { mutableStateOf<List<User>>(emptyList()) }
@@ -229,7 +259,7 @@ private fun BookingDialog(
         }
     }
 
-    var patientId by remember { mutableStateOf<String?>(null) }
+    var patientId by remember { mutableStateOf(lockedPatient?.id) }
     var doctorId by remember { mutableStateOf<String?>(null) }
     var patientExpanded by remember { mutableStateOf(false) }
     var doctorExpanded by remember { mutableStateOf(false) }
@@ -270,14 +300,24 @@ private fun BookingDialog(
                         horizontalArrangement = Arrangement.Center
                     ) { CircularProgressIndicator() }
                 } else {
-                    AppointmentOptionDropdown(
-                        label = "المريض",
-                        selectedLabel = patients.firstOrNull { it.id == patientId }?.fullName ?: "",
-                        options = patients.map { it.id to it.fullName },
-                        expanded = patientExpanded,
-                        onExpandedChange = { patientExpanded = it },
-                        onSelect = { patientId = it }
-                    )
+                    if (lockedPatient != null) {
+                        OutlinedTextField(
+                            value = lockedPatient.fullName,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("المريض") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        AppointmentOptionDropdown(
+                            label = "المريض",
+                            selectedLabel = patients.firstOrNull { it.id == patientId }?.fullName ?: "",
+                            options = patients.map { it.id to it.fullName },
+                            expanded = patientExpanded,
+                            onExpandedChange = { patientExpanded = it },
+                            onSelect = { patientId = it }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
 
                     AppointmentOptionDropdown(
@@ -354,7 +394,7 @@ private fun BookingDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    if (patients.isEmpty()) {
+                    if (patients.isEmpty() && lockedPatient == null) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "لا توجد مرضى متاحون لك",
@@ -390,11 +430,11 @@ private fun BookingDialog(
                                     validationError = null
                                     onSubmit(
                                         patientId!!, doctorId!!, appointmentType, priority,
-                                        scheduledAt!!, duration, title.trim(), notes.trim().takeIf { it.isNotEmpty() }
+                                        scheduledAt!!, duration!!, title.trim(), notes.trim().takeIf { it.isNotEmpty() }
                                     )
                                 }
                             },
-                            enabled = loaded && patients.isNotEmpty()
+                            enabled = loaded && (patients.isNotEmpty() || lockedPatient != null)
                         ) { Text("حجز") }
                     }
                 }

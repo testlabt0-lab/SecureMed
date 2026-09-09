@@ -389,6 +389,27 @@ fun MedicationsScreen(
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
+            // 3-5: what is shared vs. local, stated where the plans are shown.
+            // Plans sync to the server (visible to the care team); the dose
+            // log — and everything computed from it — stays on this device.
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("☁️", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "خطط الأدوية تتزامن مع الخادم ويراها فريق الرعاية. أما سجل الجرعات والالتزام فمحفوظ على هذا الجهاز فقط ولا يُشارك.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
             if (state.medications.isEmpty()) {
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {

@@ -2,6 +2,7 @@
 Views for accounts app: authentication, biometric, user management.
 """
 import base64
+import hmac
 import io
 import secrets
 from datetime import timedelta
@@ -234,8 +235,10 @@ class LoginView (APIView ):
             cache .set (f'mfa_pending:{mfa_token }',str (user .id ),timeout =300 )# 5 min
 
             if mfa_method =='email':
-                import random 
-                otp_code =f"{random .randint (100000 ,999999 )}"
+                # secrets, not random: randint is predictable when the process
+                # state is known, and an OTP that can be predicted is a second
+                # password printed into an email.
+                otp_code =f"{secrets .randbelow (900000 )+100000 :06d}"
                 cache .set (f'mfa_code:{mfa_token }',otp_code ,timeout =300 )
 
                 # Send OTP via email
@@ -859,8 +862,9 @@ class MFALoginView (APIView ):
         is_valid =False 
 
         if cached_code :
-        # Verify Email OTP
-            is_valid =(code ==cached_code )
+        # Verify Email OTP. compare_digest, not ==: equality on short strings
+        # short-circuits byte by byte and is observable through timing.
+            is_valid =hmac .compare_digest (code ,cached_code )
         else :
         # Verify TOTP
             if not user .mfa_secret :
@@ -878,15 +882,62 @@ class MFALoginView (APIView ):
             status =status .HTTP_400_BAD_REQUEST ,
             )
 
-            # Trust this device if requested
+        # Device authorization gate — LoginView and BiometricLoginView both
+        # enforce it, but this view was a gap: a caller on an untrusted device
+        # could complete 2FA and receive tokens anyway. Same rule, same place
+        # in the flow: checked after the secret verifies, before anything is
+        # minted.
+        fingerprint =request .META .get ('HTTP_X_DEVICE_FINGERPRINT','')
+        if fingerprint :
+            from apps .security .models import BlockedDevice ,DeviceRegistry 
+            from apps .audit .device_tracker import DeviceTracker 
+            if DeviceTracker .is_device_blocked (fingerprint )or (
+            BlockedDevice .objects .enforceable ()
+            .filter (device_fingerprint =fingerprint ).exists ()
+            ):
+                log_security_event (
+                user =user ,event_type ='LOGIN_FAILED',request =request ,
+                details ={'reason':'blocked_device_mfa',
+                          'device_fingerprint':fingerprint},
+                severity ='WARNING',
+                )
+                return Response (
+                {'detail':'هذا الجهاز محظور.','authorized':False },
+                status =status .HTTP_403_FORBIDDEN ,
+                )
+            if getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True ):
+                device =DeviceRegistry .objects .filter (
+                user =user ,device_fingerprint =fingerprint 
+                ).first ()
+                if device is None or not device .is_trusted :
+                    log_security_event (
+                    user =user ,event_type ='LOGIN_FAILED',request =request ,
+                    details ={'reason':'untrusted_device_mfa',
+                              'device_fingerprint':fingerprint},
+                    severity ='WARNING',
+                    )
+                    return Response (
+                    {'detail':'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.',
+                     'authorized':False },
+                    status =status .HTTP_403_FORBIDDEN ,
+                    )
+
+        # Trust this device if requested. Self-trust is the historical
+        # adaptive-auth behaviour, and it is a hole in Dr. Majed's activation
+        # policy: with ENFORCE_DEVICE_AUTHORIZATION on, activation must come
+        # from the admin (Telegram/dashboard) only — a client asking for trust
+        # here would mint its own license, even for a blacklisted device.
         trust_device =request .data .get ('trust_device',False )
-        if trust_device :
+        if trust_device and not getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True ):
             fingerprint =request .META .get ('HTTP_X_DEVICE_FINGERPRINT')
             if fingerprint :
-                from apps .security .models import DeviceRegistry 
-                DeviceRegistry .objects .filter (
-                user =user ,device_fingerprint =fingerprint 
-                ).update (is_trusted =True )
+                from apps .security .models import DeviceRegistry ,BlockedDevice 
+                if not BlockedDevice .objects .enforceable ().filter (
+                device_fingerprint =fingerprint 
+                ).exists ():
+                    DeviceRegistry .objects .filter (
+                    user =user ,device_fingerprint =fingerprint 
+                    ).update (is_trusted =True )
 
         cache .delete (f'mfa_pending:{mfa_token }')
         if cached_code :

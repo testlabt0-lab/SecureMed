@@ -9,15 +9,16 @@ from apps .backups .models import BackupRecord
 @admin .register (BackupRecord )
 class BackupRecordAdmin (admin .ModelAdmin ):
     list_display =[
-    'filename','status','kind','size_kb','created_by',
-    'exists_on_disk','created_at',
+    'filename','status','kind','scope','size_kb','created_by',
+    'delivery_status','exists_on_disk','created_at',
     ]
-    list_filter =['status','kind']
+    list_filter =['status','kind','scope','delivery_status']
     search_fields =['filename','note']
     readonly_fields =[
     'filename','filepath','size_bytes','checksum','status',
-    'kind','row_counts','media_files','duration_ms',
+    'kind','scope','row_counts','media_files','duration_ms',
     'created_by','note','created_at',
+    'delivery_status','delivery_detail','offsite_key','delivered_at',
     ]
 
     @admin .display (description =_ ('الحجم (KB)'))

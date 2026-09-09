@@ -171,9 +171,12 @@ export const settingsAPI = {
   totpSetup: mfaApi.setup,
   totpVerify: mfaApi.verify,
   totpDisable: mfaApi.disable,
-  sessions: () => api.get('/auth/sessions/'),
-  revokeSession: (sessionId: string) => api.post(`/auth/sessions/${sessionId}/revoke/`),
-  revokeAllSessions: () => api.post('/auth/sessions/revoke_all/'),
+  // Live session registry backed by apps.security.ActiveSessionsView —
+  // the old /auth/sessions/* endpoints were never implemented server-side.
+  sessions: () => api.get('/security/sessions/'),
+  revokeSession: (sessionId: string) =>
+    api.delete('/security/sessions/', { data: { session_id: sessionId } }),
+  revokeAllSessions: () => api.delete('/security/sessions/'),
   notificationPrefs: notificationsApi.preferences,
   updateNotificationPrefs: notificationsApi.updatePreferences,
 };

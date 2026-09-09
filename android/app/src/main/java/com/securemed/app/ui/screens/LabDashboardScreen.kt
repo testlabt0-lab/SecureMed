@@ -2,7 +2,6 @@ package com.securemed.app.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Science
@@ -13,6 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.model.LabTestRequest
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -21,7 +23,7 @@ fun LabDashboardScreen(
     onBack: () -> Unit,
     viewModel: LabViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val requests = viewModel.requestsPagingFlow.collectAsLazyPagingItems()
 
     Scaffold(
         topBar = {
@@ -48,23 +50,42 @@ fun LabDashboardScreen(
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(8.dp))
-            
-            when (val state = uiState) {
-                is LabUiState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+
+            val isRefreshing = requests.loadState.refresh is LoadState.Loading
+            val refreshError = requests.loadState.refresh as? LoadState.Error
+
+            when {
+                requests.loadState.refresh is LoadState.Loading && requests.itemCount == 0 -> {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-                is LabUiState.Error -> {
-                    Text("خطأ: ${state.message}", color = MaterialTheme.colorScheme.error)
+                refreshError != null && requests.itemCount == 0 -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            ApiErrors.messageFor(refreshError.error, "خطأ أثناء جلب التحاليل"),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { requests.retry() }) { Text("إعادة المحاولة") }
+                    }
                 }
-                is LabUiState.Success -> {
-                    if (state.requests.isEmpty()) {
-                        Text("لا توجد تحاليل حالياً.", modifier = Modifier.padding(16.dp))
-                    } else {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(state.requests) { request ->
+                requests.itemCount == 0 -> {
+                    Text("لا توجد تحاليل حالياً.", modifier = Modifier.padding(16.dp))
+                }
+                else -> {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(requests.itemCount) { index ->
+                            requests[index]?.let { request ->
                                 LabResultCard(request = request)
+                            }
+                        }
+                        if (requests.loadState.append is LoadState.Loading) {
+                            item {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) { CircularProgressIndicator() }
                             }
                         }
                     }

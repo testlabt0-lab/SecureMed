@@ -39,20 +39,32 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['post'])
     def create_backup_action(self, request):
-        """Run a synchronous backup (demo scale)."""
+        """Run a synchronous backup (demo scale).
+
+        `scope` selects what the archive covers: FULL (default), DATABASE
+        (db dump only) or MEDIA (uploaded files only) — القاعدة والملفات
+        قابلة للفصل عند النسخ والاستعادة.
+        """
         note = str(request.data.get('note') or '')[:255]
+        scope = str(request.data.get('scope') or BackupRecord.Scope.FULL).upper()
+        if scope not in BackupRecord.Scope.values:
+            return Response(
+                {'detail': f'نطاق غير معروف: {scope} — المسموح: {", ".join(BackupRecord.Scope.values)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             record = create_backup(
                 created_by=request.user,
                 kind=BackupRecord.Kind.MANUAL,
                 note=note,
+                scope=scope,
             )
         except Exception as e:
             log_security_event(
                 user=request.user,
                 event_type='BACKUP_FAILED',
                 request=request,
-                details={'error': str(e)[:200]},
+                details={'error': str(e)[:200], 'scope': scope},
                 severity='ERROR',
             )
             return Response(
@@ -63,7 +75,7 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
             user=request.user,
             event_type='BACKUP_CREATED',
             request=request,
-            details={'filename': record.filename, 'size': record.size_bytes},
+            details={'filename': record.filename, 'size': record.size_bytes, 'scope': record.scope},
         )
         return Response(
             BackupRecordSerializer(record).data,
@@ -143,7 +155,27 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
                     details={'filename': record.filename, 'restored_media_files': result.get('restored_media_files', 0)},
                     severity='CRITICAL',
                 )
-            return Response(result)
+                # Restore is the most destructive operation in the system —
+                # the admin chat hears about it immediately, with the safety
+                # copy that was taken right before it.
+                try:
+                    from apps.security.telegram_service import send_critical_alert
+                    send_critical_alert(
+                        'تمت استعادة نسخة احتياطية!',
+                        [
+                            f"<b>الأرشيف المستعاد:</b> <code>{record.filename}</code>",
+                            f"<b>النطاق:</b> {result.get('scope', 'FULL')}",
+                            f"<b>بواسطة:</b> {request.user.email}",
+                            result.get('safety_backup') and (
+                                f"<b>نسخة الأمان قبل الاستعادة:</b> "
+                                f"<code>{result['safety_backup']}</code>"
+                            ) or None,
+                        ],
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger('security').error(f"Restore telegram alert failed: {e}")
+                return Response(result)
         except Exception as e:
             log_security_event(
                 user=request.user,
@@ -156,6 +188,57 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
                 {'detail': f'فشلت الاستعادة: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    @action(detail=False, methods=['get'])
+    def delivery_status(self, request):
+        """Which off-site channels are configured, for the dashboard UI."""
+        from django.conf import settings as s
+        telegram_ready = bool(
+            getattr(s, 'TELEGRAM_BOT_TOKEN', '') and getattr(s, 'TELEGRAM_ADMIN_CHAT_ID', '')
+        )
+        cloud_ready = bool(getattr(s, 'BACKUP_OFFSITE_BUCKET', ''))
+        return Response({
+            'telegram': {
+                'enabled': bool(getattr(s, 'BACKUP_SEND_TO_TELEGRAM', False)),
+                'ready': telegram_ready,
+            },
+            'cloud': {
+                'enabled': bool(getattr(s, 'BACKUP_OFFSITE_ENABLED', False)),
+                'ready': cloud_ready,
+                'bucket': getattr(s, 'BACKUP_OFFSITE_BUCKET', '') or None,
+            },
+            'any_enabled': (
+                bool(getattr(s, 'BACKUP_SEND_TO_TELEGRAM', False))
+                or bool(getattr(s, 'BACKUP_OFFSITE_ENABLED', False))
+            ),
+        })
+
+    @action(detail=True, methods=['post'])
+    def deliver_offsite(self, request, pk=None):
+        """Re-run off-site delivery (Telegram / cloud) for one archive."""
+        record = self.get_object()
+        if not record.exists_on_disk:
+            return Response(
+                {'detail': 'ملف النسخة غير موجود على القرص'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        from apps.backups.offsite import deliver_backup
+        result = deliver_backup(record)
+        log_security_event(
+            user=request.user,
+            event_type='BACKUP_DELIVERED' if record.delivered_offsite else 'BACKUP_DELIVERY_FAILED',
+            request=request,
+            details={
+                'filename': record.filename,
+                'delivery_status': record.delivery_status,
+            },
+            severity='INFO' if record.delivered_offsite else 'WARNING',
+        )
+        return Response({
+            'delivery_status': record.delivery_status,
+            'delivery_status_display': record.get_delivery_status_display(),
+            'results': result['results'],
+        })
 
     def destroy(self, request, *args, **kwargs):
         record = self.get_object()

@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { securityAPI } from '../api/client';
-import { Laptop, Smartphone, ShieldCheck, ShieldAlert, RefreshCw, CheckCircle2, Ban, Unlock, Download, Network } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
+import { Laptop, Smartphone, ShieldCheck, ShieldAlert, RefreshCw, CheckCircle2, Ban, Unlock, Download, Network, ShieldOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import toast from 'react-hot-toast';
 
 export const DeviceManagement = () => {
+  const role = useAuthStore((s) => s.user?.role);
+  const isAdmin = role === 'SUPER_ADMIN' || role === 'HOSPITAL_ADMIN';
   const [activeTab, setActiveTab] = useState<'registered' | 'blocked' | 'ips'>('registered');
   const [devices, setDevices] = useState<any[]>([]);
   const [blockedDevices, setBlockedDevices] = useState<any[]>([]);
@@ -14,6 +17,7 @@ export const DeviceManagement = () => {
   const [deviceTypes, setDeviceTypes] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [trustingId, setTrustingId] = useState<string | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [blockingId, setBlockingId] = useState<string | null>(null);
   const [unblockingId, setUnblockingId] = useState<string | null>(null);
   const [ipInput, setIpInput] = useState('');
@@ -72,14 +76,47 @@ export const DeviceManagement = () => {
     setTrustingId(id);
     const toastId = toast.loading('جاري توثيق الجهاز...');
     try {
-      await securityAPI.devices.trust(id);
-      toast.success('تم تعيين الجهاز كموثوق بنجاح', { id: toastId });
+      const res = await securityAPI.devices.trust(id);
+      toast.success(res?.data?.detail || 'تم تعيين الجهاز كموثوق بنجاح', { id: toastId });
       await fetchDevices();
-    } catch (error) {
-      toast.error('فشل توثيق الجهاز', { id: toastId });
-      console.error('Error trusting device:', error);
+    } catch (error: any) {
+      // surfaced verbatim: the backend's guards (blacklisted device, or
+      // self-trust refused while ENFORCE_DEVICE_AUTHORIZATION is on) explain
+      // themselves better than a generic label
+      const msg = error.response?.data?.detail || 'فشل توثيق الجهاز';
+      toast.error(msg, { id: toastId });
     } finally {
       setTrustingId(null);
+    }
+  };
+
+  const deactivateDevice = async (device: any) => {
+    if (isAdmin && !confirm(
+      `إلغاء تفعيل هذا الجهاز سيقوم بـ:\n` +
+      `• سحب الثقة منه فوراً\n` +
+      `• إضافته للقائمة السوداء (يمنعه من الدخول مجدداً)\n` +
+      `• إنهاء جلسته الحالية\n\n` +
+      `هل تريد المتابعة؟`
+    )) {
+      return;
+    }
+    if (!isAdmin && !confirm(
+      `إزالة هذا الجهاز من حسابك ستنهي جلسته الحالية، ولن يُحظر — ` +
+      `يمكنك طلب تفعيله مجدداً لاحقاً. متابعة؟`
+    )) {
+      return;
+    }
+    setDeactivatingId(device.id);
+    const toastId = toast.loading('جاري إلغاء تفعيل الجهاز...');
+    try {
+      await securityAPI.devices.deactivate(device.id);
+      toast.success('تم إلغاء تفعيل الجهاز وحظره وإنهاء جلسته', { id: toastId });
+      await Promise.all([fetchDevices(), fetchBlockedDevices()]);
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || 'فشل إلغاء التفعيل';
+      toast.error(msg, { id: toastId });
+    } finally {
+      setDeactivatingId(null);
     }
   };
 
@@ -372,7 +409,7 @@ export const DeviceManagement = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center gap-2">
-                              {!device.is_trusted && (
+                              {!device.is_trusted && isAdmin && (
                                 <button
                                   onClick={() => trustDevice(device.id)}
                                   disabled={trustingId === device.id}
@@ -382,14 +419,38 @@ export const DeviceManagement = () => {
                                   توثيق
                                 </button>
                               )}
-                              <button
-                                onClick={() => blockDevice(device)}
-                                disabled={blockingId === device.id}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
-                              >
-                                <Ban className="w-3.5 h-3.5" />
-                                {blockingId === device.id ? 'جاري الحظر...' : 'حظر'}
-                              </button>
+                              {device.is_trusted && isAdmin && (
+                                <button
+                                  onClick={() => deactivateDevice(device)}
+                                  disabled={deactivatingId === device.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                                  title="سحب الثقة + حظر + إنهاء الجلسة"
+                                >
+                                  <ShieldOff className="w-3.5 h-3.5" />
+                                  {deactivatingId === device.id ? 'جاري الإلغاء...' : 'إلغاء التفعيل'}
+                                </button>
+                              )}
+                              {device.is_trusted && !isAdmin && (
+                                <button
+                                  onClick={() => deactivateDevice(device)}
+                                  disabled={deactivatingId === device.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                                  title="إزالة الجهاز من حسابك — يمكنك طلب تفعيله مجدداً لاحقاً"
+                                >
+                                  <ShieldOff className="w-3.5 h-3.5" />
+                                  {deactivatingId === device.id ? 'جاري الإزالة...' : 'إزالة جهازي'}
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <button
+                                  onClick={() => blockDevice(device)}
+                                  disabled={blockingId === device.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                  {blockingId === device.id ? 'جاري الحظر...' : 'حظر'}
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

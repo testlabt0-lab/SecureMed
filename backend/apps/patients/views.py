@@ -330,6 +330,53 @@ class MedicalRecordViewSet (viewsets .ModelViewSet ):
         }
         )
 
+    def _can_modify_record (self ,record ):
+        """Same gate perform_create applies, for updates and deletes.
+
+        Without this any authenticated user who could *read* a record could
+        PATCH or DELETE it — the ModelViewSet default has no write guard, and
+        the mobile client is about to expose both operations. The rule matches
+        creation: admins always, otherwise EDITOR-or-higher in the record's
+        channel.
+        """
+        user =self .request .user
+        if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
+            return True
+        if not record .channel or not record .channel .can_view (user ):
+            return False
+        role =record .channel .get_user_role (user )
+        return role in ['OWNER','MODERATOR','EDITOR','CONTRIBUTOR']
+
+    def perform_update (self ,serializer ):
+        record =serializer .instance
+        if not self ._can_modify_record (record ):
+            raise PermissionDenied ('دورك لا يسمح بتعديل هذا السجل')
+        updated =serializer .save ()
+        log_security_event (
+        user =self .request .user ,
+        event_type ='MEDICAL_RECORD_UPDATED',
+        request =self .request ,
+        details ={
+        'record_id':str (updated .id ),
+        'channel_id':str (updated .channel_id ),
+        }
+        )
+
+    def perform_destroy (self ,instance ):
+        if not self ._can_modify_record (instance ):
+            raise PermissionDenied ('دورك لا يسمح بحذف هذا السجل')
+        log_security_event (
+        user =self .request .user ,
+        event_type ='MEDICAL_RECORD_DELETED',
+        request =self .request ,
+        details ={
+        'record_id':str (instance .id ),
+        'channel_id':str (instance .channel_id ) if instance .channel_id else None ,
+        'title':instance .title ,
+        }
+        )
+        instance .delete ()
+
 
         # Helper import
 from django .db .models import Q 

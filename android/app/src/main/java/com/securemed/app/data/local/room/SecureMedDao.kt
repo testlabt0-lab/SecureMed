@@ -61,5 +61,19 @@ interface SecureMedDao {
         clearRecords()
         clearAppointments()
         clearPendingActions()
+        // Plans/logs moved into Room (3-4) carry patient names, and the old
+        // JSON logout wiped them — the wipe must follow the data.
+        clearMedicationTables()
+    }
+
+    @Query("DELETE FROM medication_plans")
+    suspend fun clearMedicationPlans()
+
+    @Query("DELETE FROM medication_dose_logs")
+    suspend fun clearMedicationDoseLogs()
+
+    suspend fun clearMedicationTables() {
+        clearMedicationPlans()
+        clearMedicationDoseLogs()
     }
 }

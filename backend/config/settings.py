@@ -520,6 +520,27 @@ BACKUP_KEEP_COUNT =config ('BACKUP_KEEP_COUNT',default =14 ,cast =int )
 # not automatically get every backup with it.
 BACKUP_ENCRYPTION_KEY =config ('BACKUP_ENCRYPTION_KEY',default ='')
 
+# Off-site delivery of every finished archive (خطة النسخ التلقائي عبر تلجرام
+# أو التخزين السحابي). Both channels are opt-in; a deployment with neither
+# configured keeps local-only archives as before.
+#
+# 1. Telegram: the encrypted archive is uploaded to the admin chat via
+#    sendDocument. The public Bot API caps one document at 50 MB — larger
+#    archives simply skip this channel, so pair it with the bucket for big
+#    databases. Requires TELEGRAM_BOT_TOKEN + TELEGRAM_ADMIN_CHAT_ID.
+BACKUP_SEND_TO_TELEGRAM =config ('BACKUP_SEND_TO_TELEGRAM',default =False ,cast =bool )
+# 2. Cloud: a copy is pushed to any S3-compatible bucket (AWS S3, Cloudflare
+#    R2, Backblaze B2, MinIO, Spaces) with boto3, multipart-safe. Credentials
+#    default to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY; set
+#    BACKUP_OFFSITE_ENDPOINT_URL for non-AWS endpoints.
+BACKUP_OFFSITE_ENABLED =config ('BACKUP_OFFSITE_ENABLED',default =False ,cast =bool )
+BACKUP_OFFSITE_BUCKET =config ('BACKUP_OFFSITE_BUCKET',default ='')
+BACKUP_OFFSITE_PREFIX =config ('BACKUP_OFFSITE_PREFIX',default ='securemed-backups')
+BACKUP_OFFSITE_ENDPOINT_URL =config ('BACKUP_OFFSITE_ENDPOINT_URL',default ='')
+BACKUP_OFFSITE_REGION =config ('BACKUP_OFFSITE_REGION',default ='us-east-1')
+BACKUP_OFFSITE_ACCESS_KEY_ID =config ('BACKUP_OFFSITE_ACCESS_KEY_ID',default ='')
+BACKUP_OFFSITE_SECRET_ACCESS_KEY =config ('BACKUP_OFFSITE_SECRET_ACCESS_KEY',default ='')
+
 # ============================================
 # Telegram device-approval bot
 # ============================================

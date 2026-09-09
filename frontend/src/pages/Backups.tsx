@@ -1,11 +1,30 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DatabaseBackup, Plus, Download, Trash2, ShieldCheck, HardDrive, RotateCcw
+  DatabaseBackup, Plus, Download, Trash2, ShieldCheck, HardDrive, RotateCcw,
+  Send, Cloud, CheckCircle2, XCircle, CircleDashed
 } from 'lucide-react';
 import { backupsAPI } from '../api/client';
 import { downloadBlobResponse } from '../api/extendedApis';
 import toast from 'react-hot-toast';
+
+// delivery_status → { label, tone }. Mirrors BackupRecord.DeliveryStatus on
+// the backend so a new backend state without a mapping here degrades to
+// "unknown" instead of crashing the row.
+const DELIVERY_BADGES: Record<string, { label: string; cls: string }> = {
+  NOT_SENT: { label: 'محلية فقط', cls: 'badge-gray' },
+  TELEGRAM: { label: 'أُرسلت عبر تلجرام', cls: 'badge-info' },
+  CLOUD: { label: 'في التخزين السحابي', cls: 'badge-info' },
+  BOTH: { label: 'تلجرام + سحابي', cls: 'badge-success' },
+  DELIVERY_FAILED: { label: 'فشل التسليم', cls: 'badge-danger' },
+};
+
+// scope → label. Mirrors BackupRecord.Scope.
+const SCOPE_BADGES: Record<string, { label: string; cls: string }> = {
+  FULL: { label: 'كامل', cls: 'badge-info' },
+  DATABASE: { label: 'قاعدة البيانات', cls: 'badge-warning' },
+  MEDIA: { label: 'الملفات', cls: 'badge-gray' },
+};
 
 export default function Backups() {
   const queryClient = useQueryClient();
@@ -17,10 +36,27 @@ export default function Backups() {
     queryFn: () => backupsAPI.list(),
   });
 
+  const { data: delivery } = useQuery({
+    queryKey: ['backup-delivery-status'],
+    queryFn: () => backupsAPI.deliveryStatus(),
+  });
+  const channels = delivery?.data;
+  const channelsLabel = channels?.any_enabled
+    ? [
+        channels.telegram?.enabled ? 'تلجرام' : null,
+        channels.cloud?.enabled ? `التخزين السحابي${channels.cloud?.bucket ? ` (${channels.cloud.bucket})` : ''}` : null,
+      ].filter(Boolean).join(' + ')
+    : null;
+  const channelsMisconfigured = !!channels && (
+    (channels.telegram?.enabled && !channels.telegram?.ready) ||
+    (channels.cloud?.enabled && !channels.cloud?.ready)
+  );
+
   const createMutation = useMutation({
-    mutationFn: () => backupsAPI.create(note),
-    onSuccess: () => {
-      toast.success('تم إنشاء النسخة الاحتياطية بنجاح');
+    mutationFn: (scope: string) => backupsAPI.create(note, scope),
+    onSuccess: (_res, scope: string) => {
+      const scopeLabel = SCOPE_BADGES[scope]?.label || scope;
+      toast.success(`تم إنشاء النسخة الاحتياطية (${scopeLabel}) بنجاح`);
       setNote('');
       queryClient.invalidateQueries({ queryKey: ['backups'] });
     },
@@ -71,6 +107,21 @@ export default function Backups() {
     },
   });
 
+  const deliverMutation = useMutation({
+    mutationFn: (id: string) => backupsAPI.deliverOffsite(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['backups'] });
+      const status = res.data?.delivery_status;
+      if (status === 'TELEGRAM' || status === 'CLOUD' || status === 'BOTH') {
+        toast.success(res.data?.delivery_status_display || 'تم التسليم الخارجي بنجاح');
+      } else {
+        toast.error(res.data?.delivery_status_display || 'فشل التسليم الخارجي — راجع سجل الخادم');
+      }
+    },
+    onError: (err: any) =>
+      toast.error(err.response?.data?.detail || 'فشل التسليم الخارجي'),
+  });
+
   const backups = data?.data?.results || data?.data || [];
   const totalSize = backups.reduce((s: number, b: any) => s + (b.size_bytes || 0), 0);
 
@@ -96,16 +147,41 @@ export default function Backups() {
             onChange={(e) => setNote(e.target.value)}
             maxLength={200}
           />
-          <button
-            onClick={() => {
-              if (confirm('إنشاء نسخة احتياطية كاملة الآن؟')) createMutation.mutate();
-            }}
-            disabled={createMutation.isPending}
-            className="btn-primary flex items-center justify-center gap-2 whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            {createMutation.isPending ? 'جاري الإنشاء...' : 'نسخة احتياطية الآن'}
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                if (confirm('إنشاء نسخة احتياطية كاملة الآن (قاعدة البيانات + الملفات)؟')) createMutation.mutate('FULL');
+              }}
+              disabled={createMutation.isPending}
+              className="btn-primary flex items-center justify-center gap-2 whitespace-nowrap"
+              title="قاعدة البيانات + الملفات المرفوعة"
+            >
+              <Plus className="w-4 h-4" />
+              {createMutation.isPending ? 'جاري الإنشاء...' : 'نسخة كاملة'}
+            </button>
+            <button
+              onClick={() => {
+                if (confirm('إنشاء نسخة قاعدة البيانات فقط؟ (بدون الملفات المرفوعة)')) createMutation.mutate('DATABASE');
+              }}
+              disabled={createMutation.isPending}
+              className="btn-secondary flex items-center justify-center gap-2 whitespace-nowrap"
+              title="dump قاعدة البيانات فقط — أخف وأسرع للتسليم اليومي"
+            >
+              <DatabaseBackup className="w-4 h-4" />
+              قاعدة البيانات فقط
+            </button>
+            <button
+              onClick={() => {
+                if (confirm('إنشاء نسخة الملفات المرفوعة فقط؟')) createMutation.mutate('MEDIA');
+              }}
+              disabled={createMutation.isPending}
+              className="btn-secondary flex items-center justify-center gap-2 whitespace-nowrap"
+              title="ملفات الرفع (التقارير، الأشعة، السجلات) فقط — لا تلمس قاعدة البيانات"
+            >
+              <HardDrive className="w-4 h-4" />
+              الملفات فقط
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
           <span className="flex items-center gap-1">
@@ -113,10 +189,22 @@ export default function Backups() {
             {backups.length} نسخة — {(totalSize / 1024 / 1024).toFixed(2)} ميجابايت
           </span>
           <span>•</span>
-          <span>يُحتفظ تلقائياً بآخر 14 نسخة</span>
+          <span>نسخة تلقائية يومية (قاعدة البيانات 2 صباحاً + كاملة كل جمعة) — يُحتفظ بآخر 14 نسخة لكل نطاق</span>
+          <span>•</span>
+          <span className="flex items-center gap-1">
+            <Cloud className="w-3.5 h-3.5" />
+            {channelsLabel
+              ? `التسليم التلقائي مفعّل: ${channelsLabel}`
+              : 'التسليم الخارجي غير مفعّل (تُضبط القنوات في إعدادات الخادم)'}
+          </span>
           <span>•</span>
           <span>للاستعادة: اختر أيقونة (الاستعادة) من الجدول أدناه (تحذير: سيتم مسح البيانات الحالية)</span>
         </div>
+        {channelsMisconfigured && (
+          <div className="mt-3 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+            ⚠ قناة تسليم مفعّلة لكن بياناتها ناقصة (بوت تلجرام أو دلو التخزين) — سيُسجَّل الفشل في حالة التسليم لكل نسخة.
+          </div>
+        )}
       </div>
 
       {/* Backups list */}
@@ -135,22 +223,49 @@ export default function Backups() {
                 <th className="pb-3 pr-4 font-medium">الملف</th>
                 <th className="pb-3 font-medium">الحجم</th>
                 <th className="pb-3 font-medium">البصمة</th>
+                <th className="pb-3 font-medium">التسليم الخارجي</th>
                 <th className="pb-3 font-medium">التاريخ</th>
                 <th className="pb-3 pl-4 font-medium">الإجراءات</th>
               </tr>
             </thead>
             <tbody>
-              {backups.map((b: any) => (
+              {backups.map((b: any) => {
+                const delivery = DELIVERY_BADGES[b.delivery_status] || {
+                  label: b.delivery_status || 'غير معروف',
+                  cls: 'badge-gray',
+                };
+                const scope = SCOPE_BADGES[b.scope] || SCOPE_BADGES.FULL;
+                return (
                 <tr key={b.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="py-3 pr-4">
                     <p className="font-medium text-sm">{b.filename}</p>
-                    {b.note && <p className="text-xs text-gray-500">{b.note}</p>}
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      <span className={`badge ${scope.cls} text-[10px]`}>{scope.label}</span>
+                      {b.note && <span className="text-xs text-gray-500">{b.note}</span>}
+                    </div>
                     {!b.exists_on_disk && (
                       <span className="badge badge-danger text-[10px]">الملف غير موجود</span>
                     )}
                   </td>
                   <td className="text-sm whitespace-nowrap">{b.size_kb} KB</td>
                   <td className="text-xs font-mono text-gray-400">{b.checksum?.slice(0, 10)}...</td>
+                  <td className="text-sm whitespace-nowrap">
+                    <span className={`badge ${delivery.cls} text-[10px] flex items-center gap-1 w-fit`}>
+                      {b.delivery_status === 'BOTH' ? (
+                        <CheckCircle2 className="w-3 h-3" />
+                      ) : b.delivery_status === 'DELIVERY_FAILED' ? (
+                        <XCircle className="w-3 h-3" />
+                      ) : (
+                        <CircleDashed className="w-3 h-3" />
+                      )}
+                      {delivery.label}
+                    </span>
+                    {b.delivered_at && (
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {new Date(b.delivered_at).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}
+                      </p>
+                    )}
+                  </td>
                   <td className="text-xs text-gray-500 whitespace-nowrap">
                     {new Date(b.created_at).toLocaleString('ar', { dateStyle: 'short', timeStyle: 'short' })}
                   </td>
@@ -163,6 +278,14 @@ export default function Backups() {
                         title="فحص السلامة"
                       >
                         <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      </button>
+                      <button
+                        onClick={() => deliverMutation.mutate(b.id)}
+                        disabled={!b.exists_on_disk || deliverMutation.isPending}
+                        className="p-2 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 rounded-lg disabled:opacity-30"
+                        title="إعادة التسليم الخارجي (تلجرام / التخزين السحابي حسب الإعدادات)"
+                      >
+                        <Send className="w-4 h-4 text-cyan-600" />
                       </button>
                       <button
                         onClick={() => downloadMutation.mutate(b.id)}
@@ -199,7 +322,8 @@ export default function Backups() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

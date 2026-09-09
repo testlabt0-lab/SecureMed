@@ -121,6 +121,26 @@ class DeviceTracker :
                 severity='WARNING',
                 details={'reason': reason_msg, 'device_fingerprint': fingerprint, 'location': location}
             )
+            # The owner hears about the new device inside the app (and by email
+            # per preferences) — if the login was not theirs, they now know to
+            # deactivate the device or alert the admin.
+            try:
+                from apps.notifications.utils import send_notification
+                send_notification(
+                    recipient=user,
+                    notification_type='LOGIN_ALERT',
+                    priority='HIGH' if created else 'MEDIUM',
+                    title='دخول من جهاز جديد',
+                    message=(
+                        f'تم تسجيل دخول على جهاز {"جديد" if created else "من موقع جديد"} '
+                        f'({device_info.get("os_info", "") or "جهاز غير معروف"}) '
+                        f'من {ip_address or "عنوان غير معروف"}. '
+                        f'إن لم تكن أنت، ألغِ تفعيل الجهاز من إدارة الأجهزة أو أبلغ الإدارة.'
+                    ),
+                    data={'device_fingerprint': fingerprint, 'ip_address': ip_address},
+                )
+            except Exception as e:
+                logger.error(f"Failed to send new-device login alert: {e}")
 
         return device, is_suspicious
 

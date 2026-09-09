@@ -16,6 +16,7 @@ restore_backup():
 """
 import hashlib 
 import json 
+import logging 
 import os 
 import shutil 
 import time 
@@ -78,64 +79,96 @@ def _count_media_files ()->int :
     return total 
 
 
-def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='')->BackupRecord :
-    """Create a full backup archive. Raises on failure."""
+def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='',
+                   scope =BackupRecord .Scope .FULL )->BackupRecord :
+    """Create a backup archive covering *scope*.
+
+    FULL = db dump + media, DATABASE = db dump only, MEDIA = media only.
+    Separate scopes exist because the two halves age differently: the database
+    changes with every consultation while uploaded scans and lab PDFs are
+    immutable, so a frequent small database-only backup is cheaper to ship
+    off-site than a full archive every time.
+    """
     from apps .backups .models import BackupRecord as BR 
+
+    if scope not in BR .Scope .values :
+        raise ValueError (f'نطاق غير معروف: {scope }')
 
     started =time .time ()
     ts =timezone .localtime ().strftime ('%Y%m%d_%H%M%S')
     # unique suffix avoids same-second filename collisions
     unique =uuid .uuid4 ().hex [:6 ]
-    filename =f'securemed_backup_{ts }_{unique }.zip'
+    scope_tag ={'FULL':'full','DATABASE':'db','MEDIA':'media'}[scope ]
+    filename =f'securemed_backup_{scope_tag }_{ts }_{unique }.zip'
     out_path =backup_dir ()/filename 
 
-    # 1) data dump
-    dump_file =backup_dir ()/f'_tmp_dump_{ts }.json'
-    with open (dump_file ,'w',encoding ='utf-8')as f :
-        call_command (
-        'dumpdata',
-        exclude =TRANSIENT_EXCLUDE ,
-        stdout =f ,
-        format ='json',
-        indent =1 ,
-        )
-    checksum =_sha256_file (dump_file )
+    media_root =Path (settings .MEDIA_ROOT )
+    include_db =scope in (BR .Scope .FULL ,BR .Scope .DATABASE )
+    include_media =scope in (BR .Scope .FULL ,BR .Scope .MEDIA )
+
+    dump_file =None
+    checksum =''
+    row_counts ={}
+
+    if include_db :
+        # 1) data dump
+        dump_file =backup_dir ()/f'_tmp_dump_{ts }.json'
+        with open (dump_file ,'w',encoding ='utf-8')as f :
+            call_command (
+            'dumpdata',
+            exclude =TRANSIENT_EXCLUDE ,
+            stdout =f ,
+            format ='json',
+            indent =1 ,
+            )
+        checksum =_sha256_file (dump_file )
+        row_counts =_table_counts ()
 
     manifest ={
     'created_at':timezone .now ().isoformat (),
     'database':connections .databases [DEFAULT_DB_ALIAS ].get ('ENGINE',''),
     'checksum_sha256':checksum ,
-    'row_counts':_table_counts (),
+    'row_counts':row_counts ,
     'note':note ,
     'kind':kind ,
+    'scope':scope ,
     }
 
     # 2) build the zip
     try :
         with zipfile .ZipFile (out_path ,'w',zipfile .ZIP_DEFLATED )as zf :
-            zf .write (dump_file ,arcname ='db.json')
+            if include_db :
+                zf .write (dump_file ,arcname ='db.json')
             zf .writestr ('manifest.json',json .dumps (manifest ,ensure_ascii =False ,indent =2 ))
             # 3) media files
-            media_root =Path (settings .MEDIA_ROOT )
-            if media_root .exists ():
+            if include_media and media_root .exists ():
                 for root ,_ ,files in os .walk (media_root ):
                     for name in files :
                         full =Path (root )/name 
                         arc =Path ('media')/full .relative_to (media_root )
                         zf .write (full ,arcname =str (arc ))
     finally :
-        dump_file .unlink (missing_ok =True )
+        if dump_file is not None :
+            dump_file .unlink (missing_ok =True )
         
     # Encrypt the zip file
     try:
+        import hashlib
         import base64
-        import logging
         from cryptography.fernet import Fernet
-        key = getattr(settings, 'BACKUP_ENCRYPTION_KEY', settings.SECRET_KEY).encode('utf-8')
-        if len(key) < 32: key = key.ljust(32, b'0')
-        key = base64.urlsafe_b64encode(key[:32])
+        secret = getattr(settings, 'BACKUP_ENCRYPTION_KEY', '') or settings.SECRET_KEY
+        # Fernet requires exactly 32 url-safe base64 bytes. The old
+        # pad/truncate-to-32 derivation broke whenever SECRET_KEY was shorter
+        # than 32 bytes: base64 of a padded key is valid, but of a *truncated*
+        # secret of arbitrary length it frequently is not, Fernet raised inside
+        # the except-swallowing block, and the archive was left as plaintext
+        # while every later read treated it as encrypted garbage. Hashing the
+        # secret to 32 bytes is deterministic and always a valid key length;
+        # changing the derivation is safe because archives record no key
+        # metadata — a wrong-key archive has always failed verification.
+        key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode('utf-8')).digest())
         fernet = Fernet(key)
-        
+
         with open(out_path, 'rb') as f:
             data = f.read()
         encrypted_data = fernet.encrypt(data)
@@ -152,26 +185,44 @@ def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='')
     checksum =checksum ,
     status =BR .Status .COMPLETED ,
     kind =kind ,
-    row_counts =manifest ['row_counts'],
-    media_files =_count_media_files (),
+    scope =scope ,
+    row_counts =row_counts ,
+    media_files =_count_media_files ()if include_media else 0 ,
     duration_ms =duration_ms ,
     created_by =created_by ,
     note =note [:255 ],
     )
     _apply_retention ()
+    # Off-site delivery (Telegram document / cloud bucket) runs best-effort:
+    # a messaging or storage outage must never fail the backup run itself —
+    # the local archive above is already complete and verified.
+    try :
+        from apps .backups .offsite import deliver_backup
+        deliver_backup (record )
+    except Exception as e :
+        logger =logging .getLogger ('security')
+        logger .error (f"Off-site delivery failed for {filename}: {e }")
     return record 
 
 
 def _apply_retention ():
-    """Keep only the newest BACKUP_KEEP_COUNT completed archives."""
+    """Keep only the newest BACKUP_KEEP_COUNT completed archives **per scope**.
+
+    Per-scope, not global: media-only archives are cheap and may be run often
+    (uploaded scans never change), so a global count would let a burst of them
+    evict the full backups that restores actually depend on.
+    """
     keep =int (getattr (settings ,'BACKUP_KEEP_COUNT',14 ))
-    old =BackupRecord .objects .filter (status =BackupRecord .Status .COMPLETED ).order_by ('-created_at')[keep :]
-    for rec in old :
-        try :
-            os .remove (rec .filepath )
-        except OSError :
-            pass 
-        rec .delete ()
+    for scope in BackupRecord .Scope .values :
+        old =(BackupRecord .objects
+        .filter (status =BackupRecord .Status .COMPLETED ,scope =scope )
+        .order_by ('-created_at')[keep :])
+        for rec in old :
+            try :
+                os .remove (rec .filepath )
+            except OSError :
+                pass 
+            rec .delete ()
 
 
 def _get_decrypted_backup(filepath: str):
@@ -190,6 +241,7 @@ def _get_decrypted_backup(filepath: str):
     if not path.exists():
         raise FileNotFoundError(f'الملف غير موجود: {filepath}')
 
+    import hashlib
     import base64
     from cryptography.fernet import Fernet, InvalidToken
     from io import BytesIO
@@ -201,10 +253,7 @@ def _get_decrypted_backup(filepath: str):
         return BytesIO(raw)
 
     secret = getattr(settings, 'BACKUP_ENCRYPTION_KEY', '') or settings.SECRET_KEY
-    key = secret.encode('utf-8')
-    if len(key) < 32:
-        key = key.ljust(32, b'0')
-    key = base64.urlsafe_b64encode(key[:32])
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode('utf-8')).digest())
     fernet = Fernet(key)
 
     try:
@@ -223,79 +272,168 @@ def verify_backup (filepath :str )->dict :
     decrypted_file = _get_decrypted_backup(filepath)
     with zipfile .ZipFile (decrypted_file )as zf :
         names =set (zf .namelist ())
-        if 'db.json'not in names or 'manifest.json'not in names :
-            raise ValueError ('أرشيف غير صالح — db.json أو manifest.json مفقود')
+        if 'manifest.json'not in names :
+            raise ValueError ('أرشيف غير صالح — manifest.json مفقود')
         manifest =json .loads (zf .read ('manifest.json').decode ('utf-8'))
-        expected =manifest .get ('checksum_sha256','')
-        # extract db.json to temp and hash
-        path = Path(filepath)
-        tmp =path .parent /f'_verify_{path .name }.json'
-        try :
-            with zf .open ('db.json')as src ,open (tmp ,'wb')as dst :
-                shutil .copyfileobj (src ,dst )
-            actual =_sha256_file (tmp )
-        finally :
-            tmp .unlink (missing_ok =True )
-        if expected and actual !=expected :
-            raise ValueError ('فشل التحقق من البصمة — الأرشيف تالف أو معدّل')
+        scope =manifest .get ('scope',BackupRecord .Scope .FULL )
+        # Older archives carry no scope; they are full archives.
+        if 'db.json'not in names :
+            if scope !=BackupRecord .Scope .MEDIA :
+                raise ValueError ('أرشيف غير صالح — db.json مفقود')
+        else :
+            expected =manifest .get ('checksum_sha256','')
+            # extract db.json to temp and hash
+            path = Path(filepath)
+            tmp =path .parent /f'_verify_{path .name }.json'
+            try :
+                with zf .open ('db.json')as src ,open (tmp ,'wb')as dst :
+                    shutil .copyfileobj (src ,dst )
+                actual =_sha256_file (tmp )
+            finally :
+                tmp .unlink (missing_ok =True )
+            if expected and actual !=expected :
+                raise ValueError ('فشل التحقق من البصمة — الأرشيف تالف أو معدّل')
     return manifest 
+
+
+def _restore_media_from_zip (zf )->int :
+    """Copy every media/ entry of an open archive into MEDIA_ROOT."""
+    media_root =Path (settings .MEDIA_ROOT )
+    media_root .mkdir (parents =True ,exist_ok =True )
+    restored_files =0 
+    for name in zf .namelist ():
+        if name .startswith ('media/')and not name .endswith ('/'):
+            rel =Path (name ).relative_to ('media')
+            target =media_root /rel 
+            target .parent .mkdir (parents =True ,exist_ok =True )
+            with zf .open (name )as src ,open (target ,'wb')as dst :
+                shutil .copyfileobj (src ,dst )
+            restored_files +=1 
+    return restored_files 
+
+
+def reconcile_backup_registry():
+    """Re-register archive files on disk that have no BackupRecord row.
+
+    restore_backup's flush wipes BackupRecord itself — it is transient data as
+    far as dumpdata is concerned — so every archive that survived the restore
+    on disk would otherwise be forgotten by the registry while still occupying
+    space and still being restorable by hand.
+    """
+    from apps .backups .models import BackupRecord as BR 
+
+    registered =set (BR .objects .values_list ('filename',flat =True ))
+    created =0 
+    for f in sorted (backup_dir ().glob ('*.zip')):
+        if f .name in registered :
+            continue 
+        scope ,checksum ='',''
+        try :
+            manifest =verify_backup (str (f ))
+            scope =manifest .get ('scope',BR .Scope .FULL )
+            checksum =manifest .get ('checksum_sha256','')
+        except Exception :
+            pass 
+        BR .objects .create (
+        filename =f .name ,
+        filepath =str (f ),
+        size_bytes =f .stat ().st_size ,
+        checksum =checksum [:64 ],
+        status =BR .Status .COMPLETED ,
+        kind =BR .Kind .MANUAL ,
+        scope =scope or BR .Scope .FULL ,
+        note ='أُعيد تسجيله بعد استعادة',
+        )
+        created +=1 
+    return created 
 
 
 def restore_backup (filepath :str ,force :bool =False )->dict :
     """
-    Restore database + media from an archive.
-    Refuses without force=True (destructive: flushes current data).
+    Restore from an archive, honouring the manifest's scope.
+
+    DATABASE → flush + loaddata (media untouched); MEDIA → files only, the
+    live database is never touched; FULL → both (the historical behaviour).
+    Refuses without force=True for the destructive scopes.
     """
     manifest =verify_backup (filepath )# raises on corruption
+    scope =manifest .get ('scope',BackupRecord .Scope .FULL )
     if not force :
         return {
         'verified':True ,
         'manifest':manifest ,
+        'scope':scope ,
         'detail':'الأرشيف سليم — أعد التنفيذ مع force=True للاستعادة الفعلية',
         }
 
+    # Pre-restore safety copy: an accidental restore was irreversible before
+    # this — the flush destroyed the live data with no way back. The current
+    # state is snapshotted first, and a failure to snapshot aborts the restore
+    # (a broken safety net must not sit silently under a destructive
+    # operation). Retention applies to it like any archive.
+    safety_record =None
+    if scope !=BackupRecord .Scope .MEDIA :
+        safety_record =create_backup (
+        kind =BackupRecord .Kind .MANUAL ,
+        note ='أمان تلقائي قبل الاستعادة',
+        scope =BackupRecord .Scope .FULL ,
+        )
+
     decrypted_file = _get_decrypted_backup(filepath)
+    restored_media_files =0 
     with zipfile .ZipFile (decrypted_file )as zf :
-        db_json =zf .read ('db.json').decode ('utf-8')
+        if scope !=BackupRecord .Scope .MEDIA :
+            db_json =zf .read ('db.json').decode ('utf-8')
 
-        # write the dump to a temp fixture file (loaddata accepts paths)
-        path = Path(filepath)
-        tmp_fixture =path .parent /f'_restore_{path .name }.json'
-        tmp_fixture .write_text (db_json ,encoding ='utf-8')
-        try :
-        # 1) flush current data (django_migrations is preserved;
-        #    post_migrate inhibited so loaddata refills contenttypes)
-            call_command (
-            'flush',interactive =False ,verbosity =0 ,
-            inhibit_post_migrate =True ,
-            )
-
-            # 2) load the dump
-            from django .core .serializers .base import DeserializationError 
+            # write the dump to a temp fixture file (loaddata accepts paths)
+            path = Path(filepath)
+            tmp_fixture =path .parent /f'_restore_{path .name }.json'
+            tmp_fixture .write_text (db_json ,encoding ='utf-8')
             try :
-                call_command ('loaddata',str (tmp_fixture ),verbosity =0 )
-            except DeserializationError as e :
-                raise ValueError (f'بيانات غير قابلة للاستعادة: {e }')
-        finally :
-            tmp_fixture .unlink (missing_ok =True )
+            # 1) flush current data (django_migrations is preserved;
+            #    post_migrate inhibited so loaddata refills contenttypes)
+                call_command (
+                'flush',interactive =False ,verbosity =0 ,
+                inhibit_post_migrate =True ,
+                )
 
+                # 2) load the dump
+                from django .core .serializers .base import DeserializationError 
+                try :
+                    call_command ('loaddata',str (tmp_fixture ),verbosity =0 )
+                except DeserializationError as e :
+                    raise ValueError (f'بيانات غير قابلة للاستعادة: {e }')
+            finally :
+                tmp_fixture .unlink (missing_ok =True )
+
+        if scope !=BackupRecord .Scope .DATABASE :
             # 3) restore media files
-        media_root =Path (settings .MEDIA_ROOT )
-        media_root .mkdir (parents =True ,exist_ok =True )
-        restored_files =0 
-        for name in zf .namelist ():
-            if name .startswith ('media/')and not name .endswith ('/'):
-                rel =Path (name ).relative_to ('media')
-                target =media_root /rel 
-                target .parent .mkdir (parents =True ,exist_ok =True )
-                with zf .open (name )as src ,open (target ,'wb')as dst :
-                    shutil .copyfileobj (src ,dst )
-                restored_files +=1 
+            restored_media_files =_restore_media_from_zip (zf )
+
+    # flush wiped BackupRecord itself (transient-excluded from the dump), so
+    # re-register the safety copy explicitly and reconcile every other archive
+    # that survived on disk.
+    if safety_record is not None :
+        BackupRecord .objects .create (
+        filename =safety_record .filename ,
+        filepath =safety_record .filepath ,
+        size_bytes =safety_record .size_bytes ,
+        checksum =safety_record .checksum ,
+        status =BackupRecord .Status .COMPLETED ,
+        kind =BackupRecord .Kind .MANUAL ,
+        scope =BackupRecord .Scope .FULL ,
+        media_files =safety_record .media_files ,
+        duration_ms =safety_record .duration_ms ,
+        note ='أمان تلقائي قبل الاستعادة',
+        )
+    reconcile_backup_registry ()
 
     return {
     'verified':True ,
     'restored':True ,
-    'restored_media_files':restored_files ,
+    'scope':scope ,
+    'restored_media_files':restored_media_files ,
+    'safety_backup':safety_record .filename if safety_record else None ,
     'manifest':manifest ,
     'detail':'تمت الاستعادة بنجاح',
     }

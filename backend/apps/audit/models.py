@@ -80,6 +80,8 @@ class AuditLog (models .Model ):
         # Data access events
         PATIENT_DATA_ACCESSED ='PATIENT_DATA_ACCESSED',_ ('الوصول لبيانات مريض')
         MEDICAL_RECORD_CREATED ='MEDICAL_RECORD_CREATED',_ ('إنشاء سجل طبي')
+        MEDICAL_RECORD_UPDATED ='MEDICAL_RECORD_UPDATED',_ ('تعديل سجل طبي')
+        MEDICAL_RECORD_DELETED ='MEDICAL_RECORD_DELETED',_ ('حذف سجل طبي')
 
         # Security tool events
         PORT_SCAN_EXECUTED ='PORT_SCAN_EXECUTED',_ ('تنفيذ مسح منافذ')
@@ -93,6 +95,9 @@ class AuditLog (models .Model ):
 
         # User management
         USER_DEACTIVATED ='USER_DEACTIVATED',_ ('إلغاء تفعيل مستخدم')
+
+        # Prescriptions
+        PRESCRIPTION_CREATED ='PRESCRIPTION_CREATED',_ ('إنشاء وصفة طبية')
 
         # Two-factor authentication
         MFA_ENABLED ='MFA_ENABLED',_ ('تفعيل التحقق بخطوتين')
@@ -170,6 +175,27 @@ class AuditLog (models .Model ):
         MONTHLY_REPORT_EMAILED ='MONTHLY_REPORT_EMAILED',_ ('إرسال التقرير الشهري')
         SCHEDULED_REPORT_SENT ='SCHEDULED_REPORT_SENT',_ ('إرسال تقرير مجدول')
         TEST_EMAIL_SENT ='TEST_EMAIL_SENT',_ ('إرسال بريد اختباري')
+
+        # Device lifecycle (approval flow + إلغاء التفعيل). These were already
+        # emitted by apps.security before being declared here; undeclared
+        # values saved fine but rendered raw in the admin and were invisible
+        # to list filters.
+        DEVICE_REGISTRATION_REQUESTED ='DEVICE_REGISTRATION_REQUESTED',_ ('طلب تسجيل جهاز')
+        DEVICE_APPROVED_VIA_TELEGRAM ='DEVICE_APPROVED_VIA_TELEGRAM',_ ('تفعيل جهاز عبر تيليجرام')
+        DEVICE_REJECTED_VIA_TELEGRAM ='DEVICE_REJECTED_VIA_TELEGRAM',_ ('رفض جهاز عبر تيليجرام')
+        DEVICE_DEACTIVATED_VIA_TELEGRAM ='DEVICE_DEACTIVATED_VIA_TELEGRAM',_ ('إلغاء تفعيل جهاز عبر تيليجرام')
+        DEVICE_DEACTIVATED ='DEVICE_DEACTIVATED',_ ('إلغاء تفعيل جهاز')
+        DEVICE_TRUSTED ='DEVICE_TRUSTED',_ ('توثيق جهاز')
+
+        # Session lifecycle
+        SESSION_ENDED_BY_USER ='SESSION_ENDED_BY_USER',_ ('إنهاء جلسة بواسطة المستخدم')
+
+        # Backup delivery (Telegram document / cloud off-site copy)
+        BACKUP_FAILED ='BACKUP_FAILED',_ ('فشل النسخ الاحتياطي')
+        BACKUP_DOWNLOADED ='BACKUP_DOWNLOADED',_ ('تنزيل نسخة احتياطية')
+        BACKUP_DELETED ='BACKUP_DELETED',_ ('حذف نسخة احتياطية')
+        BACKUP_DELIVERED ='BACKUP_DELIVERED',_ ('تسليم نسخة احتياطية خارجياً')
+        BACKUP_DELIVERY_FAILED ='BACKUP_DELIVERY_FAILED',_ ('فشل تسليم نسخة احتياطية')
 
     class Severity (models .TextChoices ):
         INFO ='INFO',_ ('معلومة')

@@ -5,26 +5,31 @@ import androidx.room.RoomDatabase
 
 /**
  * On-device mirror of data the server owns — patients, records and appointments —
- * kept so the app stays readable with no connectivity. Nothing here is the only
- * copy of anything: medication plans and dose logs, which *are* device-only, live
- * in [com.securemed.app.data.local.MedicationStore] instead.
+ * kept so the app stays readable with no connectivity. Since 3-4 it also owns
+ * the device-only medication tables: plans and dose logs moved out of the
+ * encrypted JSON files (`LocalCache`) into [MedicationPlanEntity] and
+ * [DoseLogEntity], with a one-time migration that carries the old rows over.
  *
- * That distinction is what licenses the destructive upgrade policy in
- * `DatabaseModule`, and what makes the file safe to delete outright when its
- * SQLCipher passphrase is lost (`SecurePreferences.init`).
+ * The distinction still matters for the upgrade policy: the mirrored entities
+ * are refetchable copies, while the medication tables are the ONLY copy of a
+ * device-first feature — which is why the JSON→Room migration runs before any
+ * destructive fallback could touch them (see `DatabaseModule`).
  */
 @Database(
     entities = [
         PatientEntity::class,
         MedicalRecordEntity::class,
         AppointmentEntity::class,
-        PendingSyncActionEntity::class
+        PendingSyncActionEntity::class,
+        MedicationPlanEntity::class,
+        DoseLogEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class SecureMedDatabase : RoomDatabase() {
     abstract fun secureMedDao(): SecureMedDao
+    abstract fun medicationDao(): MedicationDao
 
     companion object {
         /**
@@ -33,5 +38,12 @@ abstract class SecureMedDatabase : RoomDatabase() {
          * passphrase is gone.
          */
         const val DATABASE_NAME = "securemed_local_db"
+
+        /**
+         * Version of the database layout the JSON→Room migration writes. The
+         * migrator checks this so a future schema bump does not silently
+         * import rows into a table shape it no longer matches.
+         */
+        const val MIGRATION_TARGET_VERSION = 3
     }
 }

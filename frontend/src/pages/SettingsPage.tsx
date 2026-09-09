@@ -613,6 +613,16 @@ function SessionsTab() {
   });
   const sessions = sessionsRes?.data?.sessions || [];
 
+  const endSession = useMutation({
+    mutationFn: (sessionId: string) => settingsAPI.revokeSession(sessionId),
+    onSuccess: () => {
+      toast.success('تم إنهاء الجلسة المحددة');
+      qc.invalidateQueries({ queryKey: ['active-sessions'] });
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail || 'فشل إنهاء الجلسة'),
+  });
+
   const revokeAll = useMutation({
     mutationFn: () => settingsAPI.revokeAllSessions(),
     onSuccess: () => {
@@ -630,7 +640,11 @@ function SessionsTab() {
           <p className="text-xs text-gray-400 mt-0.5">الأجهزة المسجّلة حالياً في حسابك</p>
         </div>
         <button
-          onClick={() => revokeAll.mutate()}
+          onClick={() => {
+            if (confirm('إنهاء جميع الجلسات سيخرجك من هذا الجهاز أيضاً. متابعة؟')) {
+              revokeAll.mutate();
+            }
+          }}
           disabled={revokeAll.isPending}
           className="flex items-center gap-1.5 text-red-400 hover:text-red-300 text-sm border border-red-500/30 hover:border-red-500/50 px-3 py-1.5 rounded-xl transition-colors"
         >
@@ -648,19 +662,31 @@ function SessionsTab() {
       ) : (
         <div className="space-y-3">
           {sessions.map((session: any, i: number) => (
-            <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center gap-3">
+            <div key={session.session_id || i} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center gap-3">
               <Monitor className="w-8 h-8 text-gray-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white font-medium">{session.device || 'جهاز غير معروف'}</p>
-                <p className="text-xs text-gray-400">{session.ip_address} • {session.location || 'موقع غير معروف'}</p>
+                <p className="text-sm text-white font-medium font-mono">
+                  {session.device_fingerprint?.substring(0, 16) || 'جهاز غير معروف'}
+                </p>
+                <p className="text-xs text-gray-400">{session.ip_address || 'IP غير معروف'}</p>
                 <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                   <Clock className="w-3 h-3" />
-                  آخر نشاط: {session.last_activity || 'الآن'}
+                  {session.age_minutes != null
+                    ? `بدأت منذ ${session.age_minutes} دقيقة`
+                    : 'الآن'}
                 </p>
               </div>
-              {session.current && (
-                <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">الجلسة الحالية</span>
-              )}
+              <button
+                onClick={() => {
+                  if (confirm('إنهاء هذه الجلسة فقط؟')) endSession.mutate(session.session_id);
+                }}
+                disabled={endSession.isPending}
+                className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                title="إنهاء هذه الجلسة (تسجيل خروج هذا الجهاز)"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                إنهاء
+              </button>
             </div>
           ))}
         </div>

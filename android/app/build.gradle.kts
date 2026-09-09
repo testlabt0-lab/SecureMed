@@ -5,6 +5,15 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
+    id("io.gitlab.arturbosch.detekt")
+    id("com.github.ben-manes.versions")
+}
+
+detekt {
+    config.setFrom(files("$rootDir/detekt.yml"))
+    // Generated code is out of scope; the rest is the whole Kotlin tree.
+    buildUponDefaultConfig = true
+    parallel = true
 }
 
 // FCM push is opt-in so the build never depends on a secret: drop a real
@@ -62,8 +71,14 @@ if (project.findProperty("SECUREMED_FCM") == "true") {
         applicationId = "com.securemed.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // Release numbering is tag-derived (4-2): CI passes -PSECUREMED_VERSION_NAME
+        // and -PSECUREMED_VERSION_CODE cut from the pushed tag (v1.4.2 → 10402),
+        // so a tag alone produces an uploadable build. Local builds keep the
+        // floor values below.
+        val versionNameOverride = project.findProperty("SECUREMED_VERSION_NAME") as String?
+        val versionCodeOverride = (project.findProperty("SECUREMED_VERSION_CODE") as String?)?.toIntOrNull()
+        versionCode = versionCodeOverride ?: 1
+        versionName = versionNameOverride ?: "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

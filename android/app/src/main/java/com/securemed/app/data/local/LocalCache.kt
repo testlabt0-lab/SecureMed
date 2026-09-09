@@ -83,5 +83,16 @@ object LocalCache {
         cacheDir?.listFiles()?.forEach { it.delete() }
     }
 
+    /** Removes one entry — the JSON→Room migration retires files it imported. */
+    @Synchronized
+    fun delete(key: String) {
+        try {
+            val dir = cacheDir ?: return
+            File(dir, key.sanitized() + ".json").delete()
+            File(dir, key.sanitized() + ".tmp").delete()
+        } catch (_: Exception) {
+        }
+    }
+
     private fun String.sanitized(): String = replace(Regex("[^a-zA-Z0-9_]"), "_")
 }

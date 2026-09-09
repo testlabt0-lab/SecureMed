@@ -39,6 +39,10 @@ fun DashboardScreen(
     onNavigateToLab: () -> Unit,
     onNavigateToTelemedicine: () -> Unit,
     onNavigateToAnalytics: () -> Unit,
+    onNavigateToLabResults: () -> Unit,
+    onNavigateToWards: () -> Unit,
+    onNavigateToInvoices: () -> Unit,
+    onNavigateToAudit: () -> Unit,
     onLogout: () -> Unit
 ) {
     val viewModel: DashboardViewModel = hiltViewModel()
@@ -220,7 +224,18 @@ fun DashboardScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     QuickServiceCard(modifier = Modifier.weight(1f), title = "عن بعد", icon = Icons.Default.VideoCall, onClick = onNavigateToTelemedicine)
                     QuickServiceCard(modifier = Modifier.weight(1f), title = "التحليلات", icon = Icons.Default.Insights, onClick = onNavigateToAnalytics)
-                    Spacer(modifier = Modifier.weight(1f))
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "نتائج المختبر", icon = Icons.Default.Biotech, onClick = onNavigateToLabResults)
+                }
+            }
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الأسرّة", icon = Icons.Default.Hotel, onClick = onNavigateToWards)
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الفواتير", icon = Icons.Default.ReceiptLong, onClick = onNavigateToInvoices)
+                    if (state.showAudit) {
+                        QuickServiceCard(modifier = Modifier.weight(1f), title = "التدقيق", icon = Icons.Default.FactCheck, onClick = onNavigateToAudit)
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
             }
 

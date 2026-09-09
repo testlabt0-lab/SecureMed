@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Warning
@@ -46,6 +47,10 @@ fun PatientDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showBookingDialog by remember { mutableStateOf(false) }
+    var bookingDoctors by remember { mutableStateOf<List<com.securemed.app.data.model.User>>(emptyList()) }
+    var editingRecord by remember { mutableStateOf<MedicalRecord?>(null) }
+    var deletingRecord by remember { mutableStateOf<MedicalRecord?>(null) }
 
     Scaffold(
         topBar = {
@@ -54,6 +59,22 @@ fun PatientDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
+                    }
+                },
+                actions = {
+                    if (uiState is PatientDetailUiState.Success) {
+                        IconButton(onClick = {
+                            viewModel.clearActionMessage()
+                            viewModel.prepareBookingData { doctors ->
+                                bookingDoctors = doctors
+                                showBookingDialog = true
+                            }
+                        }) {
+                            Icon(
+                                Icons.Default.CalendarMonth,
+                                contentDescription = "حجز موعد لهذا المريض"
+                            )
+                        }
                     }
                 }
             )
@@ -137,8 +158,18 @@ fun PatientDetailScreen(
                                 }
                             }
                         } else {
-                            items(state.records) { record ->
-                                MedicalRecordCard(record = record)
+                            items(state.records, key = { it.id }) { record ->
+                                MedicalRecordCard(
+                                    record = record,
+                                    onEdit = {
+                                        viewModel.clearActionMessage()
+                                        editingRecord = record
+                                    },
+                                    onDelete = {
+                                        viewModel.clearActionMessage()
+                                        deletingRecord = record
+                                    }
+                                )
                             }
                         }
                     }
@@ -168,12 +199,68 @@ fun PatientDetailScreen(
                             }
                         )
                     }
+
+                    editingRecord?.let { record ->
+                        EditRecordDialog(
+                            record = record,
+                            inProgress = state.actionInProgress,
+                            onDismiss = {
+                                if (!state.actionInProgress) {
+                                    editingRecord = null
+                                    viewModel.clearActionMessage()
+                                }
+                            },
+                            onSubmit = { title, type, content, critical ->
+                                viewModel.updateRecord(patientId, record.id, title, content, type, critical)
+                                editingRecord = null
+                            }
+                        )
+                    }
+
+                    deletingRecord?.let { record ->
+                        ConfirmDeleteRecordDialog(
+                            inProgress = state.actionInProgress,
+                            onDismiss = {
+                                if (!state.actionInProgress) {
+                                    deletingRecord = null
+                                    viewModel.clearActionMessage()
+                                }
+                            },
+                            onConfirm = {
+                                viewModel.deleteRecord(patientId, record.id)
+                                deletingRecord = null
+                            }
+                        )
+                    }
+
+                    if (showBookingDialog) {
+                        BookingDialog(
+                            inProgress = state.actionInProgress,
+                            onDismiss = {
+                                if (!state.actionInProgress) {
+                                    showBookingDialog = false
+                                    viewModel.clearActionMessage()
+                                }
+                            },
+                            onLoadOptions = { callback ->
+                                // Doctors were fetched before opening; hand
+                                // them straight to the dialog.
+                                callback(emptyList(), bookingDoctors)
+                            },
+                            onSubmit = { _, doctorId, type, priority, scheduledAt, duration, title, notes ->
+                                viewModel.createAppointment(patientId, doctorId, type, priority, scheduledAt, duration, title, notes)
+                                showBookingDialog = false
+                            },
+                            lockedPatient = state.patient
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateRecordDialog(
     channels: List<com.securemed.app.data.model.Channel>,
@@ -450,7 +537,11 @@ private fun formatFileSize(bytes: Long): String = when {
 }
 
 @Composable
-fun MedicalRecordCard(record: MedicalRecord) {
+fun MedicalRecordCard(
+    record: MedicalRecord,
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -479,7 +570,7 @@ fun MedicalRecordCard(record: MedicalRecord) {
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -506,7 +597,8 @@ fun MedicalRecordCard(record: MedicalRecord) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "بواسطة: ${record.createdByName ?: "غير معروف"}",
@@ -519,7 +611,146 @@ fun MedicalRecordCard(record: MedicalRecord) {
                         color = MaterialTheme.colorScheme.outline
                     )
                 }
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = onEdit) { Text("تعديل") }
+                    TextButton(onClick = onDelete) {
+                        Text("حذف", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditRecordDialog(
+    record: MedicalRecord,
+    inProgress: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (title: String, recordType: String, content: String, isCritical: Boolean) -> Unit
+) {
+    var title by remember(record.id) { mutableStateOf(record.title) }
+    var content by remember(record.id) { mutableStateOf(record.content) }
+    var recordType by remember {
+        mutableStateOf(
+            RECORD_TYPES.firstOrNull { it.second == record.recordTypeDisplay }?.first ?: record.recordType
+        )
+    }
+    var isCritical by remember(record.id) { mutableStateOf(record.isCritical) }
+    var typeExpanded by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "تعديل السجل الطبي",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                ExposedDropdownMenuBox(expanded = typeExpanded, onExpandedChange = { typeExpanded = it }) {
+                    OutlinedTextField(
+                        value = RECORD_TYPES.firstOrNull { it.first == recordType }?.second ?: recordType,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("نوع السجل") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
+                        RECORD_TYPES.forEach { (value, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    recordType = value
+                                    typeExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("العنوان") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("المحتوى السريري") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = isCritical, onCheckedChange = { isCritical = it })
+                    Text("حالة حرجة", style = MaterialTheme.typography.bodyMedium)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss, enabled = !inProgress) { Text("إلغاء") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    if (inProgress) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Button(
+                            onClick = {
+                                if (title.isNotBlank() && content.isNotBlank()) {
+                                    onSubmit(title.trim(), recordType, content.trim(), isCritical)
+                                }
+                            },
+                            enabled = title.isNotBlank() && content.isNotBlank()
+                        ) { Text("حفظ") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteRecordDialog(
+    inProgress: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("حذف السجل الطبي", fontWeight = FontWeight.Bold) },
+        text = { Text("لا يمكن التراجع عن الحذف. سيُسجَّل الحذف في سجل التدقيق.") },
+        confirmButton = {
+            if (inProgress) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                Button(
+                    onClick = onConfirm,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("حذف") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !inProgress) { Text("إلغاء") }
+        }
+    )
 }

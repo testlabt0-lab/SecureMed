@@ -3,7 +3,6 @@ package com.securemed.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,10 +16,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.LoadState
+import androidx.paging.cachedIn
+import androidx.paging.compose.collectAsLazyPagingItems
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import com.securemed.app.data.SecureMedRepository
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.model.Notification
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.serialization.Serializable
@@ -38,52 +44,62 @@ class NotificationsViewModel @Inject constructor(
 ) : ViewModel() {
 
     data class State(
-        val isLoading: Boolean = true,
-        val notifications: List<Notification> = emptyList(),
         val unreadCount: Int = 0,
-        val error: String? = null
+        val error: String? = null,
+        /** After a mark-read/write the paged list refreshes via [refreshRequests]. */
+        val actionInProgress: Boolean = false
     )
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
 
-    init { loadNotifications() }
+    /** The list is paged (3-3); loading follows the user's scroll. */
+    val notificationsPagingFlow = Pager(
+        config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+        pagingSourceFactory = { repository.getNotificationsPagingSource() }
+    ).flow.cachedIn(viewModelScope)
 
-    fun loadNotifications() {
-        _state.value = _state.value.copy(isLoading = true)
+    private val _refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val refreshRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _refreshRequests
+
+    private fun requestRefresh() {
+        _refreshRequests.tryEmit(Unit)
+    }
+
+    /**
+     * The unread badge comes from the lightweight dedicated counter, not from
+     * scanning the loaded page — a paged list only holds what has loaded so
+     * far, and counting unread rows in it would misstate the total.
+     */
+    fun loadUnreadCount() {
         viewModelScope.launch {
-            repository.getNotifications().fold(
-                onSuccess = { list ->
-                    _state.value = State(
-                        isLoading = false,
-                        notifications = list,
-                        unreadCount = list.count { !it.isRead },
-                    )
-                },
-                onFailure = { e ->
-                    _state.value = State(isLoading = false, error = e.message)
-                },
-            )
+            repository.getUnreadCount()
+                .onSuccess { counts ->
+                    _state.value = _state.value.copy(unreadCount = counts["unread_count"] ?: 0)
+                }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(error = e.message)
+                }
         }
     }
 
     fun markAsRead(id: String) {
         viewModelScope.launch {
+            _state.value = _state.value.copy(actionInProgress = true)
             repository.markNotificationRead(id)
-            loadNotifications()
+            loadUnreadCount()
+            requestRefresh()
+            _state.value = _state.value.copy(actionInProgress = false)
         }
     }
 
     fun markAllRead() {
         viewModelScope.launch {
+            _state.value = _state.value.copy(actionInProgress = true)
             repository.markAllNotificationsRead()
-                .onSuccess {
-                    _state.value = _state.value.copy(
-                        notifications = _state.value.notifications.map { it.copy(isRead = true) },
-                        unreadCount = 0
-                    )
-                }
-            loadNotifications()
+            loadUnreadCount()
+            requestRefresh()
+            _state.value = _state.value.copy(actionInProgress = false)
         }
     }
 }
@@ -93,6 +109,12 @@ class NotificationsViewModel @Inject constructor(
 fun NotificationsScreen(onBack: () -> Unit) {
     val viewModel: NotificationsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
+    val notifications = viewModel.notificationsPagingFlow.collectAsLazyPagingItems()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadUnreadCount()
+        viewModel.refreshRequests.collect { notifications.refresh() }
+    }
 
     Scaffold(
         topBar = {
@@ -113,49 +135,81 @@ fun NotificationsScreen(onBack: () -> Unit) {
             )
         }
     ) { padding ->
-        if (state.isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else if (state.notifications.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Notifications,
-                        null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.outline
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "لا توجد إشعارات",
-                        color = MaterialTheme.colorScheme.outline
-                    )
+        val refreshError = notifications.loadState.refresh as? LoadState.Error
+        when {
+            notifications.loadState.refresh is LoadState.Loading && notifications.itemCount == 0 -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(state.notifications) { notification ->
-                    NotificationCard(
-                        notification = notification,
-                        onMarkRead = { viewModel.markAsRead(notification.id) }
-                    )
+            refreshError != null && notifications.itemCount == 0 -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            ApiErrors.messageFor(refreshError.error, "تعذر تحميل الإشعارات"),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { notifications.retry() }) { Text("إعادة المحاولة") }
+                    }
+                }
+            }
+            notifications.itemCount == 0 -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.outline
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "لا توجد إشعارات",
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(notifications.itemCount) { index ->
+                        notifications[index]?.let { notification ->
+                            NotificationCard(
+                                notification = notification,
+                                onMarkRead = { viewModel.markAsRead(notification.id) }
+                            )
+                        }
+                    }
+                    if (notifications.loadState.append is LoadState.Loading) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) { CircularProgressIndicator() }
+                        }
+                    }
                 }
             }
         }

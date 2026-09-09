@@ -79,7 +79,11 @@ class PrescriptionCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Prescription
-        fields = ['patient', 'diagnosis_code', 'notes', 'items']
+        # `id` read-only in the response: the Android client keys its reload
+        # and dispense calls off it, and without it the 201 body was
+        # unidentifiable (the caller had to re-list to learn what it created).
+        fields = ['id', 'patient', 'diagnosis_code', 'notes', 'items']
+        read_only_fields = ['id']
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')

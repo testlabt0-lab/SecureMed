@@ -1,10 +1,14 @@
 package com.securemed.app.data.local
 
+import com.securemed.app.data.local.room.DoseLogEntity
+import com.securemed.app.data.local.room.MedicationDao
+import com.securemed.app.data.local.room.MedicationPlanEntity
 import com.securemed.app.data.model.AdherenceStats
 import com.securemed.app.data.model.Medication
 import com.securemed.app.data.model.MedicationDoseLog
 import com.securemed.app.data.model.TodayDose
 import com.securemed.app.data.model.TodayDosesResponse
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
@@ -13,13 +17,25 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 /**
- * Device-local store for medication plans and dose logs, persisted through
- * [LocalCache] (app-private storage, cleared on logout).
+ * Device-local store for medication plans and dose logs, persisted in the
+ * encrypted Room database ([MedicationPlanEntity] / [DoseLogEntity] via
+ * [MedicationDao]) since 3-4 — previously a JSON list per key in
+ * [LocalCache].
  *
- * The backend has no dose-plan endpoint, so plans are a first-class offline
- * feature: clinicians create them here, alarms are scheduled by
- * [com.securemed.app.reminders.ReminderScheduler], and adherence is computed
- * from the logs on this device.
+ * The migration story: a device upgrading from a build before 3-4 still has
+ * its plans/logs in `LocalCache`'s encrypted files. [migrateFromLocalCache]
+ * runs once at startup (before any destructive database fallback could run
+ * away with them), imports the rows into Room, and only then deletes the
+ * files. From that point on Room is the single home for device-only data and
+ * `LocalCache` no longer participates at all (it still backs the server-mirror
+ * reads until their owners move, which is why its init stays).
+ *
+ * The DAO calls use runBlocking: callers are the alarm scheduler (runs in a
+ * WorkManager worker) and the dose-log writer on user taps, both of which
+ * already sit on background dispatchers. Making the whole store suspend-only
+ * is the honest shape, but that ripples into ReminderScheduler and the
+ * notifications path in one shot — this object is deliberately the seam that
+ * stays synchronous for them while doing all I/O through Room.
  */
 object MedicationStore {
 
@@ -33,44 +49,138 @@ object MedicationStore {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    // ===== Plans =====
+    private var dao: MedicationDao? = null
 
-    @Synchronized
-    fun loadPlans(): List<Medication> {
-        val raw = LocalCache.load(PLANS_KEY) ?: return emptyList()
-        return try {
-            json.decodeFromString(ListSerializer(Medication.serializer()), raw)
-        } catch (_: Exception) {
-            emptyList()
+    /** Call once from SecureMedApp.onCreate() before anything reads plans. */
+    fun init(medicationDao: MedicationDao) {
+        dao = medicationDao
+    }
+
+    // ===== Migration (3-4): encrypted JSON files → Room, once =====
+
+    /**
+     * Imports the legacy JSON files into Room and removes them. Idempotent by
+     * construction: files are deleted after a successful import, and an empty
+     * or unreadable file yields empty lists — importing nothing and deleting
+     * nothing is the same no-op.
+     */
+    fun migrateFromLocalCache() {
+        val target = dao ?: return
+        runBlocking {
+            val plans = runCatching {
+                LocalCache.load(PLANS_KEY)?.let { raw ->
+                    json.decodeFromString(ListSerializer(Medication.serializer()), raw)
+                } ?: emptyList()
+            }.getOrDefault(emptyList())
+            val logs = runCatching {
+                LocalCache.load(LOGS_KEY)?.let { raw ->
+                    json.decodeFromString(ListSerializer(MedicationDoseLog.serializer()), raw)
+                } ?: emptyList()
+            }.getOrDefault(emptyList())
+
+            if (plans.isNotEmpty()) {
+                target.insertPlans(plans.map { it.toEntity() })
+                LocalCache.delete(PLANS_KEY)
+            }
+            if (logs.isNotEmpty()) {
+                logs.forEach { log ->
+                    target.insertLog(
+                        DoseLogEntity(
+                            key = log.key,
+                            planId = log.planId,
+                            date = log.date,
+                            time = log.time,
+                            status = log.status,
+                            loggedAt = log.loggedAt
+                        )
+                    )
+                }
+                LocalCache.delete(LOGS_KEY)
+            }
         }
     }
 
-    @Synchronized
+    private fun Medication.toEntity() = MedicationPlanEntity(
+        id = id,
+        patientId = patientId,
+        patientName = patientName,
+        name = name,
+        dosage = dosage,
+        times = MedicationPlanEntity.joinTimes(times),
+        startDate = startDate,
+        endDate = endDate,
+        instructions = instructions,
+        prescribedByName = prescribedByName,
+        isActive = isActive,
+        createdAt = createdAt
+    )
+
+    private fun MedicationPlanEntity.toModel() = Medication(
+        id = id,
+        patientId = patientId,
+        patientName = patientName,
+        name = name,
+        dosage = dosage,
+        times = MedicationPlanEntity.splitTimes(times),
+        startDate = startDate,
+        endDate = endDate,
+        instructions = instructions,
+        prescribedByName = prescribedByName,
+        isActive = isActive,
+        createdAt = createdAt
+    )
+
+    private fun DoseLogEntity.toModel() = MedicationDoseLog(
+        key = key,
+        planId = planId,
+        date = date,
+        time = time,
+        status = status,
+        loggedAt = loggedAt
+    )
+
+    // ===== Plans =====
+
+    fun loadPlans(): List<Medication> {
+        val target = dao ?: return emptyList()
+        return runBlocking {
+            runCatching { target.getPlans().map { it.toModel() } }.getOrDefault(emptyList())
+        }
+    }
+
     fun savePlans(plans: List<Medication>) {
-        LocalCache.save(PLANS_KEY, json.encodeToString(ListSerializer(Medication.serializer()), plans))
+        val target = dao ?: return
+        runBlocking {
+            runCatching {
+                target.deleteAllPlans()
+                target.insertPlans(plans.map { it.toEntity() })
+            }
+        }
     }
 
     fun addPlan(plan: Medication) {
-        savePlans(loadPlans() + plan)
+        val target = dao ?: return
+        runBlocking {
+            runCatching { target.insertPlans(listOf(plan.toEntity())) }
+        }
     }
 
     fun setPlanActive(planId: String, active: Boolean) {
-        savePlans(loadPlans().map { if (it.id == planId) it.copy(isActive = active) else it })
+        val target = dao ?: return
+        runBlocking {
+            runCatching { target.setPlanActive(planId, active) }
+        }
     }
 
     // ===== Dose logs =====
 
-    @Synchronized
     fun loadLogs(): List<MedicationDoseLog> {
-        val raw = LocalCache.load(LOGS_KEY) ?: return emptyList()
-        return try {
-            json.decodeFromString(ListSerializer(MedicationDoseLog.serializer()), raw)
-        } catch (_: Exception) {
-            emptyList()
+        val target = dao ?: return emptyList()
+        return runBlocking {
+            runCatching { target.getLogs().map { it.toModel() } }.getOrDefault(emptyList())
         }
     }
 
-    @Synchronized
     fun logDose(planId: String, scheduledFor: String, status: String): MedicationDoseLog {
         val parts = scheduledFor.split("T")
         val entry = MedicationDoseLog(
@@ -81,14 +191,23 @@ object MedicationStore {
             status = status,
             loggedAt = LocalDateTime.now().toString()
         )
-        val others = loadLogs().filter { it.key != entry.key }
-        saveLogs(others + entry)
+        val target = dao
+        if (target != null) {
+            // REPLACE on the primary key is the "one row per plan+slot" rule
+            // the old read-filter-write JSON dance enforced.
+            runBlocking { runCatching { target.insertLog(entry.toLogEntity()) } }
+        }
         return entry
     }
 
-    private fun saveLogs(logs: List<MedicationDoseLog>) {
-        LocalCache.save(LOGS_KEY, json.encodeToString(ListSerializer(MedicationDoseLog.serializer()), logs))
-    }
+    private fun MedicationDoseLog.toLogEntity() = DoseLogEntity(
+        key = key,
+        planId = planId,
+        date = date,
+        time = time,
+        status = status,
+        loggedAt = loggedAt
+    )
 
     // ===== Derived views =====
 

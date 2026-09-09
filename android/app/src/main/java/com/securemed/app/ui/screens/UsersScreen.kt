@@ -3,7 +3,6 @@ package com.securemed.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,13 +18,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.securemed.app.data.SecureMedRepository
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.User
 import kotlinx.coroutines.launch
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.LoadState
+import androidx.paging.cachedIn
+import androidx.paging.compose.collectAsLazyPagingItems
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -65,36 +71,25 @@ class UsersViewModel @Inject constructor(
 ) : ViewModel() {
 
     data class State(
-        val isLoading: Boolean = true,
-        val users: List<User> = emptyList(),
-        val errorMessage: String? = null,
         val statusMessage: String? = null
     )
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
 
-    init {
-        loadUsers()
-    }
+    /**
+     * The user list is paged (3-3): the Pager follows the server envelope and
+     * loads the next page as the admin scrolls. Local search filters the
+     * loaded pages client-side — a server-side `?search=` for this list runs
+     * on plaintext columns that do not match the encrypted names.
+     */
+    val usersPagingFlow = Pager(
+        config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+        pagingSourceFactory = { repository.getUsersPagingSource() }
+    ).flow.cachedIn(viewModelScope)
 
-    fun loadUsers() {
-        _state.value = _state.value.copy(isLoading = true, errorMessage = null)
-        viewModelScope.launch {
-            repository.getUsers().fold(
-                onSuccess = { users ->
-                    _state.value = _state.value.copy(isLoading = false, users = users)
-                },
-                onFailure = { error ->
-                    val msg = when {
-                        error.message?.contains("403") == true -> "غير مصرح لك بإدارة المستخدمين"
-                        else -> "تعذر تحميل المستخدمين — تحقق من الاتصال"
-                    }
-                    _state.value = _state.value.copy(isLoading = false, errorMessage = msg)
-                }
-            )
-        }
-    }
+    private val _refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val refreshRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _refreshRequests
 
     fun toggleUser(user: User) {
         viewModelScope.launch {
@@ -103,13 +98,8 @@ class UsersViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { msg ->
-                    val updatedList = _state.value.users.map {
-                        if (it.id == user.id) it.copy(isActive = !user.isActive) else it
-                    }
-                    _state.value = _state.value.copy(
-                        statusMessage = msg,
-                        users = updatedList
-                    )
+                    _state.value = _state.value.copy(statusMessage = msg)
+                    _refreshRequests.tryEmit(Unit)
                 },
                 onFailure = {
                     _state.value = _state.value.copy(statusMessage = "تعذر تنفيذ العملية — تحقق من الاتصال")
@@ -117,7 +107,7 @@ class UsersViewModel @Inject constructor(
             )
         }
     }
-    
+
     fun clearStatusMessage() {
         _state.value = _state.value.copy(statusMessage = null)
     }
@@ -130,16 +120,14 @@ fun UsersScreen(
 ) {
     val viewModel: UsersViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
+    val users = viewModel.usersPagingFlow.collectAsLazyPagingItems()
     val isAdmin = SecurePreferences.userRole in ADMIN_ROLES
 
     var searchQuery by remember { mutableStateOf("") }
     var pendingUser by remember { mutableStateOf<User?>(null) }
 
-
-    LaunchedEffect(isAdmin) {
-        if (!isAdmin) {
-            // Not authorized, UI handles this state
-        }
+    LaunchedEffect(Unit) {
+        viewModel.refreshRequests.collect { users.refresh() }
     }
 
     Scaffold(
@@ -187,7 +175,7 @@ fun UsersScreen(
                 )
             }
 
-            state.isLoading -> Column(
+            users.loadState.refresh is LoadState.Loading && users.itemCount == 0 -> Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
@@ -199,7 +187,7 @@ fun UsersScreen(
                 Text("جارٍ تحميل المستخدمين...")
             }
 
-            state.errorMessage != null -> Column(
+            users.loadState.refresh is LoadState.Error && users.itemCount == 0 -> Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -207,9 +195,13 @@ fun UsersScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(state.errorMessage!!, style = MaterialTheme.typography.bodyLarge)
+                val error = users.loadState.refresh as LoadState.Error
+                Text(
+                    ApiErrors.messageFor(error.error, "تعذر تحميل المستخدمين — تحقق من الاتصال"),
+                    style = MaterialTheme.typography.bodyLarge
+                )
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { viewModel.loadUsers() }) {
+                Button(onClick = { users.retry() }) {
                     Text("إعادة المحاولة")
                 }
             }
@@ -232,24 +224,31 @@ fun UsersScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                val filtered = state.users.filter {
+                val filteredCount = (0 until users.itemCount).count { index ->
+                    val user = users[index] ?: return@count false
                     searchQuery.isBlank() ||
-                        it.fullName.contains(searchQuery, ignoreCase = true) ||
-                        it.email.contains(searchQuery, ignoreCase = true)
+                        user.fullName.contains(searchQuery, ignoreCase = true) ||
+                        user.email.contains(searchQuery, ignoreCase = true)
                 }
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    items(filtered, key = { it.id }) { user ->
-                        UserCard(
-                            user = user,
-                            canModify = user.role !in ADMIN_ROLES,
-                            onToggle = { pendingUser = user }
-                        )
+                    items(users.itemCount) { index ->
+                        val user = users[index] ?: return@items
+                        val matches = searchQuery.isBlank() ||
+                            user.fullName.contains(searchQuery, ignoreCase = true) ||
+                            user.email.contains(searchQuery, ignoreCase = true)
+                        if (matches) {
+                            UserCard(
+                                user = user,
+                                canModify = user.role !in ADMIN_ROLES,
+                                onToggle = { pendingUser = user }
+                            )
+                        }
                     }
-                    if (filtered.isEmpty()) {
+                    if (filteredCount == 0) {
                         item {
                             Text(
                                 "لا يوجد مستخدمون مطابقون",
@@ -257,6 +256,14 @@ fun UsersScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                    if (users.loadState.append is LoadState.Loading) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) { CircularProgressIndicator() }
                         }
                     }
                 }

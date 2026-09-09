@@ -9,6 +9,7 @@ from rest_framework .views import APIView
 from rest_framework .viewsets import ViewSet
 
 from django .conf import settings
+from django .utils import timezone
 
 from apps .security .permissions import IsAdmin ,IsAuditor
 from apps .security .port_scanner import scan_host_ports 
@@ -176,8 +177,20 @@ class SecurityDashboardView (APIView ):
         # A dedicated audit key means SECRET_KEY rotation cannot silently
         # invalidate the audit chain. Only whether one is set is reported.
         'audit_chain_dedicated_key':bool (getattr (settings ,'AUDIT_LOG_HMAC_KEY','')),
-        'media_access_controlled':bool (getattr (settings ,'PROTECT_MEDIA_FILES',True ))and not settings .DEBUG ,
-        # Uploaded files (imaging, lab reports, scanned documents) encrypted on disk
+        # Off-site backup delivery (Telegram document / S3 cloud copy).
+        # Reported so the dashboard shows whether every archive actually
+        # leaves the server or only lives in BACKUP_DIR.
+        'backup_offsite_delivery':{
+        'telegram_enabled':bool (getattr (settings ,'BACKUP_SEND_TO_TELEGRAM',False )),
+        'telegram_ready':bool (
+        getattr (settings ,'TELEGRAM_BOT_TOKEN','')and getattr (settings ,'TELEGRAM_ADMIN_CHAT_ID','')
+        ),
+        'cloud_enabled':bool (getattr (settings ,'BACKUP_OFFSITE_ENABLED',False )),
+        'cloud_ready':bool (getattr (settings ,'BACKUP_OFFSITE_BUCKET','')),
+        },
+        # The webhook grants device approvals anonymously otherwise.
+        'telegram_webhook_protected':bool (getattr (settings ,'TELEGRAM_WEBHOOK_SECRET','')),
+        'media_access_controlled':bool (getattr (settings ,'PROTECT_MEDIA_FILES',True ))and not settings .DEBUG ,        # Uploaded files (imaging, lab reports, scanned documents) encrypted on disk
         # with AES-256-GCM — see apps.core.storage. Reported separately from
         # field_encryption_enabled because until now the columns were encrypted and
         # the files next to them were not.
@@ -193,6 +206,77 @@ class SecurityDashboardView (APIView ):
         'api_docs_exposed':bool (getattr (settings ,'ENABLE_API_DOCS',settings .DEBUG )),
         'debug_mode':settings .DEBUG ,
         }
+
+
+class ActiveSessionsView(APIView):
+    """List the caller's own live sessions, and end one of them.
+
+    The session registry lives in the cache (SessionManager.register_session),
+    so this reads the same shape it wrote: session_id, device_fingerprint,
+    ip_address, timestamp. DELETE with `session_id` ends exactly that session
+    (the same primitive `end_session` backs logout with) — لإنهاء جهاز محدد
+    من مستخدم مسجل دخوله في مكان آخر.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.core.cache import cache
+        sessions = cache.get(f'active_sessions:{request.user.id}', [])
+        now = timezone.now().timestamp()
+        return Response({
+            'sessions': [
+                {
+                    'session_id': s.get('session_id', ''),
+                    'device_fingerprint': s.get('device_fingerprint', ''),
+                    'ip_address': s.get('ip_address', ''),
+                    'started_at': s.get('timestamp'),
+                    'age_minutes': int((now - s.get('timestamp', now)) // 60)
+                    if s.get('timestamp') else None,
+                }
+                for s in sessions
+            ],
+            'count': len(sessions),
+        })
+
+    def delete(self, request):
+        from apps.security.session_security import SessionManager
+        from django.core.cache import cache
+
+        session_id = str(request.data.get('session_id') or '').strip()
+        if not session_id:
+            # No session id = "end all my sessions", the same reading the
+            # logout view gives a token-less logout. Invalidate every live
+            # session this user has.
+            cache_key = f'active_sessions:{request.user.id}'
+            sessions = cache.get(cache_key, [])
+            SessionManager.force_logout_user(request.user.id)
+            log_security_event(
+                user=request.user,
+                event_type='SESSION_ENDED_BY_USER',
+                request=request,
+                details={'scope': 'all', 'count': len(sessions)},
+            )
+            return Response({'detail': 'تم إنهاء جميع الجلسات'})
+
+        sessions = cache.get(f'active_sessions:{request.user.id}', [])
+        if not any(
+            str(s.get('session_id', '')) == session_id for s in sessions
+        ):
+            # Not refusing on an already-gone session: ending it is
+            # idempotent, but a session id the user does not own must not
+            # be endable — the ownership check above is the guard.
+            return Response(
+                {'detail': 'الجلسة غير موجودة أو انتهت بالفعل'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        SessionManager.end_session(request.user.id, session_id)
+        log_security_event(
+            user=request.user,
+            event_type='SESSION_ENDED_BY_USER',
+            request=request,
+            details={'ended_session_id': session_id[:64]},
+        )
+        return Response({'detail': 'تم إنهاء الجلسة المحددة'})
 
 
 class CheckDeviceView(APIView):
@@ -302,6 +386,21 @@ class CheckDeviceView(APIView):
             severity='INFO',
         )
 
+        # Acknowledge the request inside the app as well — the request itself
+        # only reaches the admin chat, which the user cannot see.
+        _notify_user(
+            user,
+            notification_type='LOGIN_ALERT',
+            title='وصلنا طلب تفعيل جهازك',
+            message=(
+                f'استلمنا طلب تفعيل جهاز ({request.META.get("HTTP_X_OS_INFO", "جهاز")} — '
+                f'بصمة: {fingerprint[:16]}…) وأُرسل للإدارة للموافقة. '
+                f'ستصلك رسالة عند اتخاذ القرار.'
+            ),
+            priority='MEDIUM',
+            data={'device_id': str(device.id)},
+        )
+
         # Telegram is best-effort. A failure here must not 500 the response:
         # the device is already recorded as pending and the admin can still
         # approve from the dashboard.
@@ -320,9 +419,119 @@ class CheckDeviceView(APIView):
                         status=status.HTTP_403_FORBIDDEN)
 
 
+def _notify_user(user, notification_type, title, message, priority='HIGH', data=None):
+    """In-app (+email per preferences) notification to the affected user.
+
+    Wrapped best-effort: a notifications outage must not fail the security
+    action that triggered it. Emails respect the user's preferences through
+    apps.notifications.utils.send_notification.
+    """
+    try:
+        from apps.notifications.utils import send_notification
+        send_notification(
+            recipient=user,
+            notification_type=notification_type,
+            priority=priority,
+            title=title,
+            message=message,
+            data=data or {},
+            send_email=True,
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user {getattr(user, 'id', '?')}: {e}")
+
+
+def _deactivate_device(device, request, via, block=True, notify_owner=True):
+    """Revoke a trusted device: untrust + (optionally) block + audit.
+
+    Shared by the Telegram `deactivate_` callback and the dashboard API so
+    both paths enforce one deactivation rule — إلغاء التفعيل. ``block=False``
+    is the self-service path: the owner removes their own device (trust gone,
+    its session killed) but the device is not blacklisted, so they may request
+    activation for it again later. The block reuses the same BlockedDevice row
+    shape as a Telegram reject, so the WAF enforces it identically.
+    """
+    device.is_trusted = False
+    device.save(update_fields=['is_trusted'])
+
+    from apps.security.models import BlockedDevice
+    if block:
+        BlockedDevice.objects.update_or_create(
+            device_fingerprint=device.device_fingerprint,
+            defaults={
+                'reason': f'إلغاء تفعيل ({via})',
+                'mac_address': device.mac_address,
+                'is_active': True,
+            },
+        )
+    else:
+        # A prior block would defeat "I may re-request activation later".
+        BlockedDevice.objects.filter(
+            device_fingerprint=device.device_fingerprint, is_active=True,
+        ).delete()
+
+    # Invalidate the "not blocked" caches so the change is enforced on the
+    # very next request. device_tracker.is_device_blocked caches a negative
+    # answer for 5 minutes and the WAF keeps its own positive-decision cache.
+    try:
+        from django.core.cache import cache
+        cache.delete(f'blocked_device:{device.device_fingerprint}:{device.mac_address or ""}')
+        cache.delete(f'waf_device_blacklist:{device.device_fingerprint}')
+    except Exception as e:
+        logger.error(f"Deactivation cache invalidation failed: {e}")
+
+    from apps.security.session_security import SessionManager
+    SessionManager.force_logout_user(device.user_id)
+
+    # The owner must learn their device was revoked from inside the app too,
+    # not only from the admin chat — otherwise they discover it the next time
+    # the lock screen refuses them. A self-deactivation needs no notification:
+    # the user did it themselves.
+    if notify_owner:
+        _notify_user(
+            device.user,
+            notification_type='SECURITY_ALERT',
+            title='تم إلغاء تفعيل أحد أجهزتك',
+            message=(
+                f'أُلغي تفعيل الجهاز ({device.os_info or "جهاز"} — '
+                f'بصمة: {device.device_fingerprint[:16]}…) بواسطة الإدارة ({via}) '
+                f'وأُضيف للقائمة السوداء. إن لم تكن أنت من طلب ذلك تواصل مع الإدارة فوراً.'
+            ),
+            priority='HIGH',
+            data={'device_id': str(device.id), 'via': via},
+        )
+
+    event_type = ('DEVICE_DEACTIVATED_VIA_TELEGRAM'
+                  if via == 'telegram' else 'DEVICE_DEACTIVATED')
+    log_security_event(
+        user=device.user,
+        event_type=event_type,
+        request=request,
+        details={'device_id': str(device.id),
+                 'device_fingerprint': device.device_fingerprint,
+                 'mac_address': device.mac_address,
+                 'via': via,
+                 'blocked': block},
+        severity='WARNING',
+    )
+
+    # Best-effort heads-up to the admin chat when the deactivation came from
+    # the dashboard, so both control surfaces stay visible in one place.
+    if via != 'telegram':
+        try:
+            from apps.security.telegram_service import (
+                send_device_deactivated_notification,
+            )
+            by_label = {'dashboard': 'لوحة الإدارة',
+                        'self': 'مالك الجهاز (ذاتياً)'}.get(via, via)
+            send_device_deactivated_notification(device, by_label=by_label)
+        except Exception as e:
+            logger.error(f"Failed to notify deactivation via Telegram: {e}")
+
+
 class TelegramWebhookView(APIView):
     """
-    Receives approve/reject callbacks from the admin Telegram bot.
+    Receives approve/reject/deactivate callbacks from the admin Telegram bot.
 
     This endpoint grants login access, so it must verify that the request
     actually came from Telegram. Two complementary controls:
@@ -388,10 +597,39 @@ class TelegramWebhookView(APIView):
                                  'device_fingerprint': device.device_fingerprint},
                         severity='INFO',
                     )
+                    _notify_user(
+                        device.user,
+                        notification_type='LOGIN_ALERT',
+                        title='تم تفعيل جهاز جديد',
+                        message=(
+                            f'تمت الموافقة على الجهاز ({device.os_info or "جهاز"} — '
+                            f'بصمة: {device.device_fingerprint[:16]}…) ويمكنك تسجيل الدخول منه الآن. '
+                            f'إن لم تكن أنت من طلبه فأبلغ الإدارة فوراً.'
+                        ),
+                        priority='MEDIUM',
+                        data={'device_id': str(device.id)},
+                    )
                     answer_callback_query(callback_id, 'تم تفعيل الجهاز بنجاح')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
                                           f"{original_text}\n\n✅ <b>تم تفعيل الجهاز</b>")
+
+            elif data.startswith('deactivate_'):
+                # إلغاء التفعيل: revoke a previously-trusted device. The device
+                # stops passing CheckDeviceView, is added to the WAF blocklist
+                # (same as a Telegram reject), and the user's cached session is
+                # force-ended so a stolen token on the revoked device dies with
+                # the tap of the button.
+                device_id = data[len('deactivate_'):]
+                device = DeviceRegistry.objects.filter(id=device_id).first()
+                if device is None:
+                    answer_callback_query(callback_id, 'الجهاز غير موجود', show_alert=True)
+                else:
+                    _deactivate_device(device, request, via='telegram')
+                    answer_callback_query(callback_id, 'تم إلغاء تفعيل الجهاز وحظره')
+                    if message_id is not None:
+                        edit_message_text(chat_id, message_id,
+                                          f"{original_text}\n\n🔒 <b>تم إلغاء التفعيل وحظر الجهاز</b>")
 
             elif data.startswith('reject_'):
                 device_id = data[len('reject_'):]
@@ -414,6 +652,18 @@ class TelegramWebhookView(APIView):
                         details={'device_id': str(device.id),
                                  'device_fingerprint': device.device_fingerprint},
                         severity='WARNING',
+                    )
+                    _notify_user(
+                        device.user,
+                        notification_type='SECURITY_ALERT',
+                        title='تم رفض طلب تفعيل جهاز',
+                        message=(
+                            f'رُفض الجهاز ({device.os_info or "جهاز"} — '
+                            f'بصمة: {device.device_fingerprint[:16]}…) وحُظر من الدخول. '
+                            f'إن كنت أنت من حاول الدخول فتواصل مع الإدارة لمعرفة السبب.'
+                        ),
+                        priority='HIGH',
+                        data={'device_id': str(device.id)},
                     )
                     answer_callback_query(callback_id, 'تم حظر الجهاز')
                     if message_id is not None:

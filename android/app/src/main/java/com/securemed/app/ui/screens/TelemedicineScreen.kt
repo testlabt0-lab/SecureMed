@@ -3,7 +3,6 @@ package com.securemed.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -18,6 +17,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import com.securemed.app.data.api.ApiErrors
 import com.securemed.app.data.model.TelemedicineSession
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -26,7 +28,7 @@ fun TelemedicineScreen(
     onBack: () -> Unit,
     viewModel: TelemedicineViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val sessions = viewModel.sessionsPagingFlow.collectAsLazyPagingItems()
 
     Scaffold(
         topBar = {
@@ -53,23 +55,41 @@ fun TelemedicineScreen(
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(8.dp))
-            
-            when (val state = uiState) {
-                is TelemedicineUiState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+
+            val refreshError = sessions.loadState.refresh as? LoadState.Error
+
+            when {
+                sessions.loadState.refresh is LoadState.Loading && sessions.itemCount == 0 -> {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-                is TelemedicineUiState.Error -> {
-                    Text("خطأ: ${state.message}", color = MaterialTheme.colorScheme.error)
+                refreshError != null && sessions.itemCount == 0 -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            ApiErrors.messageFor(refreshError.error, "خطأ أثناء جلب الجلسات"),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { sessions.retry() }) { Text("إعادة المحاولة") }
+                    }
                 }
-                is TelemedicineUiState.Success -> {
-                    if (state.sessions.isEmpty()) {
-                        Text("لا توجد جلسات حالياً.", modifier = Modifier.padding(16.dp))
-                    } else {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(state.sessions) { session ->
+                sessions.itemCount == 0 -> {
+                    Text("لا توجد جلسات حالياً.", modifier = Modifier.padding(16.dp))
+                }
+                else -> {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(sessions.itemCount) { index ->
+                            sessions[index]?.let { session ->
                                 TelemedicineSessionCard(session = session)
+                            }
+                        }
+                        if (sessions.loadState.append is LoadState.Loading) {
+                            item {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) { CircularProgressIndicator() }
                             }
                         }
                     }

@@ -371,6 +371,25 @@ data class DeviceCheckResponse(
     val detail: String? = null
 )
 
+/** أحد أجهزة المستخدم المسجلة (من security/my-devices/). */
+data class MyDevice(
+    val id: String,
+    @SerialName("device_fingerprint") val deviceFingerprint: String,
+    @SerialName("os_info") val osInfo: String? = null,
+    @SerialName("browser_info") val browserInfo: String? = null,
+    @SerialName("last_ip_address") val lastIpAddress: String? = null,
+    @SerialName("is_trusted") val isTrusted: Boolean = false,
+    @SerialName("mac_address") val macAddress: String? = null,
+)
+
+data class MyDevicesResponse(
+    val devices: List<MyDevice> = emptyList()
+)
+
+data class RemoveDeviceRequest(
+    @SerialName("device_fingerprint") val deviceFingerprint: String
+)
+
 /** A single dose card shown in "today's doses". */
 @Serializable
 data class TodayDose(

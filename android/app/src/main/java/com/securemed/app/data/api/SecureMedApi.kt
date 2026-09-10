@@ -29,6 +29,10 @@ interface SecureMedApi {
     @POST("auth/logout/")
     suspend fun logout(@Body body: Map<String, String>): Unit
 
+    /** Delete this account (Play requirement) — the server verifies the password. */
+    @DELETE("auth/account/")
+    suspend fun deleteAccount(@Body body: Map<String, String>): Unit
+
     /**
      * Unused: the refresh that keeps a session alive runs through OkHttp's
      * Authenticator in [NetworkModule], which must not recurse back into this
@@ -146,6 +150,18 @@ interface SecureMedApi {
     // ===== SECURITY =====
     @POST("security/check-device/")
     suspend fun checkDevice(@Body request: DeviceCheckRequest): DeviceCheckResponse
+
+    /** أجهزتي المسجلة (للمستخدم العادي). */
+    @GET("security/my-devices/")
+    suspend fun getMyDevices(): MyDevicesResponse
+
+    /** "إزالة جهازي" — self-service deactivation (no blacklist entry). */
+    @POST("security/devices/{id}/deactivate/")
+    suspend fun deactivateMyDevice(@Path("id") id: String): Map<String, String>
+
+    /** إزالة جهاز ببصمته مباشرة (الطريق المفضل للتطبيق). */
+    @HTTP(method = "DELETE", path = "security/my-devices/", hasBody = true)
+    suspend fun removeMyDevice(@Body request: RemoveDeviceRequest): Map<String, String>
 
     @GET("security/dashboard/")
     suspend fun getSecurityDashboard(): JsonObject

@@ -13,8 +13,21 @@
     <!-- Alarm & Notification permissions -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+        SCHEDULE_EXACT_ALARM vs USE_EXACT_ALARM (Play policy, 4-3):
+
+        USE_EXACT_ALARM is granted without any user action and Play allows it
+        only for alarm-clock/calendar-class apps where exactness IS the core
+        feature. A medication reminder app is closest to that class but Play's
+        published guidance names it as a rejected example unless the dose
+        schedule is user-defined (it is here), so the safe submission path is
+        SCHEDULE_EXACT_ALARM + a runtime check. ReminderScheduler already
+        degrades to an inexact window when canScheduleExactAlarms() is false,
+        so a denied grant costs drift, not missing doses. The Play declaration
+        form must still be filled (core-functionality justification) and the
+        video recorded; the permission alone is not the approval.
+    -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <!-- Hardware requirements (optional) -->
     <uses-feature android:name="android.hardware.fingerprint" android:required="false" />

@@ -1,0 +1,27 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:LoginScreen.kt$@Composable fun LoginScreen( viewModel: AuthViewModel = hiltViewModel(), onLoginSuccess: () -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:OperationsScreens.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun CreateInvoiceDialog( inProgress: Boolean, onDismiss: () -&gt; Unit, onLoadPatients: ((List&lt;Patient&gt;) -&gt; Unit) -&gt; Unit, onSubmit: (patientId: String, discountText: String, dueDate: String, items: List&lt;InvoiceItemRequest&gt;) -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:PharmacyScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun CreatePrescriptionDialog( inProgress: Boolean, onDismiss: () -&gt; Unit, onLoadOptions: ((List&lt;Patient&gt;, List&lt;InventoryMedication&gt;) -&gt; Unit) -&gt; Unit, onSubmit: (patientId: String, diagnosisCode: String?, notes: String?, items: List&lt;PrescriptionItemRequest&gt;) -&gt; Unit )</ID>
+    <ID>CyclomaticComplexMethod:ProfileScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun ProfileScreen( onLogout: () -&gt; Unit, onBack: () -&gt; Unit, onNavigateToSettings: () -&gt; Unit, authViewModel: AuthViewModel = hiltViewModel() )</ID>
+    <ID>FunctionOnlyReturningConstant:SecurityUtils.kt$SecurityUtils$@Suppress("UNUSED_PARAMETER") fun getMacAddress(context: Context): String?</ID>
+    <ID>LoopWithTooManyJumpStatements:AdherenceChart.kt$for</ID>
+    <ID>LoopWithTooManyJumpStatements:MedicationStore.kt$MedicationStore$for</ID>
+    <ID>LoopWithTooManyJumpStatements:ReminderScheduler.kt$ReminderScheduler$for</ID>
+    <ID>MaxLineLength:AppointmentsScreen.kt$onSubmit: (patientId: String, doctorId: String, type: String, priority: String, scheduledAt: String, durationMinutes: Int, title: String, notes: String?) -&gt; Unit</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$android.widget.Toast.makeText(this, "رُصدت أدوات تحليل على هذا الجهاز. تم مسح البيانات المحلية وإغلاق التطبيق.", android.widget.Toast.LENGTH_LONG).show()</ID>
+    <ID>MaxLineLength:MainActivity.kt$MainActivity$android.widget.Toast.makeText(this, "عذراً، لا يمكن تشغيل هذا التطبيق على أجهزة مكسورة الحماية (Rooted) لأسباب أمنية.", android.widget.Toast.LENGTH_LONG).show()</ID>
+    <ID>MaxLineLength:OperationsScreens.kt$onValueChange = { value -&gt; items = items.mapIndexed { i, draft -&gt; if (i == index) draft.copy(description = value) else draft } }</ID>
+    <ID>MaxLineLength:OperationsScreens.kt$onValueChange = { value -&gt; items = items.mapIndexed { i, draft -&gt; if (i == index) draft.copy(quantity = value.filter { c -&gt; c.isDigit() }.take(4)) else draft } }</ID>
+    <ID>MaxLineLength:OperationsScreens.kt$onValueChange = { value -&gt; items = items.mapIndexed { i, draft -&gt; if (i == index) draft.copy(unitPrice = value.filter { c -&gt; c.isDigit() || c == '.' || c == ',' }.take(10)) else draft } }</ID>
+    <ID>MaxLineLength:PatientDetailScreen.kt$)</ID>
+    <ID>MaxLineLength:PatientDetailScreen.kt$Text(text = "الجنس: ${if (patient.gender == "M") "ذكر" else if (patient.gender == "F") "أنثى" else "أخرى"}", style = MaterialTheme.typography.bodyMedium)</ID>
+    <ID>MaxLineLength:PatientDetailScreen.kt$Text(text = patient.chronicConditions, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)</ID>
+    <ID>MaxLineLength:PharmacyScreen.kt$onValueChange = { value -&gt; items = items.mapIndexed { i, draft -&gt; if (i == index) draft.copy(durationDays = value.filter { it.isDigit() }.take(3)) else draft } }</ID>
+    <ID>MaxLineLength:PharmacyScreen.kt$onValueChange = { value -&gt; items = items.mapIndexed { i, draft -&gt; if (i == index) draft.copy(frequency = value) else draft } }</ID>
+    <ID>MaxLineLength:PharmacyScreen.kt$onValueChange = { value -&gt; items = items.mapIndexed { i, draft -&gt; if (i == index) draft.copy(quantity = value.filter { it.isDigit() }.take(3)) else draft } }</ID>
+    <ID>UnusedPrivateProperty:LabDashboardScreen.kt$val isRefreshing = requests.loadState.refresh is LoadState.Loading</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -111,6 +111,27 @@ class SecureMedRepository @Inject constructor(
         Result.failure(e)
     }
 
+    /** "إزالة جهازي" — self-service deactivation (no blacklist entry). */
+    suspend fun deactivateDevice(deviceId: String): Result<Map<String, String>> = try {
+        Result.success(api.deactivateMyDevice(deviceId))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** أجهزة المستخدم المسجلة. */
+    suspend fun getMyDevices(): Result<MyDevicesResponse> = try {
+        Result.success(api.getMyDevices())
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** إزالة جهاز ببصمته (من التطبيق نفسه — بلا قائمة سوداء). */
+    suspend fun removeMyDevice(fingerprint: String): Result<Map<String, String>> = try {
+        Result.success(api.removeMyDevice(RemoveDeviceRequest(fingerprint)))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     // ===== AUTH =====
     /**
      * Password sign-in. May come back with a 2FA challenge instead of a
@@ -301,6 +322,32 @@ class SecureMedRepository @Inject constructor(
 
         SecurePreferences.clearSession()
         LocalCache.clear()
+    }
+
+    /**
+     * Delete this account (Play requirement). The server verifies the
+     * password, deactivates the user, and force-ends every session — then
+     * this side runs the full local wipe so nothing session-bound survives.
+     *
+     * Success requires the server call to land: a wipe without the
+     * deactivation would tell the user "deleted" while the account lives.
+     * Failure returns the server's message and touches nothing locally.
+     */
+    suspend fun deleteAccount(password: String): Result<Unit> = try {
+        api.deleteAccount(mapOf("password" to password))
+        try {
+            ReminderScheduler(context).cancelAll()
+        } catch (_: Exception) {
+        }
+        try {
+            dao.clearAll()
+        } catch (_: Exception) {
+        }
+        SecurePreferences.clearSession()
+        LocalCache.clear()
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     // ===== USERS (admin) =====

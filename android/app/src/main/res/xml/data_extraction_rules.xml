@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    PHI must never leave the device through the system's backup channels
+    (Play data-safety review, 4-3): the encrypted Room database, the offline
+    cache, and every preference file are excluded from cloud backup, device
+    transfer, and (on API ≤ 28, via fullBackupContent="false") the legacy
+    full backup. allowBackup="false" already blanks most of this; the rules
+    repeat the intent explicitly so the Play review can read it.
+-->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="external" path="."/>
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="external" path="."/>
     </device-transfer>
 </data-extraction-rules>

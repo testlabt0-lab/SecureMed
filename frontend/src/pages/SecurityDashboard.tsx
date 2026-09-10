@@ -194,7 +194,6 @@ export default function SecurityDashboard() {
             </div>
           </div>
         </div>
-      </div>
 
         <Link
           to="/security/settings"

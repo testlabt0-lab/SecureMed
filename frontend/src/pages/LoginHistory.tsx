@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { securityAPI } from '../api/client';
-import { Shield, ShieldAlert, ShieldCheck, RefreshCw, Smartphone, Laptop, Calendar, Globe, Search, Filter, Download } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldCheck, RefreshCw, Smartphone, Laptop, Calendar, Globe, Search, Filter, Download, Fingerprint, Network } from 'lucide-react';
 import { motion } from 'framer-motion';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
@@ -217,6 +217,20 @@ export const LoginHistory = () => {
                         <span>{record.browser_info || 'متصفح غير محدد'}</span>
                         <span className="text-xs text-gray-400">({record.os_info || 'نظام غير محدد'})</span>
                       </div>
+                      {record.device_fingerprint && (
+                        <div className="text-[10px] font-mono text-gray-400 mt-1 flex flex-col gap-0.5">
+                          <span className="flex items-center gap-1">
+                            <Fingerprint className="w-3 h-3" />
+                            {record.device_fingerprint.substring(0, 20)}
+                          </span>
+                          {record.mac_address && (
+                            <span className="flex items-center gap-1">
+                              <Network className="w-3 h-3" />
+                              {record.mac_address}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {record.is_success ? (

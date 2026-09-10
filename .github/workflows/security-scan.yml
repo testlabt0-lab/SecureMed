@@ -8,49 +8,65 @@ on:
   schedule:
     - cron: '0 2 * * 1' # Run every Monday at 2 AM
 
+permissions:
+  contents: read
+
 jobs:
   sast_scan:
     name: Run SAST Scans
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-        
+
     - name: Install security tools
       run: |
-        pip install "bandit>=1.7,<2" "semgrep>=1.60,<2" "safety>=3,<4"
+        pip install "bandit>=1.7,<2" "semgrep>=1.60,<2" "safety>=3,<4" "pip-audit>=2.7"
 
-    # `|| true` was appended to all three scans, so the job was green whatever they
-    # found — the badge said "Security Scans passed" while nobody looked at the
-    # artifacts. Bandit now gates the build: it analyses our own code, is offline and
+    # Bandit gates the build: it analyses our own code, is offline and
     # deterministic, so a non-zero exit is a real finding and not infrastructure
-    # noise. It also gets `-c` now; without it the .bandit.yml profile was never
-    # loaded and bandit silently ran its own defaults instead.
+    # noise. It gets `-c` so the backend/.bandit.yml profile is actually loaded —
+    # without it bandit silently ran its own defaults instead.
     - name: Run Bandit (Python SAST)
       run: |
-        bandit -c backend/.bandit.yml -r backend/apps/ -ll -ii -f json -o bandit-results.json
+        bandit -c backend/.bandit.yml -r backend/apps/ -ll -ii \
+          -f json -o bandit-results.json
+        bandit -c backend/.bandit.yml -r backend/apps/ -ll -ii \
+          -f sarif -o bandit-results.sarif
 
-    # Semgrep `--config auto` and Safety both fetch rules/advisories at run time, so
-    # they can fail for reasons unrelated to this commit (rule-set changes, rate
-    # limits, Safety's authentication requirement). `continue-on-error` keeps them
-    # from blocking a merge while still showing up as a failed step in the UI —
-    # unlike `|| true`, which reported success.
+    # Semgrep `--config auto` fetches rules at run time, so it can fail for
+    # reasons unrelated to this commit (rule-set changes, rate limits).
+    # `continue-on-error` keeps it from blocking a merge while still showing up
+    # as a failed step in the UI — unlike `|| true`, which reported success.
     - name: Run Semgrep
       continue-on-error: true
       run: |
-        semgrep scan --config auto --json -o semgrep-results.json
+        semgrep scan --config auto --sarif -o semgrep-results.sarif
 
+    # Safety fetches advisories at run time and now requires authentication,
+    # so it is advisory. pip-audit below is the deterministic SCA gate.
     - name: Run Safety (Dependency Vulnerabilities)
       continue-on-error: true
       run: |
-        safety check -r backend/requirements.txt --json > safety-results.json
+        safety check -r backend/requirements.txt --json > safety-results.json || true
 
-    # Must be `always()`: now that Bandit can fail the job, the default behaviour
-    # would skip this step and throw away the very report needed to triage it.
+    # pip-audit resolves the pinned requirements against PyPI's advisory database
+    # locally in the runner. Advisory (continue-on-error) on purpose: the pins in
+    # backend/requirements.txt are deliberate and a new published CVE against one
+    # of them should surface as a reviewable finding, not wedge every build —
+    # but the report is always produced so the review actually happens.
+    - name: Run pip-audit (deterministic SCA)
+      continue-on-error: true
+      run: |
+        pip-audit -r backend/requirements.txt --format json -o pip-audit-results.json
+
+    # `always()` so the reports survive a gate failure — the run that fails is
+    # the one whose report is worth reading. SARIF files are uploaded as
+    # artifacts; the code-scanning upload is documented below.
     - name: Upload Scan Results
       if: always()
       uses: actions/upload-artifact@v4
@@ -59,5 +75,68 @@ jobs:
         if-no-files-found: warn
         path: |
           bandit-results.json
-          semgrep-results.json
+          bandit-results.sarif
+          semgrep-results.sarif
           safety-results.json
+          pip-audit-results.json
+
+    # SARIF can be sent to GitHub code scanning, which annotates pull requests
+    # directly. Left off by default: it needs `security-events: write` on this
+    # job plus either a public repository or GitHub Advanced Security — where
+    # neither holds, the step fails for a reason no one can fix from inside the
+    # repo. To enable, add `security-events: write` to job permissions above and:
+    #
+    #      - name: Upload SARIF to code scanning
+    #        if: always()
+    #        uses: github/codeql-action/upload-sarif@v3
+    #        with:
+    #          sarif_file: |
+    #            bandit-results.sarif
+    #            semgrep-results.sarif
+
+  # Secret scanning. This runs the gitleaks binary directly rather than
+  # gitleaks/gitleaks-action@v2, which requires a paid GITLEAKS_LICENSE secret
+  # on private repositories and fails the job without one.
+  #
+  # Two passes with different severity:
+  #   * `--no-git` gates the build: the files present in this commit are clean,
+  #     or the commit does not merge. History is a different question below.
+  #   * A full-history sweep runs non-blocking and reports what older commits
+  #     contain. Rotating a secret that leaked a year ago is an incident-
+  #     response decision, not something a CI gate can do — but it must be
+  #     visible, which is what the artifact is for.
+  secrets_scan:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # full history for the sweep below
+
+    - name: Run Gitleaks (gate on working tree)
+      run: |
+        docker run --rm \
+          -v "$PWD:/repo" \
+          -w /repo \
+          ghcr.io/gitleaks/gitleaks:latest \
+          detect --no-git --report-path /repo/gitleaks-tree.json --exit-code 1
+
+    - name: Run Gitleaks (history sweep, advisory)
+      if: always()
+      continue-on-error: true
+      run: |
+        docker run --rm \
+          -v "$PWD:/repo" \
+          -w /repo \
+          ghcr.io/gitleaks/gitleaks:latest \
+          detect --report-path /repo/gitleaks-history.json --exit-code 1
+
+    - name: Upload Gitleaks reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gitleaks-reports
+        if-no-files-found: warn
+        path: |
+          gitleaks-tree.json
+          gitleaks-history.json

@@ -4,6 +4,7 @@ Views for accounts app: authentication, biometric, user management.
 import base64
 import hmac
 import io
+import re
 import secrets
 from datetime import timedelta
 
@@ -20,6 +21,11 @@ from django .utils import timezone
 from django .db import transaction 
 from django .core .cache import cache 
 from django .db .models import Q 
+from django .utils.encoding import force_str ,force_bytes 
+from django .utils.http import urlsafe_base64_encode ,urlsafe_base64_decode 
+from django .contrib.auth.tokens import default_token_generator 
+from django .views.generic import TemplateView ,FormView 
+from django import forms 
 
 from apps .accounts .models import User ,BiometricProfile 
 from apps .accounts .serializers import (
@@ -33,9 +39,10 @@ from apps .audit .device_tracker import DeviceTracker
 from apps .security .session_security import SessionManager 
 from apps .security .throttling import BiometricRateThrottle ,LoginRateThrottle 
 from apps .security .crypto import encrypt_field ,decrypt_field 
-from apps .security .models import LoginHistory, BlockedDevice
+from apps .security .models import LoginHistory, BlockedDevice, DeviceRegistry
 from apps .security .authentication import BoundJWTAuthentication
 from apps .core .net import client_fingerprint ,get_client_ip as _canonical_client_ip
+from utils .email_service import send_securemed_email
 import hashlib
 
 def get_client_ip(request):
@@ -196,7 +203,11 @@ class LoginView (APIView ):
             cache.delete(f"failed_login_device_{fingerprint}")
             cache.delete(f"failed_login_level_{fingerprint}")
 
-        # Device Tracking (early evaluation for Adaptive Auth)
+        # Device Tracking (early evaluation for Adaptive Auth). The "new device"
+        # alert is suppressed when this login is about to become an email
+        # challenge instead: the login has not happened yet, so emailing «تم
+        # تسجيل دخول» now would describe an event that never completes, and the
+        # completed login alerts from MFALoginView's path instead.
         device_info ={
         'ip_address': ip_address,
         'mac_address': mac_address,
@@ -204,8 +215,21 @@ class LoginView (APIView ):
         'os_info': os_info,
         'browser_info': browser_info
         }
-        tracked =DeviceTracker .track_device (user ,request ,device_info )
-        device ,is_new_device =tracked if tracked else (None ,False )
+        adaptive_mode =(
+        getattr (settings ,'ADAPTIVE_MFA_ENABLED',True )
+        and not getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True )
+        )
+        # Track first; whether the alert fires is decided from the result.
+        tracked =DeviceTracker .track_device (user ,request ,device_info ,notify =False )
+        device ,is_suspicious_device =tracked if tracked else (None ,False )
+        # A challenge is pending whenever adaptive mode is on and the device is
+        # not trusted — new or previously-seen-but-never-verified alike. Both
+        # are exactly the devices DeviceTracker marked suspicious.
+        challenge_pending =(adaptive_mode and device is not None and not device .is_trusted )
+        if tracked and is_suspicious_device and not challenge_pending :
+            # Suspicious (new device / new location) and logging straight in:
+            # surface the alert now.
+            DeviceTracker .notify_new_device (user ,request ,device_info ,device ,is_suspicious_device )
 
         # Enforce Dr. Majed's requirement: No login from unauthorized devices.
         # The setting exists so a deployment can opt out for testing without
@@ -230,6 +254,26 @@ class LoginView (APIView ):
         if user .mfa_enabled and user .mfa_secret :
             needs_mfa =True 
             mfa_method ='totp'
+
+        # Adaptive MFA (ADAPTIVE_MFA_ENABLED): when device authorization is not
+        # enforced, an unrecognised device is not trusted on sight — it is
+        # challenged with a one-time code emailed to the account's address, and
+        # the login completes only through MFALoginView. Passing
+        # ENFORCE_DEVICE_AUTHORIZATION=True, the 403 above already refused the
+        # login, so the challenge would never be reached. A device that passes
+        # the challenge once may register itself as trusted (trust_device) and
+        # then logs straight in on later attempts.
+        adaptive_challenge =(
+        not needs_mfa
+        and getattr (settings ,'ADAPTIVE_MFA_ENABLED',True )
+        and not getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True )
+        and fingerprint 
+        and device is not None 
+        and not device .is_trusted 
+        )
+        if adaptive_challenge :
+            needs_mfa =True 
+            mfa_method ='email'
 
         if needs_mfa :
             mfa_token =secrets .token_urlsafe (32 )
@@ -256,7 +300,7 @@ class LoginView (APIView ):
             user =user ,
             event_type ='LOGIN_CHALLENGE',
             request =request ,
-            details ={'method':mfa_method ,'mfa_pending':True ,'is_new_device':is_new_device },
+            details ={'method':mfa_method ,'mfa_pending':True ,'is_new_device':is_suspicious_device },
             )
             return Response ({
             'requires_2fa':True ,
@@ -946,6 +990,21 @@ class MFALoginView (APIView ):
         if cached_code :
             cache .delete (f'mfa_code:{mfa_token }')
 
+        # The login is now real: record the device and let the owner hear about
+        # it (email + in-app alert). LoginView deferred this alert while the
+        # outcome was still a pending challenge.
+        from apps .audit .device_tracker import DeviceTracker 
+        mfa_device_info ={
+        'ip_address':get_client_ip (request ),
+        'mac_address':request .META .get ('HTTP_X_MAC_ADDRESS',''),
+        'device_fingerprint':fingerprint ,
+        'os_info':request .META .get ('HTTP_X_OS_INFO',''),
+        'browser_info':request .META .get ('HTTP_X_BROWSER_INFO',''),
+        }
+        mfa_tracked =DeviceTracker .track_device (user ,request ,mfa_device_info ,notify =False )
+        if mfa_tracked and mfa_tracked [0 ]is not None :
+            DeviceTracker .notify_new_device (user ,request ,mfa_device_info ,mfa_tracked [0 ],mfa_tracked [1 ])
+
         user .last_login =timezone .now ()
         user .last_login_ip =get_client_ip (request )
         user .save (update_fields =['last_login','last_login_ip'])
@@ -1292,6 +1351,25 @@ class GrantPermissionView(APIView):
                 request=request,
                 details={'target_user': str(user.id), 'permission': permission_codename}
             )
+            # The affected user must know their access changed — a grant they
+            # did not expect may be an account-compromise signal, and a silent
+            # one hides it.
+            try:
+                from apps.notifications.utils import send_notification
+                send_notification(
+                    recipient=user,
+                    notification_type='PERMISSION_GRANTED',
+                    priority='MEDIUM',
+                    title='تم منحك صلاحية جديدة',
+                    message=(
+                        f'منحك {request.user.email} صلاحية «{permission_codename}». '
+                        f'إن لم تتوقع ذلك تواصل مع الإدارة.'
+                    ),
+                    data={'permission': permission_codename},
+                    send_email=True,
+                )
+            except Exception:
+                pass
             return Response({'detail': f'تم منح صلاحية {permission_codename} بنجاح'})
         except Permission.DoesNotExist:
             return Response({'detail': 'الصلاحية غير موجودة'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1322,6 +1400,162 @@ class RevokePermissionView(APIView):
                 request=request,
                 details={'target_user': str(user.id), 'permission': permission_codename}
             )
+            try:
+                from apps.notifications.utils import send_notification
+                send_notification(
+                    recipient=user,
+                    notification_type='PERMISSION_REVOKED',
+                    priority='HIGH',
+                    title='تم سحب صلاحية منك',
+                    message=(
+                        f'سحب {request.user.email} صلاحية «{permission_codename}» منك. '
+                        f'قد تفقد إمكانية الوصول لبعض الخدمات. إن لم تتوقع ذلك تواصل مع الإدارة.'
+                    ),
+                    data={'permission': permission_codename},
+                    send_email=True,
+                )
+            except Exception:
+                pass
             return Response({'detail': f'تم سحب صلاحية {permission_codename} بنجاح'})
         except Permission.DoesNotExist:
             return Response({'detail': 'الصلاحية غير موجودة'}, status=status.HTTP_400_BAD_REQUEST)
+
+class DeleteAccountView(APIView):
+    """DELETE /auth/account/ — the Play-mandated account-deletion path (4-3).
+
+    Requires the current password (a stolen unlocked session must not be able
+    to wipe the account). The user is *deactivated*, not deleted: every row in
+    the medical tree carries the user id in `created_by`/`uploaded_by` chains,
+    and the audit log's integrity depends on those rows surviving with their
+    actor — a physical delete would either cascade through PHI or orphan it.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request):
+        password = (request.data or {}).get('password', '')
+        if not password or not request.user.check_password(password):
+            return Response(
+                {'detail': 'كلمة المرور غير صحيحة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+
+        # Every token the account holds dies with it — including other devices.
+        SessionManager.force_logout_user(user.id)
+
+        log_security_event(
+            user=user,
+            event_type='USER_DEACTIVATED',
+            request=request,
+            details={'reason': 'self_account_deletion'},
+        )
+        return Response({'detail': 'تم حذف الحساب بنجاح'})
+
+class AccountDeletionRequestView(TemplateView):
+    """POST privacy/account-deletion/ — email the confirmation link.
+
+    The same no-enumeration contract as the reset flow: an unknown or
+    inactive address gets the identical page response and no email.
+    """
+
+    template_name = 'account_deletion.html'
+
+    def post(self, request, *args, **kwargs):
+        email = (request.POST.get('email') or '').lower().strip()
+        valid_shape = re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email) is not None
+        user = User.objects.filter(email=email, is_active=True).first() if valid_shape else None
+        if user is not None:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            confirm_link = (
+                f"{settings.FRONTEND_URL}/privacy/account-deletion/confirm/"
+                f"?uid={uid}&token={token}"
+            )
+            send_securemed_email(
+                to_email=email,
+                subject='طلب حذف الحساب — SecureMed',
+                title='طلب حذف الحساب',
+                body_html=f"""
+                    <p>تحية طيبة،</p>
+                    <p>توصلنا بطلب حذف الحساب المرتبط بهذا البريد في منصة
+                    <b>SecureMed</b>. الحذف يُعطِّل الحساب نهائياً وينهي كل
+                    جلساته على كل الأجهزة، ولا يمكن التراجع عنه.</p>
+                    <p>إذا كنتم صاحب الطلب، اضغطوا الزر أدناه للتأكيد. إن لم
+                    تكونوا، تجاهلوا هذه الرسالة ولن يتغير شيء.</p>
+                    <p style="text-align:center;margin:22px 0;">
+                      <a href="{confirm_link}"
+                         style="background:#DC2626;color:#ffffff;text-decoration:none;
+                                padding:12px 28px;border-radius:8px;font-weight:bold;
+                                display:inline-block;">تأكيد حذف الحساب</a>
+                    </p>
+                """,
+            )
+            log_security_event(
+                user=user,
+                event_type='ACCOUNT_DELETION_REQUESTED',
+                request=request,
+                details={'channel': 'web'},
+            )
+        context = self.get_context_data(requested=valid_shape)
+        return self.render_to_response(context)
+
+    def get(self, request, *args, **kwargs):
+        return self.render_to_response(self.get_context_data(**kwargs))
+
+
+class AccountDeletionConfirmView(TemplateView):
+    """GET privacy/account-deletion/confirm/?uid=…&token=….
+
+    Executes the deactivation for a valid one-time link: is_active=False
+    (PHI rows and the audit chain depend on the actor surviving), every
+    session force-ended, and the completion audited. A used or forged link
+    renders the request page with an error flag instead of acting.
+    """
+
+    template_name = 'account_deletion_confirm.html'
+
+    def _resolve_user(self, request):
+        uid = request.GET.get('uid') or request.POST.get('uid', '')
+        token = request.GET.get('token') or request.POST.get('token', '')
+        try:
+            user_id = force_str(urlsafe_base64_decode(uid))
+            user = User.objects.filter(pk=user_id, is_active=True).first()
+        except (ValueError, TypeError, OverflowError):
+            return None
+        if user is None or not default_token_generator.check_token(user, token):
+            return None
+        return user
+
+    def get(self, request, *args, **kwargs):
+        user = self._resolve_user(request)
+        context = {'link_valid': user is not None}
+        if user is not None:
+            user.is_active = False
+            user.save(update_fields=['is_active'])
+            SessionManager.force_logout_user(user.id)
+            log_security_event(
+                user=user,
+                event_type='USER_DEACTIVATED',
+                request=request,
+                details={'reason': 'web_account_deletion'},
+            )
+            context['deleted'] = True
+        return self.render_to_response(context)
+
+
+class AccountDeletionPageView(TemplateView):
+    """GET privacy/account-deletion/ — the public web path Play requires.
+
+    Play's account-deletion rule (4-3 §2): a user who can no longer open the
+    app (lost device, deleted it) must still be able to start account
+    deletion. This page explains the process and emails the owner of the
+    address a one-time confirmation link — the same proof-of-mailbox model
+    PasswordResetRequestView already establishes.
+    """
+
+    template_name = 'account_deletion.html'
+

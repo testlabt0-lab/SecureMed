@@ -119,6 +119,19 @@ class LoginSerializer (serializers .Serializer ):
                 # Lock has expired, reset it
                     user .reset_failed_attempts ()
 
+            if not user .is_active :
+            # Deactivated accounts (self-deletion, admin suspension) must be
+            # indistinguishable from bad credentials on the wire — but the
+            # check runs BEFORE the password comparison so a correct password
+            # for a dead account still cannot mint tokens.
+                if user .check_password (password ):
+                    raise serializers .ValidationError (
+                    {'detail':'هذا الحساب غير مفعّل. يرجى التواصل مع الدعم.'}
+                    )
+                raise serializers .ValidationError (
+                {'detail':'بيانات الاعتماد غير صحيحة'}
+                )
+
             if not user.check_password(password):
                 user.failed_login_attempts += 1
                 if user.failed_login_attempts >= 3:

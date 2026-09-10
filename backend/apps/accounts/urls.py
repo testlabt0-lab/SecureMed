@@ -12,6 +12,7 @@ MFAStatusView ,MFASetupView ,MFAVerifyView ,MFADisableView ,MFALoginView ,
 GlobalSearchView ,
 PasswordResetRequestView ,PasswordResetConfirmView ,
 GrantPermissionView ,RevokePermissionView ,
+DeleteAccountView ,
 )
 
 router =DefaultRouter ()
@@ -22,6 +23,7 @@ urlpatterns =[
 path ('',include (router .urls )),
 path ('login/',LoginView .as_view (),name ='login'),
 path ('logout/',LogoutView .as_view (),name ='logout'),
+path ('account/',DeleteAccountView .as_view (),name ='account-delete'),
 path ('refresh/',RefreshTokenView .as_view (),name ='refresh'),
 path ('biometric/enroll/',BiometricEnrollView .as_view (),name ='biometric-enroll'),
 path ('biometric/challenge/',BiometricChallengeView .as_view (),name ='biometric-challenge'),

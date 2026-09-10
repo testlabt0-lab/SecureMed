@@ -15,6 +15,7 @@ import { appointmentsAPI } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
 import { CARE_TEAM_ROLES } from '../constants/roles';
 import CreateAppointmentModal from '../components/appointments/CreateAppointmentModal';
+import { ListSkeleton, EmptyState } from '../components/common/States';
 
 // ─── Type definitions ────────────────────────────────────────────────────────
 
@@ -480,15 +481,13 @@ export default function Appointments() {
 
           {/* Appointments list */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-16 text-gray-500">
-              <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-              جاري التحميل...
-            </div>
+            <ListSkeleton rows={5} />
           ) : displayedAppointments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-500 space-y-2">
-              <Calendar className="w-12 h-12 opacity-30" />
-              <p>لا توجد مواعيد</p>
-            </div>
+            <EmptyState
+              icon={<Calendar className="w-7 h-7" />}
+              title="لا توجد مواعيد"
+              description="ستظهر المواعيد المحجوزة هنا — ابدأ بحجز موعد جديد"
+            />
           ) : (
             <AnimatePresence mode="popLayout">
               <div className="space-y-3">
@@ -509,3 +508,4 @@ export default function Appointments() {
     </div>
   );
 }
+

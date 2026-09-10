@@ -148,11 +148,16 @@ class BackupViewSet(viewsets.ReadOnlyModelViewSet):
             result = restore_backup(record.filepath, force=force)
             
             if force:
+                # request.user's row may no longer exist in the DB the restore
+                # just rebuilt — logging the event under that FK would create
+                # an orphaned audit row, so record the operator in details.
                 log_security_event(
-                    user=request.user,
+                    user=None,
                     event_type='BACKUP_RESTORED',
                     request=request,
-                    details={'filename': record.filename, 'restored_media_files': result.get('restored_media_files', 0)},
+                    details={'filename': record.filename,
+                             'operator': request.user.email,
+                             'restored_media_files': result.get('restored_media_files', 0)},
                     severity='CRITICAL',
                 )
                 # Restore is the most destructive operation in the system —

@@ -97,7 +97,7 @@ class WAFMiddleware :
         blacklist_key =f'waf_blacklist:{client_ip }'
         try:
             if cache .get (blacklist_key ):
-                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا'},status =403 )
+                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
         except Exception as e:
             logger.error(f"WAF_CACHE_READ_FAILED | error={e}")
 
@@ -108,12 +108,12 @@ class WAFMiddleware :
             blocked_ip =BlockedIP .objects .enforceable ().filter (ip_address =client_ip ).first ()
             if blocked_ip is not None :
                 cache .set (blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_ip ))
-                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا'},status =403 )
+                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
 
             if device_fingerprint :
                 dev_blacklist_key =f'waf_device_blacklist:{device_fingerprint }'
                 if cache .get (dev_blacklist_key ):
-                    return JsonResponse ({'error':'تم حظر هذا الجهاز'},status =403 )
+                    return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
                 blocked_device =(
                 BlockedDevice .objects .enforceable ()
                 .filter (device_fingerprint =device_fingerprint )
@@ -121,7 +121,7 @@ class WAFMiddleware :
                 )
                 if blocked_device is not None :
                     cache .set (dev_blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_device ))
-                    return JsonResponse ({'error':'تم حظر هذا الجهاز'},status =403 )
+                    return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
         except Exception as e :
             logger.error(f"WAF_BLOCKLIST_CHECK_FAILED | error={e}")
 

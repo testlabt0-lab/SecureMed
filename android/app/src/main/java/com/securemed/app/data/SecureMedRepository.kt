@@ -24,11 +24,16 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.NetworkType
 import androidx.work.Constraints
 import com.securemed.app.data.local.room.PendingSyncActionEntity
+import com.securemed.app.data.sync.SyncQueuedException
 import com.securemed.app.data.sync.SyncWorker
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import retrofit2.HttpException
 import java.util.UUID
+
+/** WorkManager unique-name for the offline sync queue drain (see scheduleSyncWorker). */
+private const val SYNC_WORK_NAME = "securemed_pending_sync"
 
 /**
  * Repository for authentication and data operations.
@@ -304,6 +309,15 @@ class SecureMedRepository @Inject constructor(
             }
         }
 
+        // Detach the push channel before the session is gone: the unregister
+        // call authenticates with the still-valid access token. Left bound,
+        // the backend keeps delivering clinical notifications to a signed-out
+        // device until the token next rotates.
+        try {
+            unregisterCurrentFcmToken()
+        } catch (_: Exception) {
+        }
+
         // Order matters: alarms are keyed by plan id, so they have to be
         // dropped while the plans are still readable. Left armed, they keep
         // firing after sign-out and put the patient name and prescription on
@@ -436,56 +450,57 @@ class SecureMedRepository @Inject constructor(
     suspend fun getPatient(id: String): Result<Patient> =
         cached("patient_$id", Patient.serializer()) { api.getPatient(id) }
 
+    /**
+     * Create a patient; when the server is unreachable, enqueue the create
+     * as a pending sync action instead of lying about success.
+     *
+     * A 4xx is a rejection, not an outage: the request was understood and
+     * refused, so queueing it would only guarantee a permanent failure
+     * replayed forever — it is surfaced as a failure directly.
+     */
     suspend fun createPatient(request: PatientCreateRequest): Result<Patient> = try {
         val patient = api.createPatient(request)
         Result.success(patient)
+    } catch (e: HttpException) {
+        Result.failure(e)
     } catch (e: Exception) {
+        val opId = UUID.randomUUID().toString()
         val action = PendingSyncActionEntity(
             id = UUID.randomUUID().toString(),
             actionType = "CREATE_PATIENT",
             payloadJson = json.encodeToString(PatientCreateRequest.serializer(), request),
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            clientOpId = opId
         )
         dao.insertPendingAction(action)
         scheduleSyncWorker()
-        
-        // Return a simulated success so the UI doesn't crash, 
-        // using a temporary ID.
-        Result.success(Patient(
-            id = "temp_${action.id}",
-            fullName = request.fullName,
-            dateOfBirth = request.dateOfBirth,
-            gender = request.gender,
-            bloodType = request.bloodType,
-            phone = request.phone,
-            chronicConditions = request.chronicConditions
-        ))
+        Result.failure(SyncQueuedException("لا يوجد اتصال — حُفظ الطلب محلياً وسيُرسل تلقائياً عند عودة الشبكة"))
     }
 
+    /**
+     * Create a medical record, with the same offline policy as
+     * [createPatient]. The queued retry carries the action's `clientOpId` as
+     * `X-Client-Op-Id` so a process death between the server's POST and the
+     * local delete re-sends the same idempotency key instead of duplicating
+     * the record.
+     */
     suspend fun createMedicalRecord(request: MedicalRecordCreateRequest): Result<MedicalRecord> = try {
         val record = api.createMedicalRecord(request)
         Result.success(record)
+    } catch (e: HttpException) {
+        Result.failure(e)
     } catch (e: Exception) {
+        val opId = UUID.randomUUID().toString()
         val action = PendingSyncActionEntity(
             id = UUID.randomUUID().toString(),
             actionType = "CREATE_MEDICAL_RECORD",
             payloadJson = json.encodeToString(MedicalRecordCreateRequest.serializer(), request),
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            clientOpId = opId
         )
         dao.insertPendingAction(action)
         scheduleSyncWorker()
-
-        // Return a simulated success.
-        Result.success(MedicalRecord(
-            id = "temp_${action.id}",
-            title = request.title,
-            content = request.content,
-            recordType = request.recordType,
-            recordTypeDisplay = request.recordType,
-            createdByName = SecurePreferences.userName ?: "Unknown",
-            isCritical = request.isCritical,
-            createdAt = "Pending Sync"
-        ))
+        Result.failure(SyncQueuedException("لا يوجد اتصال — حُفظ السجل محلياً وسيُرسل تلقائياً عند عودة الشبكة"))
     }
 
     /**
@@ -573,7 +588,16 @@ class SecureMedRepository @Inject constructor(
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(constraints)
             .build()
-        WorkManager.getInstance(context).enqueue(request)
+        // Unique + APPEND_OR_REPLACE: N rapid creates used to enqueue N
+        // parallel SyncWorkers draining one SQLCipher-encrypted queue at the
+        // same time. APPEND chains each new request behind whatever is
+        // already running/queued; APPEND_OR_REPLACE additionally recovers
+        // when the previous chain died in a cancelled/failed state.
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            SYNC_WORK_NAME,
+            androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE,
+            request
+        )
     }
 
     suspend fun getMedicalRecords(channelId: String? = null): Result<List<MedicalRecord>> {
@@ -799,16 +823,16 @@ class SecureMedRepository @Inject constructor(
 
     // ===== MEDICATION PLANS (device-local, offline-first) =====
 
-    fun getMedications(): Result<List<Medication>> =
+    suspend fun getMedications(): Result<List<Medication>> =
         Result.success(MedicationStore.loadPlans())
 
-    fun getTodayDoses(): Result<TodayDosesResponse> =
+    suspend fun getTodayDoses(): Result<TodayDosesResponse> =
         Result.success(MedicationStore.todayDosesResponse())
 
-    fun getAdherence(): Result<AdherenceStats> =
+    suspend fun getAdherence(): Result<AdherenceStats> =
         Result.success(MedicationStore.adherenceStats())
 
-    fun createMedication(
+    suspend fun createMedication(
         patientId: String,
         patientName: String,
         name: String,
@@ -835,7 +859,7 @@ class SecureMedRepository @Inject constructor(
         Result.failure(e)
     }
 
-    fun logDose(medicationId: String, scheduledFor: String, status: String): Result<Unit> = try {
+    suspend fun logDose(medicationId: String, scheduledFor: String, status: String): Result<Unit> = try {
         MedicationStore.logDose(medicationId, scheduledFor, status)
         Result.success(Unit)
     } catch (e: Exception) {
@@ -989,6 +1013,20 @@ class SecureMedRepository @Inject constructor(
         registerPushToken(t)
     } catch (e: IllegalStateException) {
         // Firebase not provisioned — push is optional, skip silently.
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Un-register the current FCM token (same "not provisioned" semantics as
+     * [registerCurrentFcmToken]). Called on logout: without this the backend
+     * keeps pushing clinical notifications to a device that just signed out.
+     */
+    suspend fun unregisterCurrentFcmToken(): Result<Unit> = try {
+        val t = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+        unregisterPushToken(t)
+    } catch (e: IllegalStateException) {
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)

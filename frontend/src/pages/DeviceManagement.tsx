@@ -213,6 +213,12 @@ export const DeviceManagement = () => {
 
   const deviceList = Array.isArray(devices) ? devices : [];
   const blockedList = Array.isArray(blockedDevices) ? blockedDevices : [];
+  // Quick filter for the registered-devices table: the approval flow starts
+  // here, so "قيد المراجعة" is one tap away instead of eyeballing the badge.
+  const [trustFilter, setTrustFilter] = useState<'all' | 'trusted' | 'pending'>('all');
+  const filteredDevices = deviceList.filter((d) =>
+    trustFilter === 'all' ? true : trustFilter === 'trusted' ? d.is_trusted : !d.is_trusted
+  );
   const typeEntries = Object.entries(deviceTypes || {});
 
   return (
@@ -331,11 +337,30 @@ export const DeviceManagement = () => {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700/60 flex items-center justify-between">
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700/60 flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-semibold text-gray-900 dark:text-white">قائمة الأجهزة المسجلة والنشطة</h3>
-                <span className="text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold px-2.5 py-1 rounded-full">
-                  {deviceList.length} جهاز
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {([
+                    ['all', 'الكل', deviceList.length],
+                    ['trusted', 'موثوقة', deviceList.filter((d) => d.is_trusted).length],
+                    ['pending', 'قيد المراجعة', deviceList.filter((d) => !d.is_trusted).length],
+                  ] as const).map(([key, label, count]) => (
+                    <button
+                      key={key}
+                      onClick={() => setTrustFilter(key)}
+                      className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
+                        trustFilter === key
+                          ? 'bg-primary-600 text-white border-primary-600'
+                          : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-primary-300'
+                      }`}
+                    >
+                      {label} ({count})
+                    </button>
+                  ))}
+                  <span className="text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold px-2.5 py-1 rounded-full">
+                    {filteredDevices.length} معروض
+                  </span>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -358,15 +383,15 @@ export const DeviceManagement = () => {
                           جاري تحميل الأجهزة...
                         </td>
                       </tr>
-                    ) : deviceList.length === 0 ? (
+                    ) : filteredDevices.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
                           <Laptop className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                          لا توجد أجهزة مسجلة في الوقت الحالي
+                          لا توجد أجهزة مطابقة لهذا الفلتر
                         </td>
                       </tr>
                     ) : (
-                      deviceList.map((device: any) => (
+                      filteredDevices.map((device: any) => (
                         <tr key={device.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center gap-3">

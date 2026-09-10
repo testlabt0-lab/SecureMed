@@ -99,7 +99,7 @@ const STATUS_TEXT: Record<CallState, string> = {
 
 export function useWebRTCCall(options: UseWebRTCCallOptions): UseWebRTCCall {
   const { roomId, localStream, enabled } = options;
-  const accessToken = useAuthStore((s) => s.tokens?.access);
+  const accessToken = useAuthStore((s) => s.accessToken);
 
   const [state, setState] = useState<CallState>('idle');
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);

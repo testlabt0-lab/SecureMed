@@ -21,6 +21,22 @@ class PatientDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<PatientDetailUiState>(PatientDetailUiState.Loading)
     val uiState: StateFlow<PatientDetailUiState> = _uiState
 
+    init {
+        // Offline-queue outcomes (dropped poison actions, pending syncs) are
+        // posted by SyncWorker; surface them where creates originate so a
+        // queued or rejected record is never a silent event.
+        viewModelScope.launch {
+            com.securemed.app.data.sync.SyncEvents.message.collect { message ->
+                if (message != null) {
+                    val current = _uiState.value as? PatientDetailUiState.Success
+                    if (current != null) {
+                        _uiState.value = current.copy(actionMessage = message)
+                    }
+                }
+            }
+        }
+    }
+
     fun loadPatient(patientId: String) {
         viewModelScope.launch {
             _uiState.value = PatientDetailUiState.Loading

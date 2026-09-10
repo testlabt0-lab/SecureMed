@@ -14,9 +14,9 @@ const api = axios.create({
 
 api.interceptors.request.use(
   async (config) => {
-    const tokens = useAuthStore.getState().tokens;
-    if (tokens?.access) {
-      config.headers.Authorization = `Bearer ${tokens.access}`;
+    const accessToken = useAuthStore.getState().accessToken;
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
 
     // Attach device fingerprint to every request
@@ -38,7 +38,7 @@ api.interceptors.request.use(
 );
 
 let isRefreshing = false;
-let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
+let failedQueue: Array<{ resolve: (token: string | null) => void; reject: (err: unknown) => void }> = [];
 
 const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach((prom) => {
@@ -48,18 +48,40 @@ const processQueue = (error: any, token: string | null = null) => {
   failedQueue = [];
 };
 
+// Machine-readable codes the server attaches to blocking responses
+// (security/middleware.py, accounts/views.py) so the client never has to
+// pattern-match localized Arabic text.
+const BLOCK_CODES = ['DEVICE_BLOCKED', 'IP_BLOCKED'] as const;
+
+export const getErrorCode = (data: any): string | undefined => {
+  if (!data) return undefined;
+  const code = (data as any).code;
+  return Array.isArray(code) ? code[0] : code;
+};
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    const tokens = useAuthStore.getState().tokens;
 
-    if (error.response?.status === 403 && (error.response?.data?.error === 'تم حظر هذا الجهاز' || error.response?.data?.error === 'تم حظر هذا العنوان نهائيا')) {
+    if (
+      error.response?.status === 403 &&
+      BLOCK_CODES.includes(getErrorCode(error.response?.data) as any)
+    ) {
       window.location.href = '/blocked';
       return Promise.reject(error);
     }
 
-    if (error.response?.status === 401 && !originalRequest._retry && tokens?.refresh) {
+    // A dead access token. The refresh credential is the HttpOnly cookie the
+    // server set at login — the body is intentionally empty. The call goes
+    // through the same `api` instance so the device-fingerprint headers the
+    // refresh token is bound to (accounts/views.py client_fingerprint check)
+    // are attached, and withCredentials ships the cookie.
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest._isRefresh
+    ) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -75,15 +97,14 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh/`, {
-          refresh: tokens.refresh,
-        });
+        // `_isRefresh` marks this request so its own 401 never re-enters this
+        // branch — a dead cookie must land in the catch below, not loop.
+        const response = await api.post('/auth/refresh/', {}, { _isRefresh: true } as any);
         const newAccessToken = response.data.access;
 
-        useAuthStore.getState().setAuth(
-          useAuthStore.getState().user!,
-          { access: newAccessToken, refresh: tokens.refresh }
-        );
+        // The server rotates the refresh token and re-sets the HttpOnly cookie
+        // itself; the client only keeps the new access token in memory.
+        useAuthStore.getState().setAccessToken(newAccessToken);
 
         processQueue(null, newAccessToken);
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -107,8 +128,9 @@ export default api;
 export const authAPI = {
   login: (email: string, password: string) =>
     api.post('/auth/login/', { email, password }),
-  logout: (refresh: string) => api.post('/auth/logout/', { refresh }),
-  refresh: (refresh: string) => api.post('/auth/refresh/', { refresh }),
+  // The refresh credential is the HttpOnly cookie; the server identifies the
+  // session from it, so no body is needed.
+  logout: () => api.post('/auth/logout/'),
   me: () => api.get('/auth/users/me/'),
   changePassword: (data: { old_password: string; new_password: string; confirm_password: string }) =>
     api.post('/auth/users/change_password/', data),

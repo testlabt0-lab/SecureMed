@@ -24,10 +24,15 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requiredRole, requiredPermission }: ProtectedRouteProps) {
-  const { user, tokens } = useAuthStore();
+  const { user } = useAuthStore();
   const location = useLocation();
 
-  if (!user || !tokens) {
+  // The user profile is the only persisted auth state. The access token lives
+  // in memory only and is restored on demand from the HttpOnly refresh cookie
+  // by the api client's 401 interceptor, so its presence is not a gating
+  // condition here — requiring it would bounce a valid session to /login on
+  // every hard reload before the silent refresh ever ran.
+  if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

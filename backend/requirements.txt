@@ -44,6 +44,7 @@ urllib3>=2.2.2,<3
 # certifi is left uncapped on purpose: it is a CA-root bundle, and a build should
 # always be free to pick up the newest trusted roots.
 certifi>=2024.7.4
+stripe>=10.12.0
 
 # ─── 2FA + Reports ─────────────────────────────────────────────────────────────
 pyotp==2.9.0

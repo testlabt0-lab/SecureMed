@@ -17,7 +17,6 @@ object SecurePreferences {
     private const val KEY_USER_EMAIL = "user_email"
     private const val KEY_USER_NAME = "user_name"
     private const val KEY_USER_ROLE = "user_role"
-    private const val KEY_DEVICE_ID = "device_id"
     private const val KEY_INSTALL_ID = "install_id"
     private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
     private const val KEY_DARK_MODE = "dark_mode"
@@ -73,7 +72,7 @@ object SecurePreferences {
      * one at a time as they are read.
      *
      * What the user notices: they are signed out, and the backend sees an unknown
-     * device — [KEY_INSTALL_ID] and [KEY_DEVICE_ID] went with the file — so
+     * device — [KEY_INSTALL_ID] went with the file — so
      * adaptive MFA challenges the next login and biometric login has to be
      * enrolled again.
      */
@@ -237,7 +236,7 @@ object SecurePreferences {
      * biometric opt-in (enrollment is per-user, so the next user must opt in
      * again rather than inherit this one's).
      *
-     * Three keys deliberately survive, because they are device state rather
+     * Two keys deliberately survive, because they are device state rather
      * than session state and dropping them breaks the device permanently:
      *
      *  - [KEY_DB_PASSPHRASE] is the SQLCipher key. The encrypted database
@@ -245,11 +244,10 @@ object SecurePreferences {
      *    file no key can open — every Room access afterwards throws
      *    "file is not a database". Callers wipe the *contents* instead
      *    (SecureMedDao.clearAll).
-     *  - [KEY_DEVICE_ID] is registered server-side by biometric enrollment.
-     *    A new id makes the backend treat this device as unknown, so
-     *    biometric login can never succeed again.
-     *  - [KEY_INSTALL_ID] is the `X-Device-Fingerprint` this install sends.
-     *    A new value is a new device to the backend: adaptive MFA challenges
+     *  - [KEY_INSTALL_ID] is the device identity: the `X-Device-Fingerprint`
+     *    this install sends and the id biometric enrollment is bound to (the
+     *    historical separate [KEY_DEVICE_ID] has been unified onto it). A new
+     *    value is a new device to the backend: adaptive MFA challenges
      *    the login again, the "trusted device" row it earned is orphaned, and
      *    a fingerprint that changes *mid-session* is what the server's hijack
      *    detection is built to catch.
@@ -290,15 +288,18 @@ object SecurePreferences {
         prefs.edit().clear().commit()
     }
 
+    /**
+     * Device identity used for every server-side binding (biometric
+     * enrollment/challenge, push-token registration).
+     *
+     * This used to be a second, weak identity (`android-<timestamp>-<random>`
+     * minted per install with no randomness guarantees) while security-critical
+     * paths used [installId]. Two identities for one device meant a push
+     * channel or a biometric credential could be bound to an id the security
+     * layer never validated. Everything now unifies on [installId].
+     */
     val deviceId: String
-        get() {
-            var id = prefs.getString(KEY_DEVICE_ID, null)
-            if (id == null) {
-                id = "android-${System.currentTimeMillis()}-${(0..9999).random()}"
-                prefs.edit().putString(KEY_DEVICE_ID, id).apply()
-            }
-            return id
-        }
+        get() = installId
 
     /**
      * Stable per-install identifier sent as `X-Device-Fingerprint`.

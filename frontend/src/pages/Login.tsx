@@ -62,17 +62,19 @@ export default function Login() {
       })
       .catch((err) => {
         if (err.response?.status === 403) {
-            const detail = err.response.data.detail || '';
-            if (detail.includes('محظور')) {
-                setDeviceState('blocked');
-            } else if (detail.includes('بانتظار')) {
-                setDeviceState('pending');
-            } else {
-                setDeviceState('unknown');
-            }
-            setDeviceCheckMessage(detail);
+          // `state`/`code` are machine-readable (CheckDeviceView); matching on
+          // them instead of the localized detail text.
+          const state = err.response.data.state || err.response.data.code || '';
+          if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
+            setDeviceState('blocked');
+          } else if (state === 'pending' || state === 'PENDING_DEVICE') {
+            setDeviceState('pending');
+          } else {
+            setDeviceState('unknown');
+          }
+          setDeviceCheckMessage(err.response.data.detail);
         } else {
-            setDeviceState('authorized'); // fallback if API is unreachable
+          setDeviceState('authorized'); // fallback if API is unreachable
         }
       });
   }, []);
@@ -105,6 +107,46 @@ export default function Login() {
 
   // 2FA step state
   const [pendingMfaToken, setPendingMfaToken] = useState<string | null>(null);
+
+  // Re-run the pre-flight check without a full page reload — the pending
+  // screen's "فحص الحالة" button. Extracted because the original check runs
+  // from a mount-only useEffect.
+  const recheckDevice = () => {
+    setDeviceState('loading');
+    getDeviceFingerprint()
+      .then((info) => {
+        setDeviceInfo(info);
+        return securityAPI.checkDevice({
+            device_fingerprint: info.device_fingerprint,
+            mac_address: info.mac_address
+        });
+      })
+      .then((res) => {
+        if (res.data.authorized) {
+            setDeviceState('authorized');
+        } else {
+            setDeviceState('pending');
+            setDeviceCheckMessage(res.data.detail);
+        }
+      })
+      .catch((err) => {
+        if (err.response?.status === 403) {
+          // `state`/`code` are machine-readable (CheckDeviceView); matching on
+          // them instead of the localized detail text.
+          const state = err.response.data.state || err.response.data.code || '';
+          if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
+            setDeviceState('blocked');
+          } else if (state === 'pending' || state === 'PENDING_DEVICE') {
+            setDeviceState('pending');
+          } else {
+            setDeviceState('unknown');
+          }
+          setDeviceCheckMessage(err.response.data.detail);
+        } else {
+          setDeviceState('authorized'); // fallback if API is unreachable
+        }
+      });
+  };
   const [mfaCode, setMfaCode] = useState('');
   const [mfaEmail, setMfaEmail] = useState('');
 
@@ -140,7 +182,17 @@ export default function Login() {
       navigate('/dashboard');
     } catch (err: any) {
       const detail = err.response?.data?.detail || err.response?.data?.message || 'فشل تسجيل الدخول';
-      if (err.response?.status === 403 || detail.includes('حظر') || detail.includes('blocked')) {
+      // Machine-readable block codes (WAF middleware / login device gate);
+      // the text check stays only as a fallback for older payloads.
+      const blockCode = err.response?.data?.code;
+      const codeStr = Array.isArray(blockCode) ? blockCode[0] : blockCode;
+      if (
+        codeStr === 'DEVICE_BLOCKED' ||
+        codeStr === 'IP_BLOCKED' ||
+        err.response?.status === 403 ||
+        detail.includes('حظر') ||
+        detail.includes('blocked')
+      ) {
         setBlockedAlert(detail || 'تم حظر هذا الجهاز أو عنوان IP لأسباب أمنية');
       }
       toast.error(detail);
@@ -251,9 +303,15 @@ export default function Login() {
             {deviceState === 'pending' && (
                 <div className="flex flex-col items-center justify-center py-10 space-y-4">
                     <Monitor className="w-16 h-16 text-amber-500" />
-                    <h3 className="text-xl text-white font-bold">جهاز غير مصرح</h3>
+                    <h3 className="text-xl text-white font-bold">جهاز بانتظار الموافقة</h3>
                     <p className="text-amber-200 text-center">{deviceCheckMessage}</p>
-                    <p className="text-sm text-gray-400 text-center mt-2">يرجى الانتظار حتى يقوم مدير النظام بقبول طلبك عبر تيليجرام ثم قم بتحديث الصفحة.</p>
+                    <p className="text-sm text-gray-400 text-center mt-2">وصل طلبك للإدارة (تيليجرام ولوحة التحكم). عند الموافقة اضغط «فحص الحالة» — أو إن كنت مديراً فعّل الجهاز من /admin/ أو من جهاز موثوق آخر.</p>
+                    <button
+                        onClick={recheckDevice}
+                        className="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-xl transition-colors shadow-sm"
+                    >
+                        فحص الحالة
+                    </button>
                 </div>
             )}
 

@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import com.securemed.app.data.local.MedicationStore
 import com.securemed.app.data.model.Medication
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -44,8 +45,13 @@ class ReminderScheduler(private val context: Context) {
     private val alarmManager =
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    /** Load stored plans and (re)schedule every active one. */
-    fun refreshFromCache() {
+    /**
+     * Load stored plans and (re)schedule every active one.
+     *
+     * Suspending because the plans live behind the encrypted Room store:
+     * reading them must not block the caller's thread.
+     */
+    suspend fun refreshFromCache() {
         MedicationStore.loadPlans()
             .filter { it.isActive && it.times.isNotEmpty() }
             .forEach { scheduleNext(it) }
@@ -131,7 +137,7 @@ class ReminderScheduler(private val context: Context) {
      * plan ids the alarms are keyed by are gone and the alarms keep firing —
      * posting patient names and prescriptions for a signed-out user.
      */
-    fun cancelAll() {
+    suspend fun cancelAll() {
         MedicationStore.loadPlans().forEach { cancel(it.id) }
     }
 
@@ -189,10 +195,16 @@ class ReminderReceiver : BroadcastReceiver() {
             notificationId = notificationId
         )
 
-        // Queue the following dose from the cached plan
-        try {
-            ReminderScheduler(context).refreshFromCache()
-        } catch (_: Exception) {
+        // Queue the following dose from the cached plan. goAsync keeps the
+        // process alive while the suspending read of the encrypted store runs.
+        val pendingResult = goAsync()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                ReminderScheduler(context).refreshFromCache()
+            } catch (_: Exception) {
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 }
@@ -214,9 +226,14 @@ class BootReceiver : BroadcastReceiver() {
         ) {
             return
         }
-        try {
-            ReminderScheduler(context).refreshFromCache()
-        } catch (_: Exception) {
+        val pendingResult = goAsync()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                ReminderScheduler(context).refreshFromCache()
+            } catch (_: Exception) {
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 }

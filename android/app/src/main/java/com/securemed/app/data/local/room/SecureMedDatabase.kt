@@ -24,7 +24,7 @@ import androidx.room.RoomDatabase
         MedicationPlanEntity::class,
         DoseLogEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class SecureMedDatabase : RoomDatabase() {
@@ -44,6 +44,21 @@ abstract class SecureMedDatabase : RoomDatabase() {
          * migrator checks this so a future schema bump does not silently
          * import rows into a table shape it no longer matches.
          */
-        const val MIGRATION_TARGET_VERSION = 3
+        const val MIGRATION_TARGET_VERSION = 4
+
+        /**
+         * Version 3 → 4: added [PendingSyncActionEntity.clientOpId] (the
+         * idempotency key sent with every sync retry) and
+         * [PendingSyncActionEntity.failureReason]. Nullable columns with no
+         * backfill: pre-existing rows simply have no op id, and the worst
+         * case for one of those legacy rows is the duplicate-create risk
+         * that existed before this change — not a broken upgrade.
+         */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_sync_actions ADD COLUMN clientOpId TEXT")
+                db.execSQL("ALTER TABLE pending_sync_actions ADD COLUMN failureReason TEXT")
+            }
+        }
     }
 }

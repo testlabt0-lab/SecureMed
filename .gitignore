@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 backend/htmlcov/
+backend/.pytest_tmp/
 backend/.coverage
 backend/.pytest_cache/
 backend/staticfiles/
@@ -45,7 +46,9 @@ backend/certs/*.pem
 # ---------- Node ----------
 node_modules/
 frontend/node_modules/
-frontend/dist/.vite/
+# The SPA is built inside the Docker image; the build output never belongs in
+# the repository tree.
+frontend/dist/
 
 # ---------- Build artifacts ----------
 *.zip

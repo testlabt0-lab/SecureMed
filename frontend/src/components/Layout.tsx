@@ -42,7 +42,7 @@ const pushPrefByType: Record<string, string> = {
 };
 
 export default function Layout() {
-  const { user, logout, tokens } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const { theme, toggleTheme } = useThemeStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -145,10 +145,10 @@ export default function Layout() {
 
   const handleLogout = async () => {
     try {
-      if (tokens?.refresh) {
-        const { authAPI } = await import('../api/client');
-        await authAPI.logout(tokens.refresh);
-      }
+      // The server ends the session from the HttpOnly refresh cookie; no body
+      // is needed and failures still clear the local session below.
+      const { authAPI } = await import('../api/client');
+      await authAPI.logout();
     } catch (e) {
       // Ignore logout errors
     } finally {

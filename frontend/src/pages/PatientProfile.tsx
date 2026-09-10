@@ -13,6 +13,17 @@ import { patientsAPI } from '../api/client';
 import api from '../api/client';
 import Modal from '../components/common/Modal';
 
+/** The slice of the Web Speech API this page actually uses. */
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  onresult: ((event: { results: { [index: number]: { [index: number]: { transcript: string } } } }) => void) | null;
+  start(): void;
+}
+
 /** Minimal markdown renderer for the AI summary: headings, **bold**, bullets. */
 function renderSummary(text: string) {
   return text.split('\n').map((line, i) => {
@@ -181,8 +192,13 @@ export default function PatientProfile() {
   });
 
   const handleStartRecording = () => {
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // webkitSpeechRecognition is non-standard; declare the shape locally
+    // instead of @ts-ignore, which silences real typos here too.
+    const w = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const SpeechRecognition = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert("متصفحك لا يدعم التسجيل الصوتي (Web Speech API). يرجى استخدام متصفح مدعوم مثل Chrome.");
       return;

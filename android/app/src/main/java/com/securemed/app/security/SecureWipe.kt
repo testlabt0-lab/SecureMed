@@ -27,9 +27,9 @@ import java.security.SecureRandom
 object SecureWipe {
 
     /**
-     * Wipes session data, keeping the device-bound identities
-     * ([SecurePreferences.deviceId], [installId]) — those survive a logout
-     * on purpose (see [SecurePreferences.clearSession]); dropping them would
+     * Wipes session data, keeping the device-bound identity
+     * ([SecurePreferences.installId]) — it survives a logout
+     * on purpose (see [SecurePreferences.clearSession]); dropping it would
      * orphan the server-side biometric enrollment and trusted-device row.
      */
     fun wipeSession(context: Context) {

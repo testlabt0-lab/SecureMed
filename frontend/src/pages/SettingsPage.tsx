@@ -31,7 +31,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 // ─── Account Tab ──────────────────────────────────────────────────────────────
 
 function AccountTab() {
-  const { user, setAuth, tokens } = useAuthStore();
+  const { user, updateUser } = useAuthStore();
   const [form, setForm] = useState({
     full_name: user?.full_name || '',
     phone: user?.phone || '',
@@ -44,7 +44,7 @@ function AccountTab() {
     mutationFn: (data: any) => usersAPI.update(user!.id, data),
     onSuccess: (res) => {
       toast.success('تم حفظ البيانات بنجاح');
-      setAuth({ ...user!, ...res.data }, tokens!);
+      updateUser(res.data);
     },
     onError: () => toast.error('فشل الحفظ'),
   });

@@ -64,20 +64,41 @@ class TestOffsiteDelivery:
         assert record.delivered_offsite
         assert record.delivered_at is not None
 
-    def test_telegram_delivery_too_big_skips(self, tmp_path, settings):
-        """An archive over the Bot API 50 MB cap must not be attempted."""
+    def test_telegram_delivery_too_big_is_split_not_skipped(self, tmp_path, settings):
+        """أرشيف فوق حد Bot API يُقسم أجزاءً ويُرسل — لا يُتخطى.
+
+        نستخدم حداً مصغراً (32KB) وملفاً فعلياً 60KB كي يكون التقسيم حقيقياً
+        على بايتات مكتوبة فعلاً على القرص، بلا 100MB في الاختبار.
+        """
         record = _make_record(tmp_path, settings)
-        record.size_bytes = 51 * 1024 * 1024
-        record.save(update_fields=['size_bytes'])
+        import os
+        big = tmp_path / 'backups' / 'big.bin'
+        big.write_bytes(b'x' * 60_000)
+        record.size_bytes = big.stat().st_size
+        record.filepath = str(big)
+        record.save()
         settings.BACKUP_SEND_TO_TELEGRAM = True
         settings.TELEGRAM_BOT_TOKEN = '123:abc'
         settings.TELEGRAM_ADMIN_CHAT_ID = '42'
+
+        class Ok:
+            status_code = 200
+            text = ''
         with mock.patch(
-            'apps.security.telegram_service.requests.post'
+            'apps.security.telegram_service.TELEGRAM_DOCUMENT_MAX_BYTES',
+            32 * 1024,
+        ), mock.patch(
+            'apps.security.telegram_service._TELEGRAM_PART_MARGIN',
+            1024,
+        ), mock.patch(
+            'apps.security.telegram_service.requests.post',
+            return_value=Ok(),
         ) as tg_post:
             result = deliver_backup(record)
-        tg_post.assert_not_called()
-        assert result['delivery_status'] == BackupRecord.DeliveryStatus.FAILED
+        calls = [c for c in tg_post.call_args_list
+                 if 'sendDocument' in c.args[0]]
+        assert len(calls) >= 2
+        assert result['delivery_status'] == BackupRecord.DeliveryStatus.TELEGRAM
 
     def test_cloud_delivery_success(self, tmp_path, settings):
         record = _make_record(tmp_path, settings)

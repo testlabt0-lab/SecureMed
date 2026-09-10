@@ -755,9 +755,13 @@ METRICS_ALLOWED_IPS = config(
 METRICS_TOKEN = config('METRICS_TOKEN', default='')
 
 REDIS_URL =config ('REDIS_URL',default ='redis://localhost:6379/0')
-
 CELERY_BROKER_URL =config ('CELERY_BROKER_URL',default ='redis://127.0.0.1:6379/0')
 CELERY_RESULT_BACKEND =config ('CELERY_RESULT_BACKEND',default ='redis://127.0.0.1:6379/0')
+# Single-service / local dev mode (no Redis worker): run every .delay() task
+# synchronously in-process instead of dialing a broker that isn't there —
+# kombu's connect+retry loop costs ~70s per queued task otherwise.
+CELERY_TASK_ALWAYS_EAGER =config ('CELERY_TASK_ALWAYS_EAGER',default =False ,cast =bool )
+CELERY_TASK_EAGER_PROPAGATES =config ('CELERY_TASK_EAGER_PROPAGATES',default =False ,cast =bool )
 
 # AI Settings
 GEMINI_API_KEY =config ('GEMINI_API_KEY',default ='')
@@ -940,8 +944,8 @@ if not DEBUG and not _TESTING:
     }
     for name, default_val in _insecure_defaults.items():
         if globals().get(name) == default_val:
-            print(
-                f"WARNING: ImproperlyConfigured - {name} still uses the insecure default value in production. "
+            raise ImproperlyConfigured(
+                f"{name} still uses the insecure default value in production. "
                 f"Set it via environment variable before deploying."
             )
 
@@ -950,8 +954,8 @@ if not DEBUG and not _TESTING:
     # DB_* variables are never read.
     if not _DATABASE_URL and config('DB_ENGINE', default='') != 'sqlite':
         if config('DB_PASSWORD', default='postgres') == 'postgres':
-            print(
-                "WARNING: ImproperlyConfigured - DB_PASSWORD still uses the default 'postgres' in production. "
+            raise ImproperlyConfigured(
+                "DB_PASSWORD still uses the default 'postgres' in production. "
                 "Set it via environment variable, or use DATABASE_URL."
             )
 
@@ -968,8 +972,8 @@ if not DEBUG and not _TESTING:
     if not AUDIT_LOG_HMAC_KEY and not config(
         'AUDIT_LOG_ALLOW_SECRET_KEY_FALLBACK', default=False, cast=bool
     ):
-        print(
-            "WARNING: ImproperlyConfigured - AUDIT_LOG_HMAC_KEY is not set, so audit rows would be signed with "
+        raise ImproperlyConfigured(
+            "AUDIT_LOG_HMAC_KEY is not set, so audit rows would be signed with "
             "SECRET_KEY and anyone holding it could forge audit history. Generate "
             "a dedicated key (e.g. 'python -c \"import secrets;"
             "print(secrets.token_urlsafe(64))\"') and set AUDIT_LOG_HMAC_KEY. "
@@ -986,16 +990,16 @@ if not DEBUG and not _TESTING:
     # failure, which is the worst kind — refuse to boot instead.
     _cache_backend = CACHES.get('default', {}).get('BACKEND', '')
     if 'locmem' in _cache_backend.lower():
-        print(
-            "WARNING: ImproperlyConfigured - CACHES['default'] is LocMemCache while DEBUG=False. Rate limiting, "
+        raise ImproperlyConfigured(
+            "CACHES['default'] is LocMemCache while DEBUG=False. Rate limiting, "
             "the JWT denylist and the WAF blocklists would be per-worker and "
             "therefore unenforceable. Set REDIS_URL (recommended), or set "
             "CACHE_BACKEND=django.core.cache.backends.db.DatabaseCache and run "
             "'python manage.py createcachetable' once."
         )
     if 'InMemoryChannelLayer' in CHANNEL_LAYERS.get('default', {}).get('BACKEND', ''):
-        print(
-            "WARNING: ImproperlyConfigured - CHANNEL_LAYERS['default'] is InMemoryChannelLayer while DEBUG=False. "
+        raise ImproperlyConfigured(
+            "CHANNEL_LAYERS['default'] is InMemoryChannelLayer while DEBUG=False. "
             "WebSocket group broadcasts would only reach consumers inside the same "
             "process. Set REDIS_URL so channels_redis is used."
         )
@@ -1005,8 +1009,8 @@ if not DEBUG and not _TESTING:
     # was missing would hand that property back without saying so, and the tokens
     # would keep working, so nothing would ever surface it.
     if _JWT_RS256_REQUESTED and SIMPLE_JWT['ALGORITHM'] != 'RS256':
-        print(
-            "WARNING: ImproperlyConfigured - JWT_ALGORITHM=RS256 was requested but the keypair is unusable "
+        raise ImproperlyConfigured(
+            "JWT_ALGORITHM=RS256 was requested but the keypair is unusable "
             f"({_JWT_RS256_ERROR or 'no PEM found'}). Generate it with "
             "'python scripts/generate_certificates.py', or point "
             "JWT_PRIVATE_KEY_PATH / JWT_PUBLIC_KEY_PATH at existing PEM files. "
@@ -1022,8 +1026,8 @@ if not DEBUG and not _TESTING:
     # than one of them, because the meaningful mistake is enabling the seed
     # outside of a dev environment, not choosing a particular password.
     if config('SEED_DEMO_DATA', default='0').lower() in ('1', 'true', 'yes', 'on'):
-        print(
-            "WARNING: ImproperlyConfigured - SEED_DEMO_DATA is enabled in production. "
+        raise ImproperlyConfigured(
+            "SEED_DEMO_DATA is enabled in production. "
             "backend/scripts/seed_data.py will create 10 accounts whose passwords "
             "are committed to the repo (admin@securemed.app / Admin@2026!, "
             "doctor.* / Doctor@2026!, etc.). Set SEED_DEMO_DATA=0 before deploying."

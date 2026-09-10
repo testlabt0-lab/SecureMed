@@ -127,7 +127,13 @@ class LoginView (APIView ):
         if fingerprint:
             block_key = f"blocked_device_{fingerprint}"
             if cache.get(block_key):
-                raise drf_serializers.ValidationError({'error': 'تم حظر هذا الجهاز. يرجى المحاولة بعد انتهاء مدة الحظر.'})
+                # A Response, not ValidationError: DRF would wrap the dict
+                # values in lists, and clients match `code` as a plain string.
+                return Response(
+                    {'error': 'تم حظر هذا الجهاز. يرجى المحاولة بعد انتهاء مدة الحظر.',
+                     'code': 'DEVICE_BLOCKED'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
         serializer =LoginSerializer (data =request .data )
         try :
@@ -243,7 +249,8 @@ class LoginView (APIView ):
                 severity='WARNING'
             )
             return Response(
-                {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.', 'authorized': False},
+                {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.',
+                 'authorized': False, 'code': 'PENDING_DEVICE'},
                 status=status.HTTP_403_FORBIDDEN
         )
 
@@ -625,7 +632,8 @@ class BiometricLoginView (APIView ):
                 severity='WARNING'
             )
             return Response(
-                {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.', 'authorized': False},
+                {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.',
+                 'authorized': False, 'code': 'PENDING_DEVICE'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -949,7 +957,7 @@ class MFALoginView (APIView ):
                 severity ='WARNING',
                 )
                 return Response (
-                {'detail':'هذا الجهاز محظور.','authorized':False },
+                {'detail':'هذا الجهاز محظور.','authorized':False ,'code':'DEVICE_BLOCKED'},
                 status =status .HTTP_403_FORBIDDEN ,
                 )
             if getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True ):
@@ -965,7 +973,7 @@ class MFALoginView (APIView ):
                     )
                     return Response (
                     {'detail':'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.',
-                     'authorized':False },
+                     'authorized':False ,'code':'PENDING_DEVICE'},
                     status =status .HTTP_403_FORBIDDEN ,
                     )
 
@@ -1130,6 +1138,8 @@ class GlobalSearchView (APIView ):
         )
 
         user =request .user
+        if user.role in NON_CLINICAL_ROLES:
+            return Response({'patients': [], 'channels': [], 'users': [], 'total': 0})
         is_admin =user .role in PATIENT_INDEX_ADMIN_ROLES
 
         # Scope BEFORE scanning: accessible_patients() applies basin scoping and

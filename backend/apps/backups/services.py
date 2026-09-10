@@ -29,6 +29,8 @@ from django .conf import settings
 from django .core import serializers 
 from django .core .management import call_command 
 from django .db import DEFAULT_DB_ALIAS ,connections 
+
+from apps .accounts .models import User 
 from django .utils import timezone 
 
 from apps .backups .models import BackupRecord 
@@ -427,6 +429,15 @@ def restore_backup (filepath :str ,force :bool =False )->dict :
         note ='أمان تلقائي قبل الاستعادة',
         )
     reconcile_backup_registry ()
+
+    # Events written between the safety snapshot and the flush (e.g. this
+    # very restore's earlier audit rows) may reference users the flush just
+    # removed — null those FKs or the DB carries orphaned audit rows that
+    # break constraint checks later.
+    from apps .audit .models import AuditLog 
+    AuditLog .objects .exclude (user__isnull =True ).exclude (
+    user_id__in =User .objects .values_list ('id',flat =True )
+    ).update (user =None )
 
     return {
     'verified':True ,

@@ -376,8 +376,18 @@ class CheckDeviceView(APIView):
     throttle_classes = []  # a per-scoped throttle is applied explicitly below
     throttle_scope = 'device_check'
 
+    # Machine-readable counterpart of `state` so clients never have to
+    # pattern-match the localized `detail` text.
+    STATE_CODES = {
+        'authorized': 'AUTHORIZED',
+        'blocked': 'DEVICE_BLOCKED',
+        'pending': 'PENDING_DEVICE',
+        'unknown': 'DEVICE_UNKNOWN',
+    }
+
     def _state(self, kind, authorized, detail, **extra):
-        body = {'state': kind, 'authorized': authorized, 'detail': detail}
+        body = {'state': kind, 'authorized': authorized, 'detail': detail,
+                'code': self.STATE_CODES.get(kind, kind.upper())}
         body.update(extra)
         return body
 
@@ -487,7 +497,7 @@ class CheckDeviceView(APIView):
             logger.error(f"Failed to send device approval Telegram: {e}")
             telegram_sent = False
 
-        detail = ('تم إرسال طلب تفعيل للإدارة عبر تيليجرام'
+        detail = ('تم إرسال طلب تفعيل للإدارة (تيليجرام ولوحة التحكم)'
                   if telegram_sent else
                   'الجهاز غير مصرح، يرجى التواصل مع الإدارة للتفعيل')
         return Response(self._state('pending', False, detail),
@@ -637,6 +647,14 @@ class TelegramWebhookView(APIView):
         from apps.security.models import DeviceRegistry, BlockedDevice
 
         update = request.data
+        # Text commands (مثل /pending، /users) go through the shared console
+        # processor — the same one the polling command feeds, so both paths
+        # authorize and act identically.
+        if update.get('message'):
+            from apps.security.telegram_bot import process_update
+            process_update(update, request)
+            return Response({'ok': True})
+
         callback_query = update.get('callback_query')
         if not callback_query:
             # Telegram also pings the webhook with the same endpoint on

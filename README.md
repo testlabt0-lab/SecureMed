@@ -398,13 +398,16 @@ securemed/
 │   ├── APK_BUILD_INSTRUCTIONS.md  # كيفية بناء APK
 │   └── DEPLOYMENT.md              # النشر
 │
-├── render.yaml                 # Blueprint النشر (ثلاث خدمات)
-├── RENDER_DEPLOY_GUIDE.md      # دليل النشر على Render
-├── docker-compose.yml          # التشغيل المحلي بملامح (profiles)
-├── setup.sh                    # سكريبت الإعداد الكامل
-├── build_apk.sh                # سكريبت بناء APK
-└── README.md                   # هذا الملف
+├── docker-compose.yml            # طوبولوجيا الإنتاج على VPS (db, redis, daphne, celery, coturn, nginx/TLS, مراقبة)
+├── deploy/                       # nginx conf، شهادات TLS، مراقبة
+├── setup.sh                      # سكريبت الإعداد الكامل
+├── build_apk.sh                  # سكريبت بناء APK
+└── README.md                     # هذا الملف
 ```
+
+> **مسارات نشر أُلغيت**: مسار SmarterASP/IIS (`smarterasp-deploy.yml` + `backend/web.config`) حُذف نهائياً —
+> لم يعد مدعوماً وأياً كان ما يذكره في الوثائق القديمة. بيئة النشر المعتمدة هي **VPS/Docker** عبر
+> `docker-compose.yml` والصورة الجذرية الموحّدة (`Dockerfile` يبني الـSPA ويخدمه Django بنفس الأصل).
 
 ## 🛡️ ميزات الأمان المنفذة (كلها مُختبرَة)
 

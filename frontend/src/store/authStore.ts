@@ -22,10 +22,20 @@ export interface User {
   groups?: string[];
 }
 
+/**
+ * Token storage model:
+ * - `accessToken` lives in memory ONLY — never written to sessionStorage, so an
+ *   XSS payload cannot read a long-lived credential and the persisted state
+ *   carries nothing usable.
+ * - The refresh token is an HttpOnly cookie the server sets on login/refresh
+ *   (accounts.views.set_refresh_cookie) and reads back on /auth/refresh/ and
+ *   /auth/logout/. The client never sees it.
+ */
 interface AuthState {
   user: User | null;
-  tokens: { access: string; refresh: string } | null;
-  setAuth: (user: User, tokens: { access: string; refresh: string }) => void;
+  accessToken: string | null;
+  setAuth: (user: User, tokens: { access: string; refresh?: string }) => void;
+  setAccessToken: (token: string) => void;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
 }
@@ -34,10 +44,11 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
-      tokens: null,
-      setAuth: (user, tokens) => set({ user, tokens }),
+      accessToken: null,
+      setAuth: (user, tokens) => set({ user, accessToken: tokens.access }),
+      setAccessToken: (token) => set({ accessToken: token }),
       logout: () => {
-        set({ user: null, tokens: null });
+        set({ user: null, accessToken: null });
         sessionStorage.removeItem('auth-storage');
       },
       updateUser: (updatedUser) =>
@@ -48,6 +59,9 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       storage: createJSONStorage(() => sessionStorage),
+      // Persist the user profile only. The access token must not survive a
+      // reload in web storage; it is restored via the HttpOnly refresh cookie.
+      partialize: (state) => ({ user: state.user }) as unknown as AuthState,
     }
   )
 );

@@ -45,6 +45,9 @@ interface SecureMedDao {
     @Query("DELETE FROM pending_sync_actions WHERE id = :id")
     suspend fun deletePendingAction(id: String)
 
+    @Query("UPDATE pending_sync_actions SET failureReason = :reason WHERE id = :id")
+    suspend fun setPendingActionFailureReason(id: String, reason: String?)
+
     @Query("DELETE FROM pending_sync_actions")
     suspend fun clearPendingActions()
 

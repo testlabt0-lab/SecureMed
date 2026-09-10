@@ -6,6 +6,7 @@ import logging
 import uuid
 from django .conf import settings
 from django .utils import timezone
+from apps .accounts .models import User
 from apps .audit .models import AuditLog
 
 logger =logging .getLogger (__name__ )
@@ -100,7 +101,13 @@ def log_security_event (user ,event_type ,request =None ,details =None ,severity
         event_id =log_data ['id']
         if AuditLog .objects .filter (pk =event_id ).exists ():
             return
-        AuditLog .objects .create (id =event_id ,user =user ,**fields )
+        # A restore's flush may have removed the user row after this event was
+        # minted — writing its stale id would orphan the audit row and trip FK
+        # checks. Drop the FK, the operator identity lives in details.
+        effective_user =user 
+        if effective_user is not None and not User .objects .filter (pk =effective_user .pk ).exists ():
+            effective_user =None 
+        AuditLog .objects .create (id =event_id ,user =effective_user ,**fields )
 
     # A worker is not guaranteed to exist. `.delay()` only proves the broker took the
     # message, so on a deployment with Redis but no Celery process every audit event

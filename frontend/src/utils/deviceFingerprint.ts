@@ -15,7 +15,20 @@ export interface DeviceInfo {
   device_fingerprint: string;
 }
 
-export const getDeviceFingerprint = async (): Promise<DeviceInfo> => {
+// The fingerprint is stable for the lifetime of the tab (screen, timezone,
+// language, UA do not change mid-session), but it was recomputed with a fresh
+// SHA-256 for every single API call. Cache the promise module-level so the
+// digest runs once and every request awaits the same resolved value.
+let fingerprintPromise: Promise<DeviceInfo> | null = null;
+
+export const getDeviceFingerprint = (): Promise<DeviceInfo> => {
+  if (!fingerprintPromise) {
+    fingerprintPromise = computeDeviceFingerprint();
+  }
+  return fingerprintPromise;
+};
+
+const computeDeviceFingerprint = async (): Promise<DeviceInfo> => {
   // We collect various pieces of information to generate a unique fingerprint
   const screen_resolution = `${window.screen.width}x${window.screen.height}x${window.screen.colorDepth}`;
   const timezone_offset = new Date().getTimezoneOffset().toString();

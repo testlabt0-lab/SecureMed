@@ -33,11 +33,12 @@ object DatabaseModule {
         // `MedicationStore.migrateFromLocalCache()` before this builder ever
         // opens the file — so by the time Room reads the file the device-only
         // rows are importable and no destructive fallback can lose them.
-        //
+        // Version 3 → 4 added the pending-sync idempotency columns.
+        .addMigrations(SecureMedDatabase.MIGRATION_3_4)
         // Still a floor, not a substitute for migrations: for versions ≥ 3 a
         // destructive fallback WOULD drop device-only rows (plans/logs are
         // not refetchable from the server). A release that bumps the schema
-        // past 3 must write real Migrations and, to test them, flip
+        // past 4 must write real Migrations and, to test them, flip
         // exportSchema = true plus a room.schemaLocation KSP argument.
         .fallbackToDestructiveMigration()
         .build()

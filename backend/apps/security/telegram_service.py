@@ -126,19 +126,52 @@ def edit_message_text(chat_id, message_id, text):
 
 
 # Hard limit of the public Bot API for one sendDocument upload (50 MB).
-# Larger archives are announced in the chat instead of being attempted —
-# pair BACKUP_OFFSITE_ENABLED with them so big backups still leave the server.
+# Archives above it are split into parts just under the cap — see
+# send_backup_document — so a Telegram-only deployment still gets every
+# archive, not only the small ones.
 TELEGRAM_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024
+# Margin subtracted from the cap per part: the multipart form framing and the
+# caption travel in the same request, so a part sized exactly at the cap can
+# still be rejected. 2 MB is comfortably enough and keeps part counts low.
+_TELEGRAM_PART_MARGIN = 2 * 1024 * 1024
 
 
-def send_backup_document(record):
+def _send_document_bytes(chat_id, filename, fileobj, caption):
+    """One sendDocument call. Returns True only on a 200 from Telegram."""
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+    try:
+        response = requests.post(
+            url,
+            data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+            files={"document": (filename, fileobj, "application/octet-stream")},
+            timeout=300,
+        )
+        if response.status_code != 200:
+            logger.error(f"Failed to send backup document: {response.text[:200]}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error sending backup document: {e}")
+        return False
+
+
+def send_backup_document(record, cap_bytes=None):
     """Upload a finished (encrypted) backup archive to the admin chat.
 
     The file is sent exactly as it sits on disk — Fernet-encrypted by
     apps.backups.services — so an admin chat compromise never yields a
-    readable database dump. Returns True only when Telegram accepted the
-    document; every failure mode is logged and reported as False because a
+    readable database dump. Returns True only when Telegram accepted
+    *everything*; every failure mode is logged and reported as False because a
     messaging outage must never break the backup run itself.
+
+    Archives larger than the Bot API's 50 MB document cap used to be skipped
+    outright, which quietly left the chat with no off-site copy at all. They
+    are now split into sequential parts just under the cap
+    (``<filename>.partNN-of-M``) and sent in order; concatenating the parts in
+    numeric order reproduces the archive byte for byte (verify against
+    record.checksum after reassembly). Each caption carries the part number so
+    an operator restoring from the chat knows what to join.
     """
     bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
     chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', None)
@@ -150,38 +183,62 @@ def send_backup_document(record):
     if not getattr(record, 'exists_on_disk', True) or not os.path.exists(record.filepath):
         logger.error(f"Backup document not on disk: {record.filepath}")
         return False
-    if record.size_bytes > TELEGRAM_DOCUMENT_MAX_BYTES:
+
+    cap = cap_bytes or TELEGRAM_DOCUMENT_MAX_BYTES
+    part_size = cap - _TELEGRAM_PART_MARGIN
+    size = record.size_bytes or os.path.getsize(record.filepath)
+
+    if size > cap:
+        # Split delivery. Read sequential slices so a 2 GB archive never sits
+        # in memory; each part is named so its order is unambiguous.
+        import math
+        part_count = max(2, math.ceil(size / part_size))
         logger.info(
-            f"Backup {record.filename} ({record.size_bytes} bytes) exceeds the "
-            f"Bot API document limit; skipping upload."
+            f"Backup {record.filename} ({size} bytes) exceeds the Bot API "
+            f"document limit — sending {part_count} parts of ≤{part_size} bytes."
         )
-        return False
+        width = max(2, len(str(part_count)))
+        sent_parts = []
+        with open(record.filepath, 'rb') as fh:
+            for index in range(part_count):
+                chunk = fh.read(part_size)
+                if not chunk:
+                    break
+                part_name = (
+                    f"{record.filename}.part{str(index + 1).zfill(width)}"
+                    f"-of-{str(part_count).zfill(width)}"
+                )
+                caption = (
+                    f"💾 <b>نسخة احتياطية — جزء {index + 1}/{part_count}</b>\n"
+                    f"<b>الأرشيف:</b> <code>{record.filename}</code>\n"
+                    f"<b>الحجم الكلي:</b> {size / 1024 / 1024:.1f} MB\n"
+                    f"<b>بصمة SHA-256 للأرشيف كاملاً:</b> <code>{record.checksum[:16]}…</code>\n"
+                    f"الملف مشفّر. للاستعادة: اجمع الأجزاء بالترتيب في ملف واحد "
+                    f"بالاسم الأصلي ثم تحقق من البصمة."
+                )
+                import io
+                if not _send_document_bytes(chat_id, part_name, io.BytesIO(chunk), caption):
+                    logger.error(
+                        f"Backup split delivery stopped at part {index + 1}/{part_count} "
+                        f"of {record.filename}"
+                    )
+                    return False
+                sent_parts.append(part_name)
+        logger.info(
+            f"Backup {record.filename} delivered as {len(sent_parts)} Telegram parts."
+        )
+        return True
 
     caption = (
         f"💾 <b>نسخة احتياطية</b>\n"
         f"<b>الملف:</b> <code>{record.filename}</code>\n"
-        f"<b>الحجم:</b> {record.size_bytes / 1024:.1f} KB\n"
+        f"<b>الحجم:</b> {size / 1024:.1f} KB\n"
         f"<b>النوع:</b> {record.get_kind_display()}\n"
         f"<b>بصمة SHA-256:</b> <code>{record.checksum[:16]}…</code>\n"
         f"الملف مشفّر — لا يُفتح إلا بالمفتاح المُعدّ له."
     )
-
-    url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-    try:
-        with open(record.filepath, 'rb') as fh:
-            response = requests.post(
-                url,
-                data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
-                files={"document": (record.filename, fh, "application/octet-stream")},
-                timeout=300,
-            )
-        if response.status_code != 200:
-            logger.error(f"Failed to send backup document: {response.text[:200]}")
-            return False
-        return True
-    except Exception as e:
-        logger.error(f"Error sending backup document: {e}")
-        return False
+    with open(record.filepath, 'rb') as fh:
+        return _send_document_bytes(chat_id, record.filename, fh, caption)
 
 
 def send_backup_result_notification(record=None, success=True, detail=''):

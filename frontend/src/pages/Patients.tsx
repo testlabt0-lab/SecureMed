@@ -6,6 +6,7 @@ import { patientsAPI } from '../api/client';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../store/authStore';
 import { CARE_TEAM_ROLES } from '../constants/roles';
+import { ListSkeleton, EmptyState } from '../components/common/States';
 
 export default function Patients() {
   const navigate = useNavigate();
@@ -59,12 +60,13 @@ export default function Patients() {
         </div>
 
         {isLoading ? (
-          <div className="text-center py-8 text-gray-500">جاري التحميل...</div>
+          <ListSkeleton rows={6} />
         ) : patients.length === 0 ? (
-          <div className="text-center py-12">
-            <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500">لا يوجد مرضى بعد</p>
-          </div>
+          <EmptyState
+            icon={<Users className="w-7 h-7" />}
+            title="لا يوجد مرضى بعد"
+            description="سيظهر المرضى هنا بمجرد إنشاء أول ملف مريض"
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {patients.map((patient: any) => (
@@ -288,3 +290,4 @@ function CreatePatientModal({ onSubmit, onClose, loading }: any) {
     </div>
   );
 }
+

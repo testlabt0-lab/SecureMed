@@ -49,11 +49,19 @@ data class AppointmentEntity(
 
 /**
  * Local representation of a pending action to sync with the server.
+ *
+ * [clientOpId] is the idempotency key: a UUID minted once with the action and
+ * sent as `X-Client-Op-Id` on every retry, so a process death between the
+ * server's POST and the local delete re-sends the SAME key instead of
+ * creating a duplicate server row. [failureReason] carries the last
+ * permanent rejection for UI display.
  */
 @Entity(tableName = "pending_sync_actions")
 data class PendingSyncActionEntity(
     @PrimaryKey val id: String,
     val actionType: String,
     val payloadJson: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val clientOpId: String? = null,
+    val failureReason: String? = null
 )

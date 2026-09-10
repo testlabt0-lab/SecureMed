@@ -12,7 +12,7 @@ import {
 import { roleLabel } from '../constants/roles';
 
 export default function Profile() {
-  const { user, updateUser, tokens, logout } = useAuthStore();
+  const { user, updateUser, logout } = useAuthStore();
   const navigate = useNavigate();
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [showBiometricForm, setShowBiometricForm] = useState(false);

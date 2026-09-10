@@ -37,24 +37,6 @@ def health_check (request ):
     })
 
 
-def spa_view (request ):
-    """Serve the built React SPA (single-service production deployment).
-
-    Client-side routes (e.g. /patients/12) fall back to index.html so the
-    router takes over. Backend prefixes (api/, admin/, static/, media/,
-    health/, metrics) are excluded by the catch-all regex — they must never
-    be swallowed by the SPA. `ai/` is no longer among them: nothing is
-    mounted there since apps.ai moved under api/v1/, and an exclusion for a
-    prefix Django does not serve turns any future client-side /ai/... route
-    into a 404 on refresh.
-    """
-    index =Path (settings .FRONTEND_DIST )/'index.html'
-    if index .exists ():
-        resp =FileResponse (index .open ('rb'),content_type ='text/html; charset=utf-8')
-        resp ['Cache-Control']='no-cache'# index.html must always revalidate
-        return resp 
-    raise Http404 ('Frontend build not found — run "npm run build" in frontend/')
-
 
 urlpatterns =[
 path ('admin/',admin .site .urls ),
@@ -139,11 +121,4 @@ elif getattr (settings ,'PROTECT_MEDIA_FILES',True ):
 else :
     urlpatterns +=static (settings .MEDIA_URL ,document_root =settings .MEDIA_ROOT )
 
-# SPA catch-all — MUST stay last (excludes all backend prefixes above)
-urlpatterns +=[
-re_path (
-r'^(?!api/|admin/|static/|media/|health/|metrics|privacy/).*$',
-spa_view ,
-name ='spa',
-),
-]
+

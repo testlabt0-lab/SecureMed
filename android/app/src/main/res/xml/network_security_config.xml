@@ -5,7 +5,13 @@
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">securemed-web.onrender.com</domain>
+        <!-- N11 fix: this must name the host the release build actually calls —
+             BuildConfig.API_BASE_URL's release default is
+             securemed-production.onrender.com (android/app/build.gradle.kts).
+             It previously named securemed-web.onrender.com, so the platform
+             never applied these pins to the API host. Any change to
+             -PAPI_BASE_URL must update this domain in the same commit. -->
+        <domain includeSubdomains="true">securemed-production.onrender.com</domain>
         <!--
             Real SPKI pins for the production backend. Unlike OkHttp's pinner,
             the platform enforces these on every HTTPS connection, so a wrong
@@ -26,8 +32,8 @@
             silently inactive.
 
             Re-derive a pin (repeat per certificate in the chain):
-              openssl s_client -connect securemed-web.onrender.com:443 \
-                -servername securemed-web.onrender.com -showcerts </dev/null \
+              openssl s_client -connect securemed-production.onrender.com:443 \
+                -servername securemed-production.onrender.com -showcerts </dev/null \
                 | openssl x509 -pubkey -noout \
                 | openssl pkey -pubin -outform der \
                 | openssl dgst -sha256 -binary | openssl enc -base64

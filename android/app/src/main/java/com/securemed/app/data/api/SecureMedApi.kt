@@ -98,7 +98,11 @@ interface SecureMedApi {
     ): PagedResponse<Patient>
 
     @POST("patients/")
-    suspend fun createPatient(@Body patient: PatientCreateRequest): Patient
+    suspend fun createPatient(
+        @Body patient: PatientCreateRequest,
+        /** Idempotency key for offline-queued creates; null on the direct path. */
+        @retrofit2.http.Header("X-Client-Op-Id") clientOpId: String? = null
+    ): Patient
 
     @GET("patients/{id}/")
     suspend fun getPatient(@Path("id") id: String): Patient
@@ -110,7 +114,11 @@ interface SecureMedApi {
     ): PagedResponse<MedicalRecord>
 
     @POST("patients/records/")
-    suspend fun createMedicalRecord(@Body record: MedicalRecordCreateRequest): MedicalRecord
+    suspend fun createMedicalRecord(
+        @Body record: MedicalRecordCreateRequest,
+        /** Idempotency key for offline-queued creates; null on the direct path. */
+        @retrofit2.http.Header("X-Client-Op-Id") clientOpId: String? = null
+    ): MedicalRecord
 
     /** Update a record — the server enforces the same channel-role rule as create. */
     @PATCH("patients/records/{id}/")

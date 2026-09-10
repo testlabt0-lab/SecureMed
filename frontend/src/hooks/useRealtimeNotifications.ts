@@ -35,7 +35,7 @@ export type SocketState = 'idle' | 'connecting' | 'open' | 'closed' | 'unauthori
 
 export function useRealtimeNotifications() {
   const queryClient = useQueryClient();
-  const accessToken = useAuthStore((s) => s.tokens?.access);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const [state, setState] = useState<SocketState>('idle');
 
   const socketRef = useRef<WebSocket | null>(null);

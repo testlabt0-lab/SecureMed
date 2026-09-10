@@ -42,6 +42,7 @@ import com.securemed.app.ui.screens.*
 import com.securemed.app.ui.theme.SecureMedTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
+import javax.inject.Inject
 
 /**
  * FragmentActivity (not plain ComponentActivity) because AndroidX
@@ -50,6 +51,9 @@ import kotlinx.coroutines.delay
  */
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    @Inject
+    lateinit var repository: com.securemed.app.data.SecureMedRepository
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -115,6 +119,18 @@ class MainActivity : FragmentActivity() {
         // PHI, tokens, or a device identity the attacker can reuse.
         if (!BuildConfig.DEBUG && com.securemed.app.security.TamperDetection
                 .isTamperingDetected(this)) {
+            // Detach the push channel first, while the access token is still
+            // in hand and the request can authenticate. Bounded wait: the
+            // process is closing anyway, and the local wipe must not be held
+            // hostage by a network call. The server rejecting this (no
+            // session, blocked device) is an acceptable outcome — the point
+            // is to not leave a live FCM binding behind on the happy path of
+            // a device that reports instrumentation.
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(1500) {
+                    runCatching { repository.unregisterCurrentFcmToken() }
+                }
+            }
             com.securemed.app.security.SecureWipe.wipeEverything(this)
             android.widget.Toast.makeText(this, "رُصدت أدوات تحليل على هذا الجهاز. تم مسح البيانات المحلية وإغلاق التطبيق.", android.widget.Toast.LENGTH_LONG).show()
             finishAffinity()

@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   sast_scan:
@@ -48,11 +49,13 @@ jobs:
         semgrep scan --config auto --sarif -o semgrep-results.sarif
 
     # Safety fetches advisories at run time and now requires authentication,
-    # so it is advisory. pip-audit below is the deterministic SCA gate.
+    # so it is advisory (continue-on-error below, not `|| true` — a failure
+    # must be visible as a failed step, not reported as success). pip-audit
+    # below is the deterministic SCA gate.
     - name: Run Safety (Dependency Vulnerabilities)
       continue-on-error: true
       run: |
-        safety check -r backend/requirements.txt --json > safety-results.json || true
+        safety check -r backend/requirements.txt --json > safety-results.json
 
     # pip-audit resolves the pinned requirements against PyPI's advisory database
     # locally in the runner. Advisory (continue-on-error) on purpose: the pins in
@@ -80,19 +83,19 @@ jobs:
           safety-results.json
           pip-audit-results.json
 
-    # SARIF can be sent to GitHub code scanning, which annotates pull requests
-    # directly. Left off by default: it needs `security-events: write` on this
-    # job plus either a public repository or GitHub Advanced Security — where
-    # neither holds, the step fails for a reason no one can fix from inside the
-    # repo. To enable, add `security-events: write` to job permissions above and:
-    #
-    #      - name: Upload SARIF to code scanning
-    #        if: always()
-    #        uses: github/codeql-action/upload-sarif@v3
-    #        with:
-    #          sarif_file: |
-    #            bandit-results.sarif
-    #            semgrep-results.sarif
+    # SARIF goes to GitHub code scanning, which annotates pull requests
+    # directly. Needs `security-events: write` (granted above) plus either a
+    # public repository or GitHub Advanced Security — where neither holds the
+    # upload itself fails, so it is continue-on-error and the artifacts above
+    # remain the fallback.
+    - name: Upload SARIF to code scanning
+      if: always()
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: |
+          bandit-results.sarif
+          semgrep-results.sarif
 
   # Secret scanning. This runs the gitleaks binary directly rather than
   # gitleaks/gitleaks-action@v2, which requires a paid GITLEAKS_LICENSE secret

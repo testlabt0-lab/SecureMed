@@ -18,6 +18,17 @@ export default function SecurityDashboard() {
     queryFn: () => securityAPI.dashboard(),
   });
 
+  // Live pending-device count — the number an admin acts on (Telegram digest
+  // mirrors it every morning, this shows it on the spot).
+  const { data: devicesData } = useQuery({
+    queryKey: ['security-devices'],
+    queryFn: () => securityAPI.devices.list(),
+  });
+  const pendingDevicesCount = (Array.isArray(devicesData?.data)
+    ? devicesData.data
+    : []
+  ).filter((d: any) => !d.is_trusted).length;
+
   const portScanMutation = useMutation({
     mutationFn: (data: any) => securityAPI.portScan(data),
     onSuccess: (res) => {
@@ -138,9 +149,14 @@ export default function SecurityDashboard() {
           <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110">
             <MonitorSmartphone className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
           </div>
-          <div>
-            <h3 className="font-bold text-gray-900 dark:text-white group-hover:text-primary-600 transition-colors">
+          <div className="min-w-0">
+            <h3 className="font-bold text-gray-900 dark:text-white group-hover:text-primary-600 transition-colors flex items-center gap-2">
               إدارة وبصمات الأجهزة
+              {pendingDevicesCount > 0 && (
+                <span className="text-[11px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                  {pendingDevicesCount} بانتظار الموافقة
+                </span>
+              )}
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">مراقبة الأجهزة المصرحة وحظر المشبوهة</p>
           </div>

@@ -1,0 +1,47 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سياسة الخصوصية — SecureMed</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background: #f3f4f6; margin: 0; padding: 20px;}
+        .card { max-width: 800px; margin: 0 auto; background: #ffffff; border-radius: 12px;
+                padding: 32px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+        h1 { font-size: 24px; color: #111827; margin: 0 0 16px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;}
+        h2 { font-size: 18px; color: #1f2937; margin: 24px 0 12px; }
+        p, li { color: #374151; line-height: 1.8; font-size: 15px; }
+        ul { margin-top: 0; }
+        footer { text-align: center; color: #9ca3af; font-size: 12px; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;}
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>سياسة الخصوصية وأمان البيانات</h1>
+        <p>تلتزم منصة <strong>SecureMed</strong> بحماية بياناتك الشخصية والطبية. توضح هذه السياسة كيفية جمعنا واستخدامنا وحمايتنا لبياناتك.</p>
+
+        <h2>1. البيانات التي يتم جمعها</h2>
+        <ul>
+            <li><strong>بيانات الحساب:</strong> الاسم، البريد الإلكتروني، رقم الهاتف، والدور الوظيفي.</li>
+            <li><strong>البيانات الصحية (PHI):</strong> سجلات المرضى، الوصفات الطبية، المواعيد، ونتائج المختبرات التي يتم إنشاؤها عبر النظام.</li>
+            <li><strong>بيانات الجهاز:</strong> بصمة الجهاز (لمنع الاختراق وتوثيق الجلسات)، وعنوان IP (في سجلات التدقيق لأغراض الأمان).</li>
+            <li><strong>بيانات الاستخدام:</strong> سجلات الأعطال والمشكلات التقنية لتحسين الخدمة.</li>
+        </ul>
+        <p><em>ملاحظة: لا نقوم بجمع بيانات الموقع الجغرافي (GPS)، ولا نشارك بياناتك مع أي طرف ثالث لأغراض إعلانية أو تجارية.</em></p>
+
+        <h2>2. مكان التخزين والحماية</h2>
+        <p>تُخزّن جميع البيانات بشكل آمن على خوادمنا المعتمدة. نستخدم تقنيات تشفير متقدمة لحماية البيانات أثناء النقل (TLS/HTTPS) وأثناء الحفظ.</p>
+
+        <h2>3. مدة الاحتفاظ بالبيانات</h2>
+        <p>نحتفظ ببيانات حسابك الشخصي طوال فترة نشاط الحساب. عند طلب <a href="{% url 'account-deletion' %}">حذف الحساب</a>، يتم تعطيل وصولك فوراً وتُحذف بيانات دخولك. يُرجى ملاحظة أن <strong>السجلات الطبية</strong> التي تم إنشاؤها عبر حسابك قد تُحفظ لفترة أطول امتثالاً للتشريعات والسياسات الطبية الخاصة بالاحتفاظ بالسجلات.</p>
+
+        <h2>4. حقوق المستخدم وحذف الحساب</h2>
+        <p>لك الحق في مراجعة وتعديل بياناتك الشخصية عبر إعدادات التطبيق. كما يُمكنك طلب حذف حسابك نهائياً من خلال التطبيق أو عبر <a href="{% url 'account-deletion' %}">صفحة حذف الحساب</a> العامة الخاصة بنا.</p>
+
+        <footer>SecureMed — منصة إدارة المعلومات الطبية</footer>
+    </div>
+</body>
+</html>

@@ -9,11 +9,12 @@ Production topology (single service):
   There is no top-level /ai/ prefix: the AI endpoints are Django views under
   /api/v1/ai/ (apps.ai). The Node sidecar they used to proxy to is retired.
 """
-from django .contrib import admin
-from apps .accounts .views import (
-AccountDeletionPageView ,AccountDeletionRequestView ,AccountDeletionConfirmView ,
+from django.contrib import admin
+from apps.accounts.views import (
+    AccountDeletionPageView, AccountDeletionRequestView, AccountDeletionConfirmView,
 )
-from django .urls import path ,include ,re_path
+from django.views.generic import TemplateView
+from django.urls import path, include, re_path
 from django .conf import settings
 from django .conf .urls .static import static
 from django .http import FileResponse ,JsonResponse ,Http404
@@ -56,6 +57,7 @@ path ('api/v1/backups/',include ('apps.backups.urls')),
 path ('api/v1/auth/',include ('apps.accounts.urls')),
 # Play-mandated public web account deletion (4-3 §2) — browser pages, not API
 # surface, so they live at the root with their own catch-all exclusion.
+path('privacy/', TemplateView.as_view(template_name='privacy_policy.html'), name='privacy-policy'),
 path ('privacy/account-deletion/',AccountDeletionPageView .as_view (),name ='account-deletion'),
 path ('privacy/account-deletion/submit/',AccountDeletionRequestView .as_view (),name ='account-deletion-request'),
 path ('privacy/account-deletion/confirm/',AccountDeletionConfirmView .as_view (),name ='account-deletion-confirm'),

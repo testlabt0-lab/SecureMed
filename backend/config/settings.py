@@ -720,6 +720,8 @@ INITIAL_ADMIN_EMAIL =config ('INITIAL_ADMIN_EMAIL',default ='admin@securemed.app
 # Production Security Settings
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
+    # Exempt health checks from HTTPS redirect so internal probes don't fail with 301
+    SECURE_REDIRECT_EXEMPT = [r'^health/.*']
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True

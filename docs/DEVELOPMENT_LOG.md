@@ -2,6 +2,235 @@
 
 ---
 
+# Phase 4o — زر حذف الحساب داخل التطبيق (2026-09-09)
+
+> التحقق: `compileDebugKotlin` + `testDebugUnitTest` (**63 اختباراً**:
+> 59 + 4 في `DeleteAccountViewModelTest`) + `lintDebug` خضراء.
+
+## 1. مسار الحذف من الإعدادات
+
+- ✅ `SecureMedApi.deleteAccount` (`DELETE auth/account/` بجسم كلمة
+  المرور) و`SecureMedRepository.deleteAccount`: نجاح الخادم **شرط**
+  للمسح المحلي — فشل الاستدعاء يعيد رسالة الخادم ولا يمسح شيئاً
+  (مسحٌ بلا تعطيل كان سيقول «حُذف» والحساب حي). النجاح يشغّل المسح
+  الكامل نفسه: منبهات، Room، توكنات، كاش — ثم `Result.success`.
+- ✅ صف «حذف الحساب» في نهاية شاشة الإعدادات (بعد فاصل — منطقة خطر
+  بعيدة عن الروتين)، حوار تأكيد بكلمة مرور (إظهار/إخفاء) يمنع الإرسال
+  الفارغ ويعرض رسالة الخادم عبر `ApiErrors` بلا إغلاق الحوار، مع
+  مؤشر تقدم في زر التأكيد.
+- ✅ `DeleteAccountViewModel` بحالة مسطحة (`deleted` راية توجيه تنجو
+  من `clearMessage` — الشاشة تقرأها في LaunchedEffect قد يسبق مستخدم
+  متسرّع)؛ `MainActivity` يمرر `onAccountDeleted` يرفع قفل الخمول
+  (`liftAppLockForSignedOut` في AuthViewModel) ويوجه لشاشة الدخول
+  بمسح المكدس كاملاً.
+
+## 2. ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `data/api/SecureMedApi.kt` | +deleteAccount |
+| `data/SecureMedRepository.kt` | +deleteAccount (شرط نجاح الخادم ثم مسح كامل) |
+| `ui/screens/DeleteAccountViewModel.kt` | جديد |
+| `ui/screens/SettingsScreen.kt` | +صف منطقة الخطر +حوار كلمة المرور |
+| `ui/MainActivity.kt` | +onAccountDeleted |
+| `ui/AuthViewModel.kt` | +liftAppLockForSignedOut |
+| `app/src/test/.../DeleteAccountViewModelTest.kt` | جديد — 4 |
+
+## ما تبقى من قائمة Play (كله خارج الشيفرة)
+
+صفحة ويب الحذف العامة، نشر سياسة الخصوصية، أسرار CI الأربعة، نموذج
+Data Safety، فيديو تعريف إذن التنبيهات الدقيق، Store listing + حساب
+مراجع — كلها موثقة في `docs/PLAY_STORE_CHECKLIST.md`.
+
+---
+
+# Phase 4n — نقطة حذف الحساب (متطلب Play، إغلاق الشيفري الوحيد المتبقي) (2026-09-09)
+
+> التحقق: **402 اختباراً خادمياً ناجحاً** (7 جديدة في
+> `tests/test_account_deletion.py`).
+
+## 1. `DELETE auth/account/` — `DeleteAccountView`
+
+- ✅ تحقق كلمة المرور إلزامي — جلسة مسروقة غير مقفلة لا تمحو الحساب.
+- ✅ **تعطيل لا حذف**: `is_active=False` — صفوف PHI تحمل معرّف
+  المستخدم في سلاسل `created_by`، وسلسلة تدقيق التحقق تعتمد عليها؛
+  الحذف الفيزيائي كان إما كاسحاً للـ PHI أو يتيمها.
+- ✅ `SessionManager.force_logout_user` — خروج كل الأجهزة + ختم زمن
+  الإبطال الذي يفرّق `BoundJWTAuthentication` التوكنات الميتة من
+  الجديدة.
+- ✅ حدث تدقيق `USER_DEACTIVATED` بتفصيل السبب.
+
+## 2. ثغرة مصاحبة أُغلقت: `LoginSerializer` لا يفحص `is_active`
+
+- ✅ مستخدم معطَّل بكلمة مروره الصحيحة كان يعبر الدخول عادياً (200) —
+  الحذف الذاتي لم يكن يمنعه فعلياً. الإصلاح في
+  `LoginSerializer.validate`: فحص `is_active` **قبل** مقارنة كلمة
+  المرور — الحساب الميت بكلمة مرور صحيحة يُرفض برسالة «غير مفعّل»،
+  وبكلمة خاطئة برسالة الاعتماد المعتاد (لا كشف وجود الحساب).
+
+## 3. اختبارات (7) — `tests/test_account_deletion.py`
+
+كلمة مرور مفقودة/خاطئة تُرفض دون تعطيل؛ التعطيل بلا حذف فيزيائي؛
+إنهاء كل الجلسات + ختم الإبطال؛ أثر التدقيق؛ الدخول بعد الحذف مرفوض
+(وهي التي كشفت ثغرة السيريلايزر)؛ endpoint محمي بالمصادقة.
+
+## 4. ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `backend/apps/accounts/views.py` | +`DeleteAccountView` |
+| `backend/apps/accounts/urls.py` | +`auth/account/` |
+| `backend/apps/accounts/serializers.py` | +فحص is_active في الدخول (إغلاق ثغرة) |
+| `backend/tests/test_account_deletion.py` | جديد — 7 اختبارات |
+| `docs/PLAY_STORE_CHECKLIST.md` | §2 الشيفرة منجزة |
+
+**قائمة Play: لم يتبقَّ منها إلا عمل Console/ويب (صفحة حذف عامة، زر
+التطبيق، نشر السياسة، الأسرار، Data Safety، الفيديو) — كلها خارج
+الشيفرة وموثَّقة في القائمة.**
+
+---
+
+# Phase 4m — إغلاق 4-4 و4-5 (2026-09-09)
+
+> التحقق: `compileDebugKotlin` + `testDebugUnitTest` + `detekt` + `lintDebug`
+> خضراء (لا تعديلات شيفرة في هذه الجلسة — تدقيق فقط).
+
+## 1. 4-4 · تدقيق الوصول وRTL (بلا عيب حرج)
+
+- ✅ **contentDescription**: مسح آلي (سكربت مؤقت حُذف) وجد 13 أيقونة
+  بحوصلة null — 5 زخرفية داخل FAB/بطاقات بنص (null صحيح عمداً)،
+  والأزرار الأيقونية الفعلية (رجوع/حذف/رفع/حجز) كلها موصوفة نصاً
+  عربياً. لا إصلاح مطلوب.
+- ✅ **RTL**: صفر أيقونة اتجاهية غير `AutoMirrored`، صفر padding
+  اتجاهي، صفر AbsoluteAlignment — الانعكاس بنيوي (`supportsRtl`).
+- ✅ **تكبير الخط**: كل الأحجام `sp` عبر `Typography` مع lineHeight،
+  لا fontSize متجمدة خارج الثيم.
+- ✅ **مناطق اللمس**: لا هدف لمس قابل داخل < 48dp.
+- حدّ مسجَّل: Accessibility Scanner الحي يحتاج جهازاً — جزء قبول
+  الإصدار، لا جلسة شيفرة.
+
+## 2. 4-5 · `android/README.md` — جديد
+
+- ✅ متطلبات البناء (JDK 17 مع سبب حظر JDK 21+ لـ detekt).
+- ✅ جدول عنوان الـ API وقواعده (HTTPS للإنتاج إلزامي: loopback النصي
+  يعطّل الـ pinning).
+- ✅ التوقيع: 4 خصائص خارج المستودع، تحذير البناء غير الموقَّع، v1
+  معطَّل/v2+v3 مفعلة، توليد keystore أول مرة مع تحذير ضياع المفتاح.
+- ✅ **استخراج هاش شهادة التوقيع** بطريقتين (`keytool -list` و
+  `apksigner verify` على المُنتَج) + الفرق عن debug، **والتمييز**
+  بينه وبين معرّف الجهاز (`installId`) الذي يربط الخادم الجلسة —
+  «هاش التثبيت» في صياغة البند كان ملتبساً بين الحالتين.
+- ✅ خط الإصدار بالوسم + أسراره + الإحالة لقائمة Play، وشجرة المصادر.
+
+## المرحلة 4 صارت: 4-1 ✅ · 4-2 ✅ · 4-3 [~ Console work] · 4-4 ✅ · 4-5 ✅
+
+---
+
+# Phase 4l — قائمة تحقق سياسات Play (إغلاق 4-3) (2026-09-09)
+
+> التحقق: `processDebugMainManifest` + `processDebugManifest` ناجحان،
+> والـ manifest المدموج بعد التعديل فيه `SCHEDULE_EXACT_ALARM` وحده —
+> تأكيد مزدوج (مصدر + مدموج بعد `--rerun-tasks`).
+
+## 1. `docs/PLAY_STORE_CHECKLIST.md` — جديد
+
+- ✅ نموذج Data Safety كجدول بيانات فعلي: حساب، PHI، بصمة جهاز
+  (`X-Device-Fingerprint` لربط الجلسة)، IP، سجلات — **بلا مواقع، بلا
+  مشاركة مع الغير**، ولا تُجمع بيانات بيومترية (البصمة محلية فقط).
+- ✅ سياسة الخصوصية + **متطلب حذف الحساب**: الخادم لا يعرض نقطة نهاية
+  حذف حساب (`accounts/urls.py`) — مسجَّل كنقص خادمي مطلوب قبل الرفع.
+- ✅ الأذونات الثمانية، كلٌّ بمرجعه، والأهم: **`USE_EXACT_ALARM` حُذف**
+  (منح تلقائي ممنوع لهذا الصنف) و`SCHEDULE_EXACT_ALARM` بقي مع
+  الترحيل الموجود إلى نافذة غير دقيقة، وإجراء تعريفه في Console
+  (نموذج + فيديو جرعة مستخدمة التعريف).
+- ✅ إضافات PHI: `data_extraction_rules` موسَّعة (database/file/external
+  مستثناة من cloud-backup وdevice-transfer) بعد أن كانت sharedpref
+  وحدها؛ و`fullBackupContent="false"` موجود أصلاً.
+- ✅ متطلبات المتجر: وصف طبي صحيح (أداة سير عمل مؤسسية لا تشخيص
+  ذاتي)، حساب مراجع بلا MFA، تصنيف IARC القياسي.
+
+## 2. ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `docs/PLAY_STORE_CHECKLIST.md` | جديد — القائمة التنفيذية |
+| `android/app/src/main/AndroidManifest.xml` | -USE_EXACT_ALARM +تعليق سياسة |
+| `android/app/src/main/res/xml/data_extraction_rules.xml` | +استثناءات database/file/external |
+| `android/DEVELOPMENT_PLAN.md` | 4-3 [~] → عمل Console متبقٍ |
+
+## ما يتبقى للرفع الأول (عمل خارج الشيفرة — القائمة تفصّله)
+
+1. نقطة نهاية حذف الحساب + صفحة ويب.
+2. نشر سياسة الخصوصية على نطاق الإنتاج.
+3. أسرار CI الأربعة (keystore) ثم أول وسم ينتج AAB موقَّعاً (4-2).
+4. تعبئة Data Safety + تعريف SCHEDULE_EXACT_ALARM بفيديو.
+5. Store listing + حساب مراجع.
+
+---
+
+# Phase 4k — خط الإصدار (إغلاق 4-2) (2026-09-09)
+
+> التحقق: detekt **يخضل** مع baseline 21 إدخالاً، و`dependencyUpdates` يُنتج
+> تقريره، و`compileDebugKotlin` + `testDebugUnitTest` خضراء. البناء الموقَّع
+> نفسه يجري في CI (الأسرار ليست على هذه الآلة، والقرص المحلي شبه ممتلئ).
+
+## 1. `.github/workflows/android-release.yml`
+
+- ✅ مُشغَّل: وسم `v*` أو `workflow_dispatch` باسم نسخة يدوي.
+- ✅ versionName من الوسم (v1.4.2 → 1.4.2) وversionCode حسابياً
+  (major×10000 + minor×100 + patch → 10402).
+- ✅ keystore يُفك من `ANDROID_KEYSTORE_BASE64` ويُكتب في android/
+  وقت التشغيل، وكلمات المرور من أسرار منفصلة — لا مادة مفتاح في git.
+- ✅ السلسلة: detekt (حاجز) → testDebugUnitTest (حاجز) → bundleRelease
+  بـ `-PSECUREMED_VERSION_NAME/CODE` → `apksigner verify` على الـ AAB
+  (توقيع غائب = خطوة فاشلة صارخة لا رفع صامت) → أثر + GitHub Release
+  بملاحظات مولَّدة.
+
+## 2. detekt في الشجرة
+
+- ✅ `detekt.yml` موثَّق قراراً بقرار: WildcardImport وFunctionNaming
+  وMatchingDeclarationName والصيد العام للاستثناءات مطفأة بأسباب
+  مسجَّلة (اتفاقات Compose والشيفرة القائمة وسياسة التدهور بلا انهيار).
+- ✅ `detekt-baseline.xml` (21 إدخالاً): الموجود مجمَّد، وأي ملاحظة
+  **جديدة** من نفس القاعدة تفشل الوسم — الخط يمنع التراجع ولا يعاقب
+  التاريخ.
+- ✅ إصلاح بيئي: detekt المضمَّن يرث هدف JVM من JDK المشغِّل — على JDK 24
+  كان يتلقى `--jvm-target 24` غير مدعوم في 1.23.x — فثُبِّت 17 في
+  `Detekt` و`DetektCreateBaselineTask`.
+- ✅ درس ملف config: قاعدتان كُتبتا في مجموعات خاطئة (NamingConventions
+  داخل style، LoopWithTooManyJumpStatements داخل complexity) فرفضهما
+  detekt — أسماء القواعد تُتَّبع كما يعرّفها detekt لا كما يفترض القارئ.
+
+## 3. فحص التبعيات
+
+- ✅ `com.github.ben-manes.versions` 0.51.0 + خطوة `dependencyUpdates`
+  في الوسم (معلوماتية) — يسمّي القديم ليقرره إنسان قبل الوسم، بعيداً
+  عن ثِقَل ماسحات NVD.
+- ✅ خيار ktlint: لا يُضاف — detekt يغطي حصته في هذه الشيفرة، و
+  إضافة مُنسِّق ثانٍ يعني قاعدتي تنسيق متنازعتين.
+
+## 4. تجاوز النسخ في build.gradle.kts
+
+- ✅ `-PSECUREMED_VERSION_NAME/-PSECUREMED_VERSION_CODE` يتجاوزان
+  versionName/versionCode؛ البناء المحلي يبقى على 1/1.0.0.
+
+## ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `.github/workflows/android-release.yml` | جديد — خط الإصدار |
+| `android/detekt.yml` + `detekt-baseline.xml` | جديد |
+| `android/build.gradle.kts` | +detekt +versions plugins |
+| `android/app/build.gradle.kts` | +detekt/versions +تجاوز النسخ +jvmTarget pins |
+| `android/DEVELOPMENT_PLAN.md` | 4-2 [x] |
+
+## أسرار CI المطلوبة قبل أول وسم
+
+- `ANDROID_KEYSTORE_BASE64`، `ANDROID_KEYSTORE_PASSWORD`،
+  `ANDROID_KEY_ALIAS`، `ANDROID_KEY_PASSWORD`.
+
+---
+
 # Phase 4j — إغلاق 4-1: اختبار قاعدة «الجلسة الخاصة» (2026-09-09)
 
 > التحقق: **364 اختباراً خادمياً ناجحاً** (12 جديدة في

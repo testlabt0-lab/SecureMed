@@ -2,6 +2,49 @@
 
 ---
 
+# Phase 4q — شاشة التقارير وCI (إغلاق آخر بندين شيفريين) (2026-09-10)
+
+> التحقق: `compileDebugKotlin` + `testDebugUnitTest` + `detekt` +
+> `lintDebug` خضراء؛ **415 اختباراً خادمياً ناجحاً**.
+
+## 1. شاشة التقارير — آخر شاشة في بند 3-6
+
+- ✅ كتالوج `reports/list/` المفلتر بالأدوار (بطاقة «التقارير» في
+  لوحة التحكم)؛ كل بطاقة تتيح تنزيل PDF أو Excel عبر الواجهة الموحدة
+  `reports/{id}/?format=&start_date=&end_date=` بمدى تواريخ اختياري
+  (تحقق صيغة محلي قبل الإرسال).
+- ✅ الملف يُكتب في `Android/data/.../files/reports/` ثم يُفتح عبر
+  **FileProvider** جديد (`file_paths.xml` نطاقاه فقط cache
+  وexternal-files/reports) — لا URI خام ولا صلاحية عالمية، ولا عارض
+  مثبّت يعطي Toast «لا يوجد تطبيق يفتح هذا النوع» بدل الانهيار.
+- ✅ التنزيل بجسم استجابة مبثوث (`@Streaming`) مع تنظيف الملف عند
+  فشل الكتابة، و403 يصل برسالة الخادم (كل تصدير مُدقَّق DATA_EXPORT).
+
+## 2. CI للاختبارات — إغلاق 4-1 كلياً
+
+- ✅ الجلسة المتوازية التزمت `tests.yml` خادمياً بخدمات Postgres/Redis
+  وواجهة الويب؛ أضفت إليها **مهمة أندرويد** (JDK 17: testDebugUnitTest
+  + detekt — نفس بوابات خط الإصدار) و`workflow_dispatch`. بلا أسرار:
+  SECRET_KEY له قيمة تطوير افتراضية والاختبارات على SQLite.
+
+## 3. ملفات جديدة/معدَّلة
+
+| الملف | التغيير |
+|---|---|
+| `.github/workflows/tests.yml` | +مهمة أندرويد +workflow_dispatch |
+| `data/api/SecureMedApi.kt` | +report catalog +@Streaming download |
+| `data/model/OperationsModels.kt` | +ReportCatalogItem/Response |
+| `data/SecureMedRepository.kt` | +getReportCatalog +downloadReport (كتابة ملف آمنة) |
+| `ui/screens/ReportsScreen.kt` + `ReportsViewModel.kt` | جديد |
+| `navigation/Routes.kt` + `ui/MainActivity.kt` | +مسار reports |
+| `ui/screens/DashboardScreen.kt` | +بطاقة التقارير |
+| `AndroidManifest.xml` + `res/xml/file_paths.xml` | +FileProvider |
+
+**بذلك تكون خطة التطوير (المراحل 1-4) مغلقة بالكامل بلا أي بند
+شيفري متبقٍ.**
+
+---
+
 # Phase 4o — زر حذف الحساب داخل التطبيق (2026-09-09)
 
 > التحقق: `compileDebugKotlin` + `testDebugUnitTest` (**63 اختباراً**:

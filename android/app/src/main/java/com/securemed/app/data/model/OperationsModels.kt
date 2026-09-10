@@ -132,3 +132,17 @@ data class InvoiceItemRequest(
     val quantity: Int,
     @SerialName("unit_price") val unitPrice: Double
 )
+
+/** A row of `GET reports/list/` — already role-filtered server-side. */
+@Serializable
+data class ReportCatalogItem(
+    val id: String,
+    val title: String,
+    val description: String = "",
+    val formats: List<String> = listOf("pdf")
+)
+
+@Serializable
+data class ReportCatalogResponse(
+    val results: List<ReportCatalogItem> = emptyList()
+)

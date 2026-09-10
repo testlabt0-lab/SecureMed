@@ -43,6 +43,7 @@ sealed class Route(val route: String) {
     data object Wards : Route("wards")
     data object Invoices : Route("invoices")
     data object Audit : Route("audit")
+    data object Reports : Route("reports")
 
     // ===== Channel sub-screens =====
     /**

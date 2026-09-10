@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scopes the FileProvider can share — only what the app generates
+     (report exports). Nothing else in the tree is shareable. -->
+<paths>
+    <cache-path name="cache" path="." />
+    <external-files-path name="reports" path="reports/" />
+</paths>

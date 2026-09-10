@@ -43,6 +43,7 @@ fun DashboardScreen(
     onNavigateToWards: () -> Unit,
     onNavigateToInvoices: () -> Unit,
     onNavigateToAudit: () -> Unit,
+    onNavigateToReports: () -> Unit,
     onLogout: () -> Unit
 ) {
     val viewModel: DashboardViewModel = hiltViewModel()
@@ -231,11 +232,17 @@ fun DashboardScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     QuickServiceCard(modifier = Modifier.weight(1f), title = "الأسرّة", icon = Icons.Default.Hotel, onClick = onNavigateToWards)
                     QuickServiceCard(modifier = Modifier.weight(1f), title = "الفواتير", icon = Icons.Default.ReceiptLong, onClick = onNavigateToInvoices)
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "التقارير", icon = Icons.Default.Assessment, onClick = onNavigateToReports)
+                }
+            }
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (state.showAudit) {
                         QuickServiceCard(modifier = Modifier.weight(1f), title = "التدقيق", icon = Icons.Default.FactCheck, onClick = onNavigateToAudit)
                     } else {
                         Spacer(modifier = Modifier.weight(1f))
                     }
+                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
 

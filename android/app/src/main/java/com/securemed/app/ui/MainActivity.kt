@@ -255,6 +255,7 @@ class MainActivity : FragmentActivity() {
                                     onNavigateToWards = { navController.navigate(Route.Wards.route) },
                                     onNavigateToInvoices = { navController.navigate(Route.Invoices.route) },
                                     onNavigateToAudit = { navController.navigate(Route.Audit.route) },
+                                    onNavigateToReports = { navController.navigate(Route.Reports.route) },
                                     onLogout = { signOut(false) }
                                 )
                             }
@@ -339,6 +340,9 @@ class MainActivity : FragmentActivity() {
                             }
                             composable(Route.Audit.route) {
                                 AuditScreen(onBack = { navController.popBackStack() })
+                            }
+                            composable(Route.Reports.route) {
+                                ReportsScreen(onBack = { navController.popBackStack() })
                             }
                             composable(Route.Analytics.route) {
                                 AnalyticsScreen(onBack = { navController.popBackStack() })

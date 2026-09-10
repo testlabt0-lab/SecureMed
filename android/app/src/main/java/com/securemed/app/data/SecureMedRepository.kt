@@ -710,6 +710,54 @@ class SecureMedRepository @Inject constructor(
         Result.failure(e)
     }
 
+    /** Role-filtered report catalog (`reports/list/`). */
+    suspend fun getReportCatalog(): Result<ReportCatalogResponse> = try {
+        Result.success(api.getReportCatalog())
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /**
+     * Download a report export into the app's external files dir and hand
+     * back the file, ready for a FileProvider open intent. The server audits
+     * every export; a 403 arrives as the caller's own Arabic message.
+     */
+    suspend fun downloadReport(
+        reportId: String,
+        reportTitle: String,
+        format: String,
+        startDate: String?,
+        endDate: String?
+    ): Result<java.io.File> {
+        val response = try {
+            api.downloadReport(reportId, format, startDate, endDate)
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+        if (!response.isSuccessful) {
+            return Result.failure(java.io.IOException("HTTP ${response.code()}"))
+        }
+        val body = response.body() ?: return Result.failure(
+            java.io.IOException("استجابة فارغة من الخادم")
+        )
+        val dir = java.io.File(context.getExternalFilesDir(null), "reports").apply { mkdirs() }
+        val extension = if (format == "excel") "xlsx" else "pdf"
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.ROOT)
+            .format(java.util.Date())
+        val safeTitle = reportTitle.replace(Regex("[^\\w\\u0600-\\u06FF ]"), "").trim()
+            .ifBlank { reportId }
+        val file = java.io.File(dir, "${safeTitle}_$stamp.$extension")
+        return try {
+            body.byteStream().use { input ->
+                file.outputStream().use { output -> input.copyTo(output) }
+            }
+            Result.success(file)
+        } catch (e: Exception) {
+            file.delete()
+            Result.failure(e)
+        }
+    }
+
     // ===== SECURITY =====
     suspend fun getSecurityDashboard(): Result<Map<String, String>> = try {
         val obj = api.getSecurityDashboard()

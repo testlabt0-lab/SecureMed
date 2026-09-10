@@ -3,7 +3,9 @@ package com.securemed.app.data.api
 import com.securemed.app.data.model.*
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import kotlinx.serialization.json.JsonObject
+import retrofit2.Response
 import retrofit2.http.*
 
 /**
@@ -292,4 +294,19 @@ interface SecureMedApi {
     // Router basename is `consultations`; `telemedicine/sessions/` was a 404.
     @GET("telemedicine/consultations/")
     suspend fun getTelemedicineSessions(@Query("page") page: Int = 1): PagedResponse<TelemedicineSession>
+
+    // ===== REPORTS =====
+    /** Role-filtered catalog: the server never advertises a report the caller may not export. */
+    @GET("reports/list/")
+    suspend fun getReportCatalog(): ReportCatalogResponse
+
+    /** Download a report as PDF/Excel bytes (the server audits every export). */
+    @Streaming
+    @GET("reports/{report_id}/")
+    suspend fun downloadReport(
+        @Path("report_id") reportId: String,
+        @Query("format") format: String = "pdf",
+        @Query("start_date") startDate: String? = null,
+        @Query("end_date") endDate: String? = null
+    ): Response<ResponseBody>
 }

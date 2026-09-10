@@ -23,7 +23,8 @@ from rest_framework.views import APIView
 
 from apps.audit.utils import log_security_event
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from .utils import anonymize_patient_data
 
 logger = logging.getLogger('security')
@@ -44,12 +45,21 @@ UPSTREAM_ERROR = 'تعذر الوصول إلى خدمة الذكاء الاصط�
 
 
 def get_gemini_model(model_name='gemini-1.5-flash'):
-    """Initialize and return a Gemini model if the API key is configured."""
+    """Initialize and return a Gemini model wrapper if the API key is configured."""
     api_key = getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
         return None
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+    
+    client = genai.Client(api_key=api_key)
+    
+    class ModelWrapper:
+        def generate_content(self, contents):
+            return client.models.generate_content(
+                model=model_name,
+                contents=contents
+            )
+            
+    return ModelWrapper()
 
 
 def _require_module(user):
@@ -255,7 +265,8 @@ class AIAnalyzeImageView(APIView):
         )
 
         try:
-            response = model.generate_content([prompt, {"mime_type": mime_type, "data": image_data}])
+            part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
+            response = model.generate_content([prompt, part])
             return Response({"analysis": response.text}, status=status.HTTP_200_OK)
         except Exception as e:
             return _upstream_failure(request, e, event_type='AI_IMAGE_ANALYSIS_FAILED')

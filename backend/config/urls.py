@@ -44,8 +44,8 @@ path ('admin/',admin .site .urls ),
 
 # Health probes
 path ('health/',health_check ,name ='health-check'),# legacy
-path ('health/live/',liveness ,name ='health-liveness'),# Kubernetes livenessProbe
-path ('health/ready/',readiness ,name ='health-readiness'),# Kubernetes readinessProbe
+re_path (r'^health/live/?$',liveness ,name ='health-liveness'),# Kubernetes livenessProbe
+re_path (r'^health/ready/?$',readiness ,name ='health-readiness'),# Kubernetes readinessProbe
 
 path ('api/v1/ai/',include ('apps.ai.urls')),
 path ('metrics',metrics_view ,name ='prometheus-django-metrics'),

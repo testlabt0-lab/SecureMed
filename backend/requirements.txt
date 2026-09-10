@@ -70,7 +70,7 @@ channels-redis>=4.2.0,<5
 # superseded by the `google-genai` package, so an uncapped `>=` is the line here
 # most likely to break a build without warning. Bump deliberately after testing
 # against the newer client.
-google-generativeai>=0.8.0,<0.9
+google-genai>=0.3.0,<0.4
 
 # ─── AWS S3 / Cloud Storage ────────────────────────────────────────────────────
 django-storages==1.14.4

@@ -244,6 +244,22 @@ export const securityAPI = {
   loginHistory: {
     list: () => api.get('/security/login-history/'),
   },
+  // The caller's own registered devices ("أجهزتي") — self-service listing and
+  // removal keyed by the fingerprint each request already sends. Distinct
+  // from `devices` above, which is the admin-facing registry view.
+  myDevices: {
+    list: () => api.get('/security/my-devices/'),
+    remove: (deviceFingerprint?: string) =>
+      api.delete('/security/my-devices/', {
+        data: deviceFingerprint ? { device_fingerprint: deviceFingerprint } : {},
+      }),
+  },
+  // Play-mandated self-service account deletion: password re-verification on
+  // the server, deactivation instead of a physical delete, every session
+  // force-ended, audited as USER_DEACTIVATED.
+  account: {
+    delete: (password: string) => api.delete('/auth/account/', { data: { password } }),
+  },
 };
 
 export const auditAPI = {

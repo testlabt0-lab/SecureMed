@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { User, Fingerprint, Lock, Shield, Mail, Phone, MapPin, CheckCircle, AlertCircle, Smartphone, KeyRound, Trash2, MonitorSmartphone } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { User, Fingerprint, Lock, Shield, Mail, Phone, MapPin, CheckCircle, AlertCircle, Smartphone, KeyRound, Trash2, MonitorSmartphone, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { authAPI } from '../api/client';
+import { authAPI, securityAPI } from '../api/client';
 import { mfaApi, biometricDevicesApi } from '../api/extendedApis';
 import toast from 'react-hot-toast';
 import {
@@ -11,7 +12,8 @@ import {
 import { roleLabel } from '../constants/roles';
 
 export default function Profile() {
-  const { user, updateUser, tokens } = useAuthStore();
+  const { user, updateUser, tokens, logout } = useAuthStore();
+  const navigate = useNavigate();
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [showBiometricForm, setShowBiometricForm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -34,6 +36,22 @@ export default function Profile() {
   // ===== Biometric devices =====
   const [devices, setDevices] = useState<any[]>([]);
 
+  // ===== My registered devices (session devices) =====
+  const [myDevices, setMyDevices] = useState<any[]>([]);
+  const [removingDevice, setRemovingDevice] = useState<string | null>(null);
+
+  // ===== Account deletion (danger zone) =====
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const loadMyDevices = async () => {
+    try {
+      const { data } = await securityAPI.myDevices.list();
+      setMyDevices(Array.isArray(data?.devices) ? data.devices : []);
+    } catch { /* ignore — the section just stays hidden on failure */ }
+  };
+
   const loadMfaStatus = async () => {
     try {
       const { data } = await mfaApi.status();
@@ -51,6 +69,7 @@ export default function Profile() {
   useEffect(() => {
     loadMfaStatus();
     loadDevices();
+    loadMyDevices();
   }, []);
 
   const handleMfaSetup = async () => {
@@ -101,6 +120,38 @@ export default function Profile() {
       loadDevices();
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'فشل حذف الجهاز');
+    }
+  };
+
+  const handleRemoveMyDevice = async (fingerprint: string) => {
+    setRemovingDevice(fingerprint);
+    try {
+      await securityAPI.myDevices.remove(fingerprint);
+      toast.success('تمت إزالة الجهاز');
+      await loadMyDevices();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'فشل إزالة الجهاز');
+    } finally {
+      setRemovingDevice(null);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) return;
+    setDeleting(true);
+    try {
+      // The server deactivates the account and force-ends every session.
+      await securityAPI.account.delete(deletePassword);
+      toast.success('تم حذف الحساب بنجاح');
+      // The local session is dead on the server — clear the client side and
+      // route to login. The navigate happens after logout so guards settle.
+      logout();
+      navigate('/login');
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'تعذر حذف الحساب — تحقق من كلمة المرور');
+    } finally {
+      setDeleting(false);
+      setDeletePassword('');
     }
   };
 
@@ -402,19 +453,91 @@ export default function Profile() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleRemoveDevice(d.id, d.device_id)}
-                  className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0"
-                  title="حذف الجهاز"
-                  aria-label="حذف الجهاز"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                 <button
+                   onClick={() => handleRemoveDevice(d.id, d.device_id)}
+                   className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0"
+                   title="حذف الجهاز"
+                   aria-label="حذف الجهاز"
+                 >
+                   <Trash2 className="w-4 h-4" />
+                 </button>
+               </div>
+             ))}
+           </div>
+         )}
+       </div>
+
+       {/* My registered session devices */}
+       {myDevices.length > 0 && (
+         <div className="card">
+           <h2 className="font-bold mb-4 flex items-center gap-2">
+             <MonitorSmartphone className="w-5 h-5 text-primary-600" />
+             أجهزتي المسجلة ({myDevices.length})
+           </h2>
+           <p className="text-xs text-gray-400 mb-3">
+             الأجهزة التي دخلت بحسابك — إزالة جهاز تمنع جلساته الجديدة
+           </p>
+           <div className="space-y-2">
+             {myDevices.map((d: any) => (
+               <div
+                 key={d.id}
+                 className="flex items-center justify-between gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
+               >
+                 <div className="flex items-center gap-3 min-w-0">
+                   <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-100">
+                     <Smartphone className="w-4 h-4 text-blue-600" />
+                   </div>
+                   <div className="min-w-0">
+                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                       {d.device_name || d.device_fingerprint}
+                     </p>
+                     <p className="text-xs text-gray-400">
+                       {d.os_info || 'جهاز مسجل'}
+                       {d.is_trusted ? ' • موثوق' : ''}
+                     </p>
+                   </div>
+                 </div>
+                 <button
+                   onClick={() => handleRemoveMyDevice(d.device_fingerprint)}
+                   disabled={removingDevice === d.device_fingerprint}
+                   className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0 disabled:opacity-50"
+                   title="إزالة الجهاز"
+                   aria-label="إزالة الجهاز"
+                 >
+                   <Trash2 className="w-4 h-4" />
+                 </button>
+               </div>
+             ))}
+           </div>
+         </div>
+       )}
+
+       {/* Danger zone: account deletion (Play requirement) */}
+       <div className="card border-red-200 dark:border-red-900/50">
+         <h2 className="font-bold mb-2 flex items-center gap-2 text-red-600 dark:text-red-400">
+           <AlertTriangle className="w-5 h-5" />
+           منطقة الخطر
+         </h2>
+         <div className="flex items-center justify-between gap-3 p-4 border border-red-100 dark:border-red-900/40 rounded-lg">
+           <div className="flex items-center gap-3 min-w-0">
+             <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
+               <AlertTriangle className="w-5 h-5 text-red-600" />
+             </div>
+             <div>
+               <h3 className="font-medium">حذف الحساب</h3>
+               <p className="text-sm text-gray-500">
+                 تعطيل نهائي للحساب وإنهاء كل جلساته على كل الأجهزة — لا يمكن التراجع
+               </p>
+             </div>
+           </div>
+           <button
+             onClick={() => setShowDeleteAccount(true)}
+             className="btn-secondary text-sm text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-900/30 flex-shrink-0"
+           >
+             حذف
+           </button>
+         </div>
+       </div>
 
       {/* Password Change Modal */}
       {showPasswordForm && (
@@ -462,6 +585,62 @@ export default function Profile() {
               <div className="flex gap-2 pt-2">
                 <button type="submit" className="btn-primary flex-1">حفظ</button>
                 <button type="button" onClick={() => setShowPasswordForm(false)} className="btn-secondary flex-1">
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Account Deletion Modal (danger zone) */}
+      {showDeleteAccount && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h2 className="text-xl font-bold">حذف الحساب نهائياً</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-1">
+              سيُعطَّل الحساب نهائياً وتنتهي كل جلساته على كل الأجهزة، ولا يمكن التراجع.
+            </p>
+            <p className="text-xs text-gray-400 mb-4">
+              سجلات المرضى الطبية المنشأة عبر الحساب تبقى محفوظة في النظام وفق سياسة الاحتفاظ الطبي.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleDeleteAccount();
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  أدخل كلمة المرور للتأكيد
+                </label>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  required
+                  autoFocus
+                  className="input-field"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={deleting}
+                  className="flex-1 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? 'جارٍ الحذف…' : 'حذف نهائي'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteAccount(false)}
+                  disabled={deleting}
+                  className="btn-secondary flex-1"
+                >
                   إلغاء
                 </button>
               </div>

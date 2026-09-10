@@ -102,6 +102,10 @@ USER securemed
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD python -c "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8000')+'/health/live/',timeout=4).status==200 else 1)"
 
+# Copy start.sh and make it executable
+COPY backend/start.sh ./start.sh
+RUN chmod +x ./start.sh
+
 # Served over ASGI, not WSGI. `gunicorn config.wsgi:application` was the previous
 # command, and WSGI cannot carry a WebSocket handshake: every Channels consumer in
 # this project (chat, notifications, video-call signalling) returned a protocol
@@ -112,7 +116,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 # `uvicorn[standard]` to requirements.txt and run:
 #   gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker \
 #            --bind 0.0.0.0:$PORT --workers 4
-# Migrations are deliberately NOT run here: this line executes on every container
-# start, including every autoscaled replica, so concurrent `migrate` runs would
-# race. render.yaml runs them once per release via preDeployCommand.
-CMD daphne -b 0.0.0.0 -p $PORT config.asgi:application
+CMD ["./start.sh"]

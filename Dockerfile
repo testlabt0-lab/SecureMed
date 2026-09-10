@@ -61,13 +61,21 @@ WORKDIR /app/backend
 # .dockerignore correctly keeps backend/.env out of the image — so the previous bare
 # `RUN python manage.py collectstatic` aborted with
 # `decouple.UndefinedValueError: SECRET_KEY not found` and this image could never
-# finish building. The two values below exist only for the lifetime of this one layer
-# (they are not ENV, so they are not in the final image config and not in the
-# container environment); Render injects the real values at start. They are
-# deliberately not the placeholder defaults from settings.py, because those are on the
-# reject list of the production configuration guard.
+# finish building. settings.py also now raises ImproperlyConfigured at import time
+# (not just a warning) if INITIAL_ADMIN_PASSWORD, DB_PASSWORD or AUDIT_LOG_HMAC_KEY
+# are left at their insecure defaults, and collectstatic imports settings — so those
+# also need a build-time-only value here (DB_ENGINE=sqlite sidesteps the DB_PASSWORD
+# check entirely since it never reaches the Postgres branch). The values below exist
+# only for the lifetime of this one layer (they are not ENV, so they are not in the
+# final image config and not in the container environment); Railway injects the real
+# values at start. They are deliberately not the placeholder defaults from
+# settings.py, because those are on the reject list of the production configuration
+# guard.
 RUN SECRET_KEY="build-layer-only-not-a-runtime-secret" \
     ENCRYPTION_KEY="build-layer-only-not-a-runtime-secret" \
+    INITIAL_ADMIN_PASSWORD="build-layer-only-not-a-runtime-secret" \
+    DB_ENGINE="sqlite" \
+    AUDIT_LOG_HMAC_KEY="build-layer-only-not-a-runtime-secret" \
     python manage.py collectstatic --noinput
 
 # Drop root. devsecops/docker/Dockerfile.backend already did this; the image that is

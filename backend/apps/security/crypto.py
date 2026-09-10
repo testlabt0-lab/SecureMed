@@ -103,6 +103,15 @@ def encrypt_field (value ):
     copied out of here into the README and into the security requirements table as
     evidence that columns are AES-256. Files are the ones on AES-256-GCM, see
     encrypt_media() below.
+
+    Output is prefixed with a key-generation marker (`v1:`). HIPAA's crypto-agility
+    expectation is that a ciphertext identifies how it was produced, so a future
+    key generation (`v2:`) can be deployed alongside this one and each row
+    re-encrypted at leisure — instead of the situation before this marker existed,
+    where every encrypted value was anonymous and rotation meant either
+    re-encrypting everything blind or hoping the old key was still configured.
+    decrypt_field() treats an unprefixed value as v1 legacy input, so this change
+    is transparent to every row already stored.
     """
     if value is None :
         return None
@@ -110,15 +119,24 @@ def encrypt_field (value ):
         value =value .encode ('utf-8')
     # Identical output to the single-key path: MultiFernet always encrypts with
     # the first key, which is the active ENCRYPTION_KEY.
-    return _fernet_chain ().encrypt (value ).decode ('utf-8')
+    return FIELD_CIPHER_VERSION +_fernet_chain ().encrypt (value ).decode ('utf-8')
+
+
+FIELD_CIPHER_VERSION ='v1:'
 
 
 def decrypt_field (encrypted_value ):
-    """Decrypt a field value, trying the active key first, then retired keys."""
+    """Decrypt a field value, trying the active key first, then retired keys.
+
+    Accepts both the current `v1:`-prefixed form and the unprefixed legacy form,
+    so enabling the marker did not orphan a single stored row.
+    """
     if not encrypted_value :
         return None
     if isinstance (encrypted_value ,str ):
         encrypted_value =encrypted_value .encode ('utf-8')
+    if encrypted_value .startswith (FIELD_CIPHER_VERSION .encode ('utf-8')):
+        encrypted_value =encrypted_value [len (FIELD_CIPHER_VERSION ):]
     try :
         return _fernet_chain ().decrypt (encrypted_value ).decode ('utf-8')
     except InvalidToken as exc :

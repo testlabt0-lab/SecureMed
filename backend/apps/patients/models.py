@@ -24,22 +24,12 @@ VALID_UPLOAD_EXTENSIONS =['.jpg','.jpeg','.png','.gif','.pdf','.dicom','.dcm']
 # and a doctor's session was the browser choosing not to sniff. The download path now
 # forces `attachment` for anything outside a small inline allow-list, and this check
 # keeps such a file from being accepted at all.
-_UPLOAD_SIGNATURES ={
-'.jpg':[(0 ,b'\xff\xd8\xff')],
-'.jpeg':[(0 ,b'\xff\xd8\xff')],
-'.png':[(0 ,b'\x89PNG\r\n\x1a\n')],
-'.gif':[(0 ,b'GIF87a'),(0 ,b'GIF89a')],
-'.pdf':[(0 ,b'%PDF-')],
-# DICOM part-10 files carry 'DICM' after a 128-byte preamble. Raw datasets written
-# without a preamble are common in exports from older modalities, and those begin
-# with a group-0002 (file meta) or group-0008 (identifying) tag in little-endian,
-# which is narrow enough to still reject '<html', '<svg', '<?xml', 'MZ' and 'PK'.
-'.dcm':[(128 ,b'DICM'),(0 ,b'\x02\x00'),(0 ,b'\x08\x00')],
-'.dicom':[(128 ,b'DICM'),(0 ,b'\x02\x00'),(0 ,b'\x08\x00')],
-}
+#
+# The signature table itself now lives in apps.core.uploads so the
+# consultation-attachment path shares one source of truth. No aliases are needed
+# here any more: validate_file_extension delegates to the shared validator and
+# migration patients.0001_initial still resolves by function name.
 
-# Longest offset+prefix above, so one read covers every signature.
-_SIGNATURE_READ_LEN =132 +8
 
 
 def validate_file_extension (value ):
@@ -50,54 +40,17 @@ def validate_file_extension (value ):
     the body adds content validation without making the model state diverge from the
     migrations — no ``makemigrations`` run is needed.
     """
-    ext =os .path .splitext (value .name )[1 ].lower ()
-    if ext not in VALID_UPLOAD_EXTENSIONS :
-        raise ValidationError (
-        f'نوع الملف غير مدعوم. الأنواع المدعومة: {", ".join (VALID_UPLOAD_EXTENSIONS )}'
-        )
-
-    # An already-stored file, revalidated by a plain full_clean() on an existing
-    # row. Re-reading it would cost a full decrypt to check bytes that were checked
-    # when they were uploaded. A freshly assigned UploadedFile has no _committed
-    # attribute at all, and a FieldFile holding a new upload has it set to False —
-    # both of which fall through to the content check below.
-    if getattr (value ,'_committed',False ):
-        return
-
-    head =_read_head (value )
-    if head is None :
-        return
-    for offset ,prefix in _UPLOAD_SIGNATURES [ext ]:
-        if head [offset :offset +len (prefix )]==prefix :
-            return
-    raise ValidationError (
-    f'محتوى الملف لا يطابق امتداده ({ext }). قد يكون الملف تالفاً أو من نوع آخر.'
-    )
+    from apps .core .uploads import validate_upload_content 
+    validate_upload_content (value ,VALID_UPLOAD_EXTENSIONS )
 
 
 def _read_head (value ):
     """First bytes of an upload, leaving the file positioned back at the start.
 
-    Returns None when the object cannot be read here — a storage-backed file the
-    caller has closed, for instance. Failing open is deliberate: this validator
-    protects against mislabelled content, and it is not the size or permission
-    check, so it must not turn an unreadable handle into a rejected upload.
+    Kept for sniff_mime_type(); the actual reading logic lives in apps.core.uploads.
     """
-    try :
-        if hasattr (value ,'seek'):
-            value .seek (0 )
-        head =value .read (_SIGNATURE_READ_LEN )
-    except (OSError ,ValueError ):
-        return None
-    finally :
-        try :
-            if hasattr (value ,'seek'):
-                value .seek (0 )
-        except (OSError ,ValueError ):
-            pass
-    if isinstance (head ,str ):
-        head =head .encode ('utf-8','replace')
-    return head or None
+    from apps .core .uploads import _read_head as _shared_read_head 
+    return _shared_read_head (value )
 
 
 def sniff_mime_type (value ):

@@ -33,7 +33,17 @@ KNOWN_DEVICE = 'fingerprint-123'
 OTHER_DEVICE = 'fingerprint-456'
 
 
-@override_settings(CELERY_TASK_ALWAYS_EAGER=True, ADAPTIVE_MFA_ENABLED=True)
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    ADAPTIVE_MFA_ENABLED=True,
+    # These tests exercise the *adaptive* login behaviour: an untrusted device
+    # is challenged with an emailed OTP instead of being refused. That path is
+    # exactly the ENFORCE_DEVICE_AUTHORIZATION=False mode settings.py documents
+    # (settings.py: "When False, the historical adaptive-MFA behaviour
+    # applies"). With the default True the login view answers 403 before any
+    # challenge exists, and every assertion below would KeyError on mfa_token.
+    ENFORCE_DEVICE_AUTHORIZATION=False,
+)
 class AdaptiveMFATest(TestCase):
     def setUp(self):
         self.client = Client()

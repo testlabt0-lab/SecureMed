@@ -11,7 +11,8 @@ from rest_framework .viewsets import ViewSet
 from django .conf import settings
 from django .utils import timezone
 
-from apps .security .permissions import IsAdmin ,IsAuditor
+from apps .security .permissions import IsAdmin ,IsAuditor 
+from apps .security .blocklist_views import DeviceRegistrySerializer 
 from apps .security .port_scanner import scan_host_ports 
 from apps .security .vulnerability_scanner import run_vulnerability_scan 
 from apps .audit .utils import log_security_event 
@@ -124,6 +125,31 @@ class SecurityDashboardView (APIView ):
             status =status .HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @staticmethod
+    def _audit_chain_verdict (days :int =2 )->dict :
+        """Run AuditLog.verify_chain() over the recent window, never raising.
+
+        The dashboard must render even if the chain read fails (a database
+        hiccup should degrade the panel, not take the scan down with it).
+        """
+        try :
+            from datetime import timedelta 
+            from apps .audit .models import AuditLog 
+            result =AuditLog .verify_chain (
+            since =timezone .now ()-timedelta (days =days )
+            )
+            return {
+            'ok':result ['ok'],
+            'checked':result ['checked'],
+            'signed':result ['signed'],
+            'legacy':result ['legacy'],
+            'unsigned':result ['unsigned'],
+            'problems':len (result ['problems']),
+            }
+        except Exception as e :
+            logger .error (f"Audit chain verdict failed: {e }")
+            return {'ok':False ,'checked':0 ,'signed':0 ,'legacy':0 ,'unsigned':0 ,'problems':0 ,'error':True }
+
     def _security_features (self ,request ):
         """Report the controls that are actually configured.
 
@@ -177,6 +203,12 @@ class SecurityDashboardView (APIView ):
         # A dedicated audit key means SECRET_KEY rotation cannot silently
         # invalidate the audit chain. Only whether one is set is reported.
         'audit_chain_dedicated_key':bool (getattr (settings ,'AUDIT_LOG_HMAC_KEY','')),
+        # Live tamper-evidence verdict over the last 48h of audit rows — the
+        # same window the daily verify-audit-chain Celery beat job checks, so
+        # an operator sees in the UI what the 4 AM alert would have reported.
+        # Computed over a bounded window because verify_chain() re-signs every
+        # row it inspects; the full table grows without bound.
+        'audit_chain_integrity':self ._audit_chain_verdict (),
         # Off-site backup delivery (Telegram document / S3 cloud copy).
         # Reported so the dashboard shows whether every archive actually
         # leaves the server or only lives in BACKUP_DIR.
@@ -206,6 +238,49 @@ class SecurityDashboardView (APIView ):
         'api_docs_exposed':bool (getattr (settings ,'ENABLE_API_DOCS',settings .DEBUG )),
         'debug_mode':settings .DEBUG ,
         }
+
+
+class MyDevicesView(APIView):
+    """The caller's own registered devices, with self-service removal.
+
+    The dashboard DeviceRegistryViewSet already exposes a filtered list, but
+    that requires browsing the admin surface — the phone app needs one
+    read-only endpoint for "أجهزتي" plus "إزالة جهازي" keyed by the device
+    fingerprint the app already sends on every request, so no id lookup
+    round-trip is needed.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps .security .models import DeviceRegistry 
+        devices = DeviceRegistry.objects.filter(user=request.user)
+        return Response({
+            'devices': DeviceRegistrySerializer(devices, many=True).data,
+        })
+
+    def delete(self, request):
+        from apps .security .models import DeviceRegistry 
+        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT', '')
+        target_fp = request.data.get('device_fingerprint') or fingerprint
+        if not target_fp:
+            return Response(
+                {'detail': 'device_fingerprint مطلوب'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        device = DeviceRegistry.objects.filter(
+            user=request.user, device_fingerprint=target_fp,
+        ).first()
+        if device is None:
+            return Response(
+                {'detail': 'الجهاز غير موجود في حسابك'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        _deactivate_device(
+            device, request, via='self', block=False, notify_owner=False,
+        )
+        return Response({
+            'detail': 'تم إزالة الجهاز من حسابك — يمكنك طلب تفعيله مجدداً لاحقاً',
+        })
 
 
 class ActiveSessionsView(APIView):

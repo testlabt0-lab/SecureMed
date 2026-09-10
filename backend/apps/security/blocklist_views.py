@@ -7,6 +7,7 @@ from apps .security .permissions import IsAdmin ,IsAuditor
 from rest_framework import serializers 
 
 class DeviceRegistrySerializer (serializers .ModelSerializer ):
+    owner_email =serializers .CharField (source ='user.email',read_only =True )
     class Meta :
         model =DeviceRegistry 
         fields ='__all__'
@@ -189,10 +190,21 @@ class BlockedDeviceViewSet (viewsets .ModelViewSet ):
         
         if device.device_fingerprint:
             from django.core.cache import cache
+            # Invalidate the caches that are actually READ. The WAF answers
+            # from waf_device_blacklist:{fp} and device_tracker from
+            # blocked_device:{fp}:{mac}; the old blocked_device_{fp} key died
+            # when the tracker moved to the fingerprint+MAC composite, so
+            # deleting only it left an unblocked device refused by cache for
+            # the full TTL.
+            cache.delete(f"waf_device_blacklist:{device.device_fingerprint}")
+            cache.delete(
+                f"blocked_device:{device.device_fingerprint}:"
+                f"{device.mac_address or ''}"
+            )
             cache.delete(f"blocked_device_{device.device_fingerprint}")
             cache.delete(f"failed_login_level_{device.device_fingerprint}")
             cache.delete(f"failed_login_device_{device.device_fingerprint}")
-            
+
         return Response ({'detail':'تم إلغاء حظر الجهاز'})
 
 
@@ -208,6 +220,13 @@ class BlockedIPViewSet (viewsets .ModelViewSet ):
         blocked_ip =self .get_object ()
         blocked_ip .is_active =False 
         blocked_ip .save (update_fields =['is_active'])
+
+        # The WAF answers IP checks from waf_blacklist:{ip} with a TTL as long
+        # as the block itself — without deleting it, an IP stayed refused by
+        # cache for the entire original block duration after "unblock".
+        from django .core .cache import cache 
+        cache .delete (f'waf_blacklist:{blocked_ip .ip_address }')
+
         return Response ({'detail':'تم إلغاء حظر عنوان IP'})
 
 

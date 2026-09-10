@@ -299,7 +299,13 @@ class WAFMiddleware :
         response ['Referrer-Policy']='same-origin'
         response ['Content-Security-Policy']=(
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        # No 'unsafe-inline' for scripts: the built SPA loads every script as an
+        # external module (verified against frontend/dist) and Vite emits no
+        # inline bootstrap, so hash/nonce plumbing is not needed. React's inline
+        # styling goes through the CSSOM (element.style.x = …), which CSP's
+        # style-src does not gate — only <style> tags and style="" attributes
+        # are, and the bundle contains none.
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "img-src 'self' data: blob: https:; "
         "font-src 'self' data: https://fonts.gstatic.com; "

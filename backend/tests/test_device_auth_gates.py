@@ -336,6 +336,51 @@ class TestSelfDeactivation:
             details__via='self',
         ).exists()
 
+    def test_my_devices_list_and_remove_by_fingerprint(self, settings):
+        """قائمة أجهزتي + إزالة بالبصمة (مسار التطبيق)."""
+        settings.AUDIT_LOG_ASYNC = False
+        user = UserFactory()
+        DeviceRegistry.objects.create(
+            user=user, device_fingerprint='AND-my-a', is_trusted=True,
+        )
+        DeviceRegistry.objects.create(
+            user=user, device_fingerprint='AND-my-b', is_trusted=False,
+        )
+        other = UserFactory()
+        DeviceRegistry.objects.create(
+            user=other, device_fingerprint='AND-not-mine', is_trusted=True,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        # list shows only my devices
+        res = client.get('/api/v1/security/my-devices/')
+        assert res.status_code == 200
+        fps = {d['device_fingerprint'] for d in res.data['devices']}
+        assert fps == {'AND-my-a', 'AND-my-b'}
+
+        # remove by fingerprint (the phone app's path)
+        res = client.delete(
+            '/api/v1/security/my-devices/',
+            {'device_fingerprint': 'AND-my-b'}, format='json',
+            HTTP_X_DEVICE_FINGERPRINT='AND-my-a',
+        )
+        assert res.status_code == 200
+        assert not DeviceRegistry.objects.get(
+            device_fingerprint='AND-my-b',
+        ).is_trusted
+        assert not BlockedDevice.objects.enforceable().filter(
+            device_fingerprint='AND-my-b'
+        ).exists()
+
+        # a foreign fingerprint is invisible → 404
+        res = client.delete(
+            '/api/v1/security/my-devices/',
+            {'device_fingerprint': 'AND-not-mine'}, format='json',
+        )
+        assert res.status_code == 404
+
     def test_other_users_device_still_admin_only(self, settings):
         settings.AUDIT_LOG_ASYNC = False
         owner = UserFactory()

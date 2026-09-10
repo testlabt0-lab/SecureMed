@@ -46,7 +46,15 @@ class TestLoginHistoryMac:
 
     def test_successful_login_records_mac(self, settings):
         settings.AUDIT_LOG_ASYNC = False
-        user = UserFactory(email='mac2@securemed.app', password='Str0ng!Pass1')
+        settings.ENFORCE_DEVICE_AUTHORIZATION = True
+        user = UserFactory(email='mac2@securemed.app')
+        user.set_password('Str0ng!Pass1')
+        user.save()
+        # the login device must be pre-approved for the gate to open
+        from apps.security.models import DeviceRegistry
+        DeviceRegistry.objects.create(
+            user=user, device_fingerprint='AND-mac-1', is_trusted=True,
+        )
 
         from rest_framework.test import APIClient
         client = APIClient()
@@ -67,10 +75,13 @@ class TestLoginHistoryMac:
     def test_mfa_login_records_mac(self, settings):
         settings.AUDIT_LOG_ASYNC = False
         settings.ADAPTIVE_MFA_ENABLED = True
+        settings.ENFORCE_DEVICE_AUTHORIZATION = True
         from apps.security.crypto import encrypt_field
         from django.core.cache import cache
 
-        user = UserFactory(email='mac3@securemed.app', password='Str0ng!Pass1')
+        user = UserFactory(email='mac3@securemed.app')
+        user.set_password('Str0ng!Pass1')
+        user.save()
         raw_secret = pyotp.random_base32()
         user.mfa_enabled = True
         user.mfa_secret = encrypt_field(raw_secret)

@@ -70,13 +70,18 @@ class DeviceTracker :
     """
 
     @staticmethod 
-    def track_device (user ,request ,device_info ):
+    def track_device (user ,request ,device_info ,notify :bool =True ):
         """
         Track the current device for the user.
         Args:
             user: User object
             request: Django request
             device_info: Dictionary containing mac_address, device_fingerprint, os_info, etc.
+            notify: send the "new device" alert. LoginView passes False when the
+                login is only *starting* an adaptive challenge — the login has
+                not happened yet, and emailing "تم تسجيل دخول" for a session
+                that may never complete is both wrong and it doubles up with
+                the alert MFALoginView sends when the challenge actually passes.
         """
         if not user or not user .is_authenticated :
             return None ,False 
@@ -124,6 +129,12 @@ class DeviceTracker :
             # The owner hears about the new device inside the app (and by email
             # per preferences) — if the login was not theirs, they now know to
             # deactivate the device or alert the admin.
+            if not notify:
+                logger.info(
+                    "LOGIN_ALERT_DEFERRED user=%s device=%s — login pending a challenge",
+                    user.id, fingerprint,
+                )
+                return device, is_suspicious
             try:
                 from apps.notifications.utils import send_notification
                 send_notification(
@@ -143,6 +154,45 @@ class DeviceTracker :
                 logger.error(f"Failed to send new-device login alert: {e}")
 
         return device, is_suspicious
+
+    @staticmethod
+    def notify_new_device (user ,request ,device_info ,device ,is_suspicious ):
+        """Send the "login from a new device/location" alert.
+
+        Split out of track_device() so callers that must first resolve whether
+        the login will complete (adaptive email challenge) can decide *when*
+        the alert is truthful. The audit SUSPICIOUS_ACTIVITY row is still
+        written by track_device() — the event was observed regardless of the
+        login's outcome; only the user-facing email waits for a completed login.
+        """
+        if not user or not is_suspicious or device is None:
+            return
+        fingerprint = device_info.get('device_fingerprint', '')
+        ip_address = device_info.get('ip_address', '')
+        # A brand-new row (created within this request) versus a known device
+        # seen from a new location; created is what HIGH priority is for.
+        is_new_device =(
+        DeviceRegistry .objects .filter (
+        user =user ,device_fingerprint =fingerprint
+        ).count ()==1
+        )
+        try:
+            from apps.notifications.utils import send_notification
+            send_notification(
+                recipient=user,
+                notification_type='LOGIN_ALERT',
+                priority='HIGH' if is_new_device else 'MEDIUM',
+                title='دخول من جهاز جديد',
+                message=(
+                    f'تم تسجيل دخول على جهاز {"جديد" if is_new_device else "من موقع جديد"} '
+                    f'({device_info.get("os_info", "") or "جهاز غير معروف"}) '
+                    f'من {ip_address or "عنوان غير معروف"}. '
+                    f'إن لم تكن أنت، ألغِ تفعيل الجهاز من إدارة الأجهزة أو أبلغ الإدارة.'
+                ),
+                data={'device_fingerprint': fingerprint, 'ip_address': ip_address},
+            )
+        except Exception as e:
+            logger.error(f"Failed to send new-device login alert: {e}")
 
     @staticmethod 
     def is_device_blocked (fingerprint ,mac_address =None ):

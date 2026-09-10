@@ -5,7 +5,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from apps.security.views import (
     PortScannerView, VulnerabilityScannerView, SecurityDashboardView,
-    CheckDeviceView, TelegramWebhookView, ActiveSessionsView,
+    CheckDeviceView, TelegramWebhookView, ActiveSessionsView, MyDevicesView,
 )
 from apps.security.stats_views import DashboardStatsView, ActivityFeedView
 from apps.security.blocklist_views import (
@@ -26,6 +26,7 @@ urlpatterns = [
     path('activity/', ActivityFeedView.as_view(), name='activity-feed'),
     path('device-types/', DeviceRegistryViewSet.as_view({'get': 'types'}), name='device-types'),
     path('check-device/', CheckDeviceView.as_view(), name='check-device'),
+    path('my-devices/', MyDevicesView.as_view(), name='my-devices'),
     path('sessions/', ActiveSessionsView.as_view(), name='active-sessions'),
     path('telegram-webhook/', TelegramWebhookView.as_view(), name='telegram-webhook'),
     path('', include(router.urls)),

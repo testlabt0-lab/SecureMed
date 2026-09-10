@@ -7,6 +7,14 @@ from django .conf import settings
 from django .utils .translation import gettext_lazy as _ 
 from django .utils import timezone 
 
+from apps .core .uploads import validate_upload_content ,DOCUMENT_EXTENSIONS 
+
+
+def validate_chat_attachment (value ):
+    """Field-level gate for consultation attachments (extension + size + magic bytes)."""
+    if value :
+        validate_upload_content (value ,DOCUMENT_EXTENSIONS )
+
 class Consultation (models .Model ):
     """A virtual consultation session between a doctor and a patient."""
 
@@ -50,9 +58,14 @@ class ChatMessage (models .Model ):
     id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
     consultation =models .ForeignKey (Consultation ,on_delete =models .CASCADE ,related_name ='messages',verbose_name =_ ('الاستشارة'))
     sender =models .ForeignKey (settings .AUTH_USER_MODEL ,on_delete =models .CASCADE ,related_name ='sent_messages',verbose_name =_ ('المرسل'))
-
     content =models .TextField (_ ('المحتوى'))
-    attachment =models .FileField (_ ('مرفق'),upload_to ='telemedicine/attachments/',null =True ,blank =True )
+    # Validators on the field, not only in the serializer: admin writes and any
+    # future upload path go through the same extension / size / magic-byte gate
+    # the API does. apps.core.uploads owns the policy.
+    attachment =models .FileField (
+    _ ('مرفق'),upload_to ='telemedicine/attachments/',null =True ,blank =True ,
+    validators =[validate_chat_attachment ],
+    )
 
     created_at =models .DateTimeField (auto_now_add =True )
 

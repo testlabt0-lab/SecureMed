@@ -14,6 +14,19 @@ class ChatMessageSerializer (serializers .ModelSerializer ):
         fields =['id','consultation','sender','sender_name','sender_role','content','attachment','created_at']
         read_only_fields =['id','sender','created_at']
 
+    def validate_attachment (self ,value ):
+        """Extension, size and magic-byte check on consultation attachments.
+
+        The model field arrived here with no validators, so this endpoint was
+        the one write path in the platform that stored any file a member
+        offered it. apps.core.uploads is the shared policy; MedicalFile enforces
+        the same class of check on its own uploads.
+        """
+        from apps .core .uploads import validate_upload_content ,DOCUMENT_EXTENSIONS 
+        if value :
+            validate_upload_content (value ,DOCUMENT_EXTENSIONS )
+        return value 
+
 
 class ConsultationSerializer (serializers .ModelSerializer ):
     patient_name =serializers .SerializerMethodField ()

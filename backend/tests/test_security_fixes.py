@@ -228,8 +228,15 @@ class TestAuditChainIntegrity:
 
     def test_chain_links_across_rows(self, settings):
         settings.AUDIT_LOG_HMAC_KEY = 'test-audit-key-not-secret-key'
+        # Rows from other tests (and Django signals) may share this table with
+        # a different key — delete ours-in-window then verify strictly within
+        # a window that starts right now, so foreign rows signed with the
+        # default key are outside the verification range entirely.
+        from django.utils import timezone as tz
+        window_start = tz.now()
+        AuditLog.objects.filter(timestamp__gte=window_start).delete()
         AuditLog.objects.create(event_type='LOGIN_SUCCESS', user=None)
         AuditLog.objects.create(event_type='LOGOUT', user=None)
-        result = AuditLog.verify_chain()
+        result = AuditLog.verify_chain(since=window_start)
         assert result['ok'], result['problems']
         assert result['signed'] >= 2

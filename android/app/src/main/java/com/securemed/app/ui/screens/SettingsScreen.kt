@@ -11,10 +11,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,14 +27,19 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.securemed.app.BuildConfig
 import com.securemed.app.data.local.SecurePreferences
+import com.securemed.app.data.model.MyDevice
 import com.securemed.app.reminders.NotificationHelper
 import com.securemed.app.security.AppLock
+import com.securemed.app.ui.AuthViewModel
 import com.securemed.app.ui.theme.ThemeController
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,7 +52,9 @@ fun SettingsScreen(
      * "I lost my phone". Kept out of the ordinary logout button, which must not
      * sign the user out of the workstation they are standing at.
      */
-    onLogoutAllDevices: () -> Unit
+    onLogoutAllDevices: () -> Unit,
+    /** The account was deleted server-side; the caller routes to login. */
+    onAccountDeleted: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -58,6 +69,17 @@ fun SettingsScreen(
     val idleTimeout by AppLock.timeoutMinutes.collectAsState()
     var showTimeoutDialog by remember { mutableStateOf(false) }
     var showLogoutAllDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showDevicesDialog by remember { mutableStateOf(false) }
+    val deleteViewModel: DeleteAccountViewModel = hiltViewModel()
+    val deleteState by deleteViewModel.uiState.collectAsState()
+    val authViewModel: AuthViewModel = hiltViewModel()
+
+    LaunchedEffect(deleteState.deleted) {
+        if (deleteState.deleted) {
+            onAccountDeleted()
+        }
+    }
 
     // POST_NOTIFICATIONS is granted and revoked in system settings, never by
     // the app, so this row mirrors the OS rather than storing a preference of
@@ -180,7 +202,23 @@ fun SettingsScreen(
                 )
             }
             item {
+                SettingActionItem(
+                    title = "أجهزتي المسجلة",
+                    description = "اعرض الأجهزة الموثوقة بحسابك وأزل أي جهاز لم تعد تستخدمه",
+                    icon = Icons.Default.Devices,
+                    onClick = { showDevicesDialog = true }
+                )
+            }
+            item {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
+            item {
+                SettingActionItem(
+                    title = "حذف الحساب",
+                    description = "تعطيل نهائي للحساب وإنهاء كل جلساته — يتطلب كلمة المرور",
+                    icon = Icons.Default.DeleteForever,
+                    onClick = { deleteViewModel.clearMessage(); showDeleteDialog = true }
+                )
             }
             item {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -293,6 +331,29 @@ fun SettingsScreen(
             }
         )
     }
+
+    // Danger zone: the account-deletion path (Play requirement). Buried at
+    // the very end of the settings list on purpose — reachable, never near
+    // the routine controls.
+    if (showDeleteDialog) {
+        DeleteAccountDialog(
+            uiState = deleteState,
+            onDismiss = {
+                if (!deleteState.inProgress) {
+                    showDeleteDialog = false
+                    deleteViewModel.clearMessage()
+                }
+            },
+            onConfirm = { password -> deleteViewModel.deleteAccount(password) }
+        )
+    }
+
+    if (showDevicesDialog) {
+        MyDevicesDialog(
+            authViewModel = authViewModel,
+            onDismiss = { showDevicesDialog = false }
+        )
+    }
 }
 
 /**
@@ -305,6 +366,208 @@ private fun minutesLabel(minutes: Int): String = when {
     minutes == 2 -> "دقيقتين"
     minutes in 3..10 -> "$minutes دقائق"
     else -> "$minutes دقيقة"
+}
+
+/**
+ * "أجهزتي المسجلة": reads the trusted-device registry and offers self-service
+ * removal — سحب الثقة وإنهاء الجلسة دون قائمة سوداء (يمكن طلب التفعيل مجدداً).
+ * The device making this call can remove itself too, which acts as a local
+ * "log out of this device permanently".
+ */
+@Composable
+private fun MyDevicesDialog(
+    authViewModel: AuthViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var devices by remember { mutableStateOf<List<MyDevice>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var removingFp by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    fun refresh() {
+        loading = true
+        authViewModel.loadMyDevices { list ->
+            devices = list
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Devices, contentDescription = null) },
+        title = { Text("أجهزتي المسجلة", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                when {
+                    loading -> CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp)
+                    )
+                    devices.isEmpty() -> Text(
+                        "لا توجد أجهزة مسجلة بحسابك بعد.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    else -> Column {
+                        devices.forEach { device ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = device.osInfo?.takeIf { it.isNotBlank() }
+                                            ?: "جهاز غير معروف",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append(device.deviceFingerprint.take(16))
+                                            device.lastIpAddress?.let {
+                                                append(" • ")
+                                                append(it)
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (device.isTrusted) {
+                                        Text(
+                                            "✓ موثوق",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                TextButton(
+                                    onClick = {
+                                        removingFp = device.deviceFingerprint
+                                        authViewModel.removeMyDeviceByFingerprint(
+                                            device.deviceFingerprint
+                                        ) { ok, msg ->
+                                            removingFp = null
+                                            message = msg
+                                            if (ok) {
+                                                if (device.deviceFingerprint ==
+                                                    com.securemed.app.security.SecurityUtils
+                                                        .getDeviceFingerprint(context)
+                                                ) {
+                                                    onDismiss()
+                                                } else {
+                                                    refresh()
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = removingFp == null
+                                ) {
+                                    Text(
+                                        "إزالة",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                        message?.let {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "إزالة جهاز تسحب ثقته وتنتهي جلسته، دون حظره — " +
+                                "يمكن طلب تفعيله مجدداً لاحقاً.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("إغلاق") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeleteAccountDialog(
+    uiState: DeleteAccountUiState,
+    onDismiss: () -> Unit,
+    onConfirm: (password: String) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text("حذف الحساب", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(
+                    "سيُعطَّل الحساب نهائياً وتنتهي كل جلساته على كل الأجهزة. " +
+                        "سجلات المرضى الطبية تبقى محفوظة في النظام وفق سياسة الاحتفاظ. " +
+                        "لا يمكن التراجع عن هذا الإجراء.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("أدخل كلمة المرور للتأكيد") },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None
+                    else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (passwordVisible) "إخفاء كلمة المرور" else "إظهار كلمة المرور"
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                uiState.message?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                validationError?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            if (uiState.inProgress) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                Button(
+                    onClick = {
+                        if (password.isBlank()) validationError = "أدخل كلمة المرور"
+                        else {
+                            validationError = null
+                            onConfirm(password)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("حذف نهائي") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !uiState.inProgress) { Text("إلغاء") }
+        }
+    )
 }
 
 @Composable

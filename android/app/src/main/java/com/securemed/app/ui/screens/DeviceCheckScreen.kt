@@ -2,6 +2,7 @@ package com.securemed.app.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Warning
@@ -87,6 +88,49 @@ fun DeviceCheckScreen(
                         viewModel.checkDeviceAuthorization(fingerprint, macAddress)
                     }) {
                         Text("إعادة المحاولة")
+                    }
+                }
+            }
+            is AuthUiState.DevicePending -> {
+                // طلب التفعيل في طابور الإدارة: شاشة انتظار مع إعادة فحص،
+                // لا شاشة خطأ — الرسالة الجديدة من الإدارة تصل كإشعار داخل
+                // التطبيق عند قرار الإدارة.
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.HourglassTop,
+                        contentDescription = "Pending approval",
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "بانتظار موافقة الإدارة",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "ستصلك رسالة داخل التطبيق عند اتخاذ القرار.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(onClick = {
+                        val fingerprint = SecurityUtils.getDeviceFingerprint(context)
+                        val macAddress = SecurityUtils.getMacAddress(context)
+                        viewModel.checkDeviceAuthorization(fingerprint, macAddress)
+                    }) {
+                        Text("فحص الحالة مرة أخرى")
                     }
                 }
             }

@@ -6,6 +6,7 @@ import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.api.TwoFactorExpiredException
 import com.securemed.app.data.model.BiometricChallengeResponse
 import com.securemed.app.data.model.LoginResponse
+import com.securemed.app.data.model.MyDevice
 import com.securemed.app.security.AppLock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -209,6 +210,16 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The account was deleted server-side (DeleteAccountViewModel already ran
+     * the full local wipe); the only remaining local duty is lifting the idle
+     * lock so the login screen is reachable, and clearing any stale auth UI.
+     */
+    fun liftAppLockForSignedOut() {
+        AppLock.reset()
+        _uiState.value = AuthUiState.Idle
+    }
+
     fun resetState() {
         _uiState.value = AuthUiState.Idle
         _errorMessage.value = null
@@ -228,9 +239,12 @@ class AuthViewModel @Inject constructor(
                         "blocked" -> _uiState.value = AuthUiState.DeviceUnauthorized(
                             response.detail ?: "هذا الجهاز محظور"
                         )
-                        "pending" -> _uiState.value = AuthUiState.DeviceUnauthorized(
+                        // Distinct pending screen: the request is in the
+                        // admin's queue, so the user needs "I'll wait" (and a
+                        // re-check button), not a generic error screen.
+                        "pending" -> _uiState.value = AuthUiState.DevicePending(
                             response.detail
-                                ?: "الجهاز غير مصرح، بانتظار موافقة الإدارة"
+                                ?: "طلب تفعيل الجهاز بانتظار موافقة الإدارة"
                         )
                         "unknown", null -> _uiState.value = AuthUiState.DeviceUnknown(
                             response.detail
@@ -253,6 +267,48 @@ class AuthViewModel @Inject constructor(
                 }
         }
     }
+
+    /** Self-service "إزالة جهازي": revoke this device's trust + kill its
+     * session, without blacklisting it (the web dashboard offers the same).
+     * Requires a logged-in session, so it is reachable from the devices
+     * screen inside the app, not from the lock screen. */
+    fun removeMyDevice(
+        deviceId: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            repository.deactivateDevice(deviceId)
+                .onSuccess {
+                    onResult(true, "تم إزالة الجهاز من حسابك")
+                }
+                .onFailure { error ->
+                    onResult(false, error.message ?: "فشل إزالة الجهاز")
+                }
+        }
+    }
+
+    /** أجهزة المستخدم المسجلة — لقائمة "الأجهزة" في الإعدادات. */
+    fun loadMyDevices(onResult: (List<MyDevice>) -> Unit) {
+        viewModelScope.launch {
+            repository.getMyDevices()
+                .onSuccess { onResult(it.devices) }
+                .onFailure { onResult(emptyList()) }
+        }
+    }
+
+    /** إزالة جهاز ببصمته (المسار المفضل من التطبيق). */
+    fun removeMyDeviceByFingerprint(
+        fingerprint: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            repository.removeMyDevice(fingerprint)
+                .onSuccess { onResult(true, it.getOrDefault("detail", "تم إزالة الجهاز")) }
+                .onFailure { error ->
+                    onResult(false, error.message ?: "فشل إزالة الجهاز")
+                }
+        }
+    }
 }
 
 sealed class AuthUiState {
@@ -267,6 +323,9 @@ sealed class AuthUiState {
      * starts in, before any check has happened).
      */
     data object DeviceAuthorized : AuthUiState()
+
+    /** طلب التفعيل وصل للإدارة ولم يُقرر بعد — أظهر شاشة انتظار لا خطأ. */
+    data class DevicePending(val message: String) : AuthUiState()
 
     data class DeviceUnauthorized(val message: String) : AuthUiState()
 

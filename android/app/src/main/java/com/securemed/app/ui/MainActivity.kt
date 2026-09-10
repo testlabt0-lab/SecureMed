@@ -355,7 +355,18 @@ class MainActivity : FragmentActivity() {
                                             popUpTo(Route.Profile.route) { inclusive = true }
                                         }
                                     },
-                                    onLogoutAllDevices = { signOut(true) }
+                                    onLogoutAllDevices = { signOut(true) },
+                                    onAccountDeleted = {
+                                        // The server deactivated the account and
+                                        // ended every session; the ViewModel's
+                                        // repository call already wiped the local
+                                        // side (alarms, Room, tokens, cache). All
+                                        // that remains here is the route to login.
+                                        authViewModel.liftAppLockForSignedOut()
+                                        navController.navigate(Route.DeviceCheck.route) {
+                                            popUpTo(0) { inclusive = true }
+                                        }
+                                    }
                                 )
                             }
                         }

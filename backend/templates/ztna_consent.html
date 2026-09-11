@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>بوابة الأمان - SecureMed</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        .container {
+            background-color: #1e293b;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            max-width: 500px;
+            width: 90%;
+        }
+        h1 {
+            color: #38bdf8;
+            margin-bottom: 20px;
+        }
+        p {
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+            color: #cbd5e1;
+        }
+        button {
+            background-color: #0284c7;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #0369a1;
+        }
+        button:disabled {
+            background-color: #475569;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: none;
+            margin-top: 15px;
+            font-size: 14px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ جدار الحماية للثقة الصفرية (ZTNA)</h1>
+        <div id="content-box">
+            <p>
+                عفواً، هذا النظام يخضع لرقابة أمنية مشددة (Zero-Trust). <br><br>
+                للأمان، يجب عليك طلب تصريح من الإدارة. هل توافق على إرسال بيانات جهازك (البصمة، ونوع المتصفح، والشبكة) للمدير لغرض التحقق؟
+            </p>
+            <button id="agree-btn" onclick="requestAccess()">✅ أوافق، أرسل طلب التصريح</button>
+            <div id="loading-msg" class="loading">جاري إرسال الطلب... يرجى الانتظار لحين موافقة الإدارة.</div>
+        </div>
+    </div>
+
+    <script>
+        function requestAccess() {
+            const btn = document.getElementById('agree-btn');
+            const loading = document.getElementById('loading-msg');
+            const contentBox = document.getElementById('content-box');
+            
+            btn.disabled = true;
+            loading.style.display = 'block';
+
+            // Extract fingerprint from cookie if exists, or pass empty string (middleware will handle it)
+            fetch('/api/v1/security/ztna-request/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken') || ''
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => {
+                contentBox.innerHTML = '<h3 style="color:#22c55e;">✅ تم إرسال طلبك بنجاح!</h3><p>يرجى إبقاء هذه الصفحة مفتوحة. سيتم تحديثها تلقائياً بمجرد موافقة الإدارة.</p>';
+                // Start polling status every 5 seconds
+                setInterval(checkStatus, 5000);
+            })
+            .catch(error => {
+                loading.innerText = 'حدث خطأ. يرجى إعادة المحاولة.';
+                btn.disabled = false;
+            });
+        }
+
+        function checkStatus() {
+            fetch('/api/v1/security/ztna-status/')
+            .then(response => {
+                if(response.ok) {
+                    window.location.reload(); // Reload page when approved
+                }
+            });
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
+</body>
+</html>

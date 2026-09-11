@@ -44,7 +44,7 @@ ALLOWED_IMAGE_MIME = {'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'im
 UPSTREAM_ERROR = 'تعذر الوصول إلى خدمة الذكاء الاصطناعي حالياً. يرجى المحاولة لاحقاً.'
 
 
-def get_gemini_model(model_name='gemini-1.5-flash'):
+def get_gemini_model(model_name='gemini-2.0-flash'):
     """Initialize and return a Gemini model wrapper if the API key is configured."""
     api_key = getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
@@ -206,7 +206,7 @@ class AIAnalyzeImageView(APIView):
         _require_module(request.user)
 
         image_base64 = request.data.get('imageBase64', '')
-        prompt = str(request.data.get('prompt') or 'قم بتحليل هذه الصورة الطبية وقدم ملاحظاتك الأولية باللغة العربية.')[:MAX_QUESTION_LEN]
+        prompt = str(request.data.get('prompt') or 'قم بتحديد نوع هذه الصورة الطبية (أشعة سينية، رنين مغناطيسي، مقطعية، إلخ) ثم قدم تحليلاً مبدئياً وملاحظاتك الأولية باللغة العربية بناءً على ما تراه.')[:MAX_QUESTION_LEN]
 
         if not image_base64 or not isinstance(image_base64, str):
             return Response({'detail': 'الصورة مطلوبة'}, status=status.HTTP_400_BAD_REQUEST)

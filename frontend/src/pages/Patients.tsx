@@ -47,17 +47,18 @@ export default function Patients() {
         )}
       </div>
 
-      <div className="card">
-        <div className="relative mb-4">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+      <div className="glass p-4 rounded-2xl flex items-center mb-6">
+        <div className="relative w-full max-w-md">
+          <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-500/50" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="بحث عن مريض..."
-            className="input-field pr-10"
+            placeholder="ابحث عن مريض بالاسم، رقم الهوية..."
+            className="input-field pr-12 w-full border-transparent focus:border-primary-500 shadow-sm"
           />
         </div>
+      </div>
 
         {isLoading ? (
           <ListSkeleton rows={6} />
@@ -68,44 +69,46 @@ export default function Patients() {
             description="سيظهر المرضى هنا بمجرد إنشاء أول ملف مريض"
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {patients.map((patient: any) => (
-              <div key={patient.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-medical-100 rounded-full flex items-center justify-center">
-                    <Heart className="w-5 h-5 text-medical-600" />
+              <div key={patient.id} className="glass relative overflow-hidden rounded-3xl p-5 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-medical-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none group-hover:bg-medical-500/20 transition-colors" />
+                <div className="flex items-center gap-4 mb-4 relative z-10">
+                  <div className="w-12 h-12 bg-gradient-to-br from-medical-100 to-medical-200 dark:from-medical-900/40 dark:to-medical-800/40 rounded-2xl flex items-center justify-center shadow-inner-light">
+                    <Heart className="w-6 h-6 text-medical-600 dark:text-medical-400" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900">{patient.full_name}</h3>
-                    <p className="text-xs text-gray-500">{patient.age} سنة • {patient.gender === 'M' ? 'ذكر' : 'أنثى'}</p>
+                    <h3 className="font-bold text-gray-900 dark:text-white text-lg">{patient.full_name}</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">{patient.age} سنة • {patient.gender === 'M' ? 'ذكر' : 'أنثى'}</p>
                   </div>
                 </div>
-                <div className="space-y-1 text-sm">
+                <div className="space-y-2.5 text-sm relative z-10">
                   {patient.blood_type && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">فصيلة الدم:</span>
-                      <span className="font-medium">{patient.blood_type}</span>
+                    <div className="flex justify-between items-center bg-gray-50/50 dark:bg-navy-800/50 px-3 py-1.5 rounded-xl">
+                      <span className="text-gray-500 dark:text-gray-400">فصيلة الدم</span>
+                      <span className="font-bold text-red-500">{patient.blood_type}</span>
                     </div>
                   )}
                   {patient.phone && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">الهاتف:</span>
-                      <span className="font-medium">{patient.phone}</span>
+                    <div className="flex justify-between items-center bg-gray-50/50 dark:bg-navy-800/50 px-3 py-1.5 rounded-xl">
+                      <span className="text-gray-500 dark:text-gray-400">الهاتف</span>
+                      <span className="font-medium dark:text-gray-300">{patient.phone}</span>
                     </div>
                   )}
                   {patient.chronic_conditions && (
-                    <div className="mt-2 p-2 bg-yellow-50 rounded text-xs text-yellow-800">
-                      ⚠️ {patient.chronic_conditions}
+                    <div className="mt-3 p-3 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl border border-amber-100/50 dark:border-amber-700/30 text-xs text-amber-800 dark:text-amber-400 flex gap-2">
+                      <span className="text-amber-500 shrink-0">⚠️</span>
+                      <span className="leading-relaxed">{patient.chronic_conditions}</span>
                     </div>
                   )}
                 </div>
-                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
+                <div className="mt-5 pt-4 border-t border-gray-100 dark:border-navy-700/50 flex items-center justify-between gap-2 relative z-10">
                   <span className="text-xs text-gray-400">
                     أضيف: {new Date(patient.created_at).toLocaleDateString('ar-SA')}
                   </span>
                   <button
                     onClick={() => navigate(`/patients/${patient.id}`)}
-                    className="text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 px-2.5 py-1 rounded-lg transition-colors"
+                    className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:text-white hover:bg-primary-600 px-4 py-2 rounded-xl transition-all duration-300"
                   >
                     الملف الكامل ←
                   </button>
@@ -114,7 +117,6 @@ export default function Patients() {
             ))}
           </div>
         )}
-      </div>
 
       {showCreate && (
         <CreatePatientModal

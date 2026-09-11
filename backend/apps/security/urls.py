@@ -6,6 +6,7 @@ from rest_framework.routers import DefaultRouter
 from apps.security.views import (
     PortScannerView, VulnerabilityScannerView, SecurityDashboardView,
     CheckDeviceView, TelegramWebhookView, ActiveSessionsView, MyDevicesView,
+    ZTNARequestView, ZTNAStatusView,
 )
 from apps.security.stats_views import DashboardStatsView, ActivityFeedView
 from apps.security.blocklist_views import (
@@ -29,5 +30,7 @@ urlpatterns = [
     path('my-devices/', MyDevicesView.as_view(), name='my-devices'),
     path('sessions/', ActiveSessionsView.as_view(), name='active-sessions'),
     path('telegram-webhook/', TelegramWebhookView.as_view(), name='telegram-webhook'),
+    path('ztna-request/', ZTNARequestView.as_view(), name='ztna-request'),
+    path('ztna-status/', ZTNAStatusView.as_view(), name='ztna-status'),
     path('', include(router.urls)),
 ]

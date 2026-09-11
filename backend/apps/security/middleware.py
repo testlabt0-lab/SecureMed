@@ -457,3 +457,80 @@ class SessionSecurityMiddleware :
                 },status =401 )
 
         return self .get_response (request )
+
+
+import uuid
+from django.template.loader import render_to_string
+from django.http import HttpResponse
+
+class ZeroTrustConsentFirewallMiddleware:
+    """
+    Zero-Trust Network Access (ZTNA) Firewall with User Consent.
+    Intercepts all requests. If the device/network combination is not approved,
+    it either shows the consent HTML page (for browsers) or returns a 403 JSON (for API).
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # Exclude paths that are always public
+        if request.path.startswith('/admin/') or request.path == '/health/' or request.path.startswith('/health/'):
+            return self.get_response(request)
+
+        # Exclude the ZTNA consent and status API paths
+        if request.path in ['/api/v1/security/ztna-request/', '/api/v1/security/ztna-status/', '/api/v1/security/telegram-webhook/']:
+            return self.get_response(request)
+
+        # Exclude static/media files
+        if request.path.startswith('/static/') or request.path.startswith('/media/'):
+            return self.get_response(request)
+
+        from apps.core.net import get_client_ip
+        client_ip = get_client_ip(request)
+        
+        # 1. Get fingerprint from Header (Android) or Cookie (Browser)
+        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
+        is_new_cookie = False
+        
+        if not fingerprint:
+            fingerprint = request.COOKIES.get('ztna_device_id')
+            if not fingerprint:
+                fingerprint = str(uuid.uuid4())
+                is_new_cookie = True
+
+        # 2. Check if approved in Redis
+        # The approval is bound to BOTH fingerprint and IP address
+        approval_key = f'ztna_approved_{fingerprint}_{client_ip}'
+        is_approved = cache.get(approval_key)
+
+        if is_approved:
+            response = self.get_response(request)
+            if is_new_cookie:
+                response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
+            return response
+
+        # 3. Not approved => Block
+        
+        # If it's an API request (from Android or Javascript), return JSON
+        if request.path.startswith('/api/'):
+            response = JsonResponse({
+                'error': 'الوصول مرفوض. يجب طلب صلاحية من الإدارة.',
+                'code': 'ZTNA_BLOCKED',
+                'fingerprint': fingerprint
+            }, status=403)
+            if is_new_cookie:
+                response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
+            return response
+
+        # Otherwise, it's a browser requesting HTML. Render the Consent page.
+        # We must set the cookie so the subsequent API call to ztna-request has it.
+        try:
+            html = render_to_string('ztna_consent.html')
+            response = HttpResponse(html, status=403)
+            if is_new_cookie:
+                response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
+            return response
+        except Exception as e:
+            logger.error(f"Failed to render ztna_consent.html: {e}")
+            return JsonResponse({'error': 'ZTNA Blocked'}, status=403)

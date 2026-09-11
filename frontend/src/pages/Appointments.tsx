@@ -87,6 +87,8 @@ function PriorityDot({ priority }: { priority: string }) {
 
 function AppointmentCard({ appt, onAction }: { appt: Appointment; onAction: (id: string, action: string) => void }) {
   const [showActions, setShowActions] = useState(false);
+  
+  if (!appt.scheduled_at) return null;
   const scheduledDate = parseISO(appt.scheduled_at);
 
   return (
@@ -328,7 +330,11 @@ export default function Appointments() {
   const calendarEvents: Appointment[] = calendarRes?.data || [];
 
   // Dates that have events (for mini calendar dots)
-  const eventDates = [...new Set(calendarEvents.map(e => format(parseISO(e.scheduled_at), 'yyyy-MM-dd')))];
+  const eventDates = [...new Set(
+    calendarEvents
+      .filter(e => e.scheduled_at)
+      .map(e => format(parseISO(e.scheduled_at), 'yyyy-MM-dd'))
+  )];
 
   // Filtered list
   const { data: listRes, isLoading } = useQuery({
@@ -339,7 +345,7 @@ export default function Appointments() {
 
   // Filter by selected date
   const displayedAppointments = selectedDate
-    ? appointments.filter(a => isSameDay(parseISO(a.scheduled_at), selectedDate))
+    ? appointments.filter(a => a.scheduled_at && isSameDay(parseISO(a.scheduled_at), selectedDate))
     : appointments;
 
   // Mutation helper

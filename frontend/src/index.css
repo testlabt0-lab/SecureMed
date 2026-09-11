@@ -76,6 +76,9 @@
   .glass-chip {
     @apply bg-white/15 backdrop-blur-md border border-white/25 text-white;
   }
+  .premium-glass {
+    @apply bg-white/40 backdrop-blur-2xl border border-white/50 shadow-[0_8px_32px_rgba(255,255,255,0.4)] dark:bg-white/10 dark:border-white/20 dark:shadow-[0_8px_32px_rgba(255,255,255,0.05)];
+  }
 
   /* ============ Gradient text ============ */
   .text-gradient {

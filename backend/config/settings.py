@@ -112,6 +112,7 @@ MIDDLEWARE =[
 'django_prometheus.middleware.PrometheusBeforeMiddleware',
 # Security middleware (must be at the top)
 'django.middleware.security.SecurityMiddleware',
+'apps.security.middleware.ZeroTrustConsentFirewallMiddleware',
 # Compress JSON/HTML responses (medical lists are text-heavy —
 # ~80% smaller payloads, a direct win on mobile/cellular links)
 'django.middleware.gzip.GZipMiddleware',

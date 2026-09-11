@@ -762,6 +762,42 @@ class TelegramWebhookView(APIView):
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
                                           f"{original_text}\n\n❌ <b>تم حظر الجهاز</b>")
+
+            elif data.startswith('ztna_approve_'):
+                req_id = data[len('ztna_approve_'):]
+                req_data = cache.get(f'ztna_pending_{req_id}')
+                if not req_data:
+                    answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
+                else:
+                    fingerprint = req_data['fingerprint']
+                    client_ip = req_data['ip']
+                    cache.set(f'ztna_approved_{fingerprint}_{client_ip}', True, timeout=None)
+                    answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
+                    if message_id is not None:
+                        edit_message_text(chat_id, message_id,
+                                          f"{original_text}\n\n✅ <b>تمت الموافقة وتم فك الحظر عن الشبكة</b>")
+
+            elif data.startswith('ztna_reject_'):
+                req_id = data[len('ztna_reject_'):]
+                req_data = cache.get(f'ztna_pending_{req_id}')
+                if not req_data:
+                    answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
+                else:
+                    fingerprint = req_data['fingerprint']
+                    client_ip = req_data['ip']
+                    BlockedDevice.objects.update_or_create(
+                        device_fingerprint=fingerprint,
+                        defaults={
+                            'reason': 'حظر ZTNA من تيليجرام',
+                            'is_active': True,
+                        }
+                    )
+                    cache.set(f'waf_device_blacklist:{fingerprint}', True, timeout=None)
+                    cache.set(f'waf_blacklist:{client_ip}', True, timeout=None)
+                    answer_callback_query(callback_id, 'تم حظر الجهاز والشبكة نهائياً')
+                    if message_id is not None:
+                        edit_message_text(chat_id, message_id,
+                                          f"{original_text}\n\n❌ <b>تم حظر الجهاز والشبكة</b>")
             else:
                 answer_callback_query(callback_id, 'إجراء غير معروف', show_alert=True)
         except Exception as e:

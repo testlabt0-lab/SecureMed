@@ -51,7 +51,7 @@ if (project.findProperty("SECUREMED_FCM") == "true") {
     // OkHttp pinner reads its host from this URL — an http base URL therefore
     // disables pinning as well.
     val apiBaseUrlOverride = project.findProperty("API_BASE_URL") as String?
-    val debugApiBaseUrl = apiBaseUrlOverride ?: "http://10.0.2.2:8000/api/v1/"
+    val debugApiBaseUrl = apiBaseUrlOverride ?: "https://securemed-web.onrender.com/api/v1/"
     val releaseApiBaseUrl = apiBaseUrlOverride ?: "https://securemed-web.onrender.com/api/v1/"
 
     // Release signing material stays out of the repository — read from

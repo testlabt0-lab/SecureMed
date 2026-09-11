@@ -36,7 +36,7 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'ma
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className={`bg-white dark:bg-gray-800 w-full ${maxWidth} rounded-3xl shadow-2xl overflow-hidden pointer-events-auto border border-gray-100 dark:border-gray-700 flex flex-col max-h-[90vh]`}
+              className={`bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl w-full ${maxWidth} rounded-3xl shadow-2xl overflow-hidden pointer-events-auto border border-gray-100 dark:border-gray-700/60 flex flex-col max-h-[90vh]`}
             >
               <div className="flex justify-between items-center p-5 border-b border-gray-100 dark:border-gray-700">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">{title}</h3>

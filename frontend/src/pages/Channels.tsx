@@ -78,31 +78,35 @@ export default function Channels() {
 
       {/* Stats summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="card py-3 px-4">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">{totalCount}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">إجمالي القنوات</div>
+        <div className="glass py-4 px-5 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent dark:from-white/5 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1 relative z-10">{totalCount}</div>
+          <div className="text-sm font-medium text-gray-500 dark:text-gray-400 relative z-10">إجمالي القنوات</div>
         </div>
-        <div className="card py-3 px-4">
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+        <div className="glass py-4 px-5 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-br from-green-500/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="text-3xl font-bold text-green-600 dark:text-green-400 mb-1 relative z-10">
             {channels.filter((c: any) => c.status === 'ACTIVE').length}
           </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">نشطة</div>
+          <div className="text-sm font-medium text-gray-500 dark:text-gray-400 relative z-10">نشطة</div>
         </div>
-        <div className="card py-3 px-4">
-          <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+        <div className="glass py-4 px-5 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="text-3xl font-bold text-red-600 dark:text-red-400 mb-1 relative z-10">
             {channels.filter((c: any) => c.priority === 'URGENT').length}
           </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">عاجلة</div>
+          <div className="text-sm font-medium text-gray-500 dark:text-gray-400 relative z-10">عاجلة</div>
         </div>
-        <div className="card py-3 px-4">
-          <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+        <div className="glass py-4 px-5 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="text-3xl font-bold text-orange-600 dark:text-orange-400 mb-1 relative z-10">
             {channels.filter((c: any) => c.priority === 'HIGH').length}
           </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">عالية الأولوية</div>
+          <div className="text-sm font-medium text-gray-500 dark:text-gray-400 relative z-10">عالية الأولوية</div>
         </div>
       </div>
 
-      <div className="card">
+      <div className="glass p-6 rounded-3xl">
         {/* Filters */}
         <div className="flex flex-col md:flex-row gap-3 mb-4">
           <div className="relative flex-1">

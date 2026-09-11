@@ -349,9 +349,9 @@ export default function Layout() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-slate-950 dark:to-cyan-950 flex">
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex sticky top-0 right-0 h-screen w-72 flex-col bg-white/90 dark:bg-gray-900/80 backdrop-blur-xl border-l border-gray-100 dark:border-gray-700/60 z-40">
+      <aside className="hidden lg:flex sticky top-0 right-0 h-screen w-72 flex-col premium-glass z-40">
         {sidebarContent}
       </aside>
 
@@ -367,7 +367,7 @@ export default function Layout() {
               onClick={() => setSidebarOpen(false)}
             />
             <motion.aside
-              className="fixed lg:hidden top-0 right-0 z-40 h-screen w-72 flex flex-col bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700"
+              className="fixed lg:hidden top-0 right-0 z-40 h-screen w-72 flex flex-col premium-glass"
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}

@@ -286,7 +286,7 @@ export default function Dashboard() {
             <StaggerItem key={stat.label}>
               <Link to={stat.link} className="block group">
                 <motion.div
-                  className={`card card-shine relative h-full transition-all duration-300 group-hover:-translate-y-1.5 group-hover:shadow-card-hover dark:bg-gray-800/70 ${styles.glow}`}
+                  className={`premium-glass relative p-6 rounded-2xl h-full transition-all duration-300 group-hover:-translate-y-1.5 group-hover:shadow-card-hover dark:bg-gray-800/70 ${styles.glow}`}
                   whileTap={{ scale: 0.98 }}
                 >
                   <div className="flex items-center justify-between mb-4">
@@ -318,7 +318,7 @@ export default function Dashboard() {
       <StaggerContainer className="grid grid-cols-1 lg:grid-cols-2 gap-6" delay={0.15}>
         {/* Trends chart */}
         <StaggerItem>
-          <div className="card h-full">
+          <div className="premium-glass h-full rounded-2xl p-6">
             <h2 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
               <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-primary-500 to-indigo-600">
                 <Activity className="w-5 h-5 text-white" />
@@ -364,7 +364,7 @@ export default function Dashboard() {
 
         {/* Channels by priority */}
         <StaggerItem>
-          <div className="card h-full">
+          <div className="premium-glass h-full rounded-2xl p-6">
             <h2 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
               <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-amber-500 to-orange-600">
                 <AlertCircle className="w-5 h-5 text-white" />
@@ -408,7 +408,7 @@ export default function Dashboard() {
 
         {/* Channels by type */}
         <StaggerItem>
-          <div className="card h-full">
+          <div className="premium-glass h-full rounded-2xl p-6">
             <h2 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
               <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-primary-500 to-blue-700">
                 <FolderKanban className="w-5 h-5 text-white" />
@@ -443,7 +443,7 @@ export default function Dashboard() {
 
         {/* Records by type */}
         <StaggerItem>
-          <div className="card h-full">
+          <div className="premium-glass h-full rounded-2xl p-6">
             <h2 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
               <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-medical-500 to-teal-700">
                 <FileText className="w-5 h-5 text-white" />
@@ -481,7 +481,7 @@ export default function Dashboard() {
       <StaggerContainer className="grid grid-cols-1 lg:grid-cols-2 gap-6" delay={0.2}>
         {/* Activity feed */}
         <StaggerItem>
-          <div className="card h-full">
+          <div className="premium-glass h-full rounded-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600">
@@ -539,7 +539,7 @@ export default function Dashboard() {
 
         {/* Recent channels */}
         <StaggerItem>
-          <div className="card h-full">
+          <div className="premium-glass h-full rounded-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-sky-500 to-primary-600">
@@ -597,7 +597,7 @@ export default function Dashboard() {
       {/* Security status */}
       {securityData?.data && (
         <StaggerItem>
-          <div className="card relative overflow-hidden">
+          <div className="premium-glass relative overflow-hidden rounded-2xl p-6">
             <h2 className="font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-4">
               <span className="icon-tile w-9 h-9 !rounded-lg bg-gradient-to-br from-emerald-500 to-green-700">
                 <Shield className="w-5 h-5 text-white" />

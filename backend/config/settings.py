@@ -30,6 +30,11 @@ if config('RAILWAY_ENVIRONMENT_ID', default=''):
     if '*' not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append('*')
 
+# Automatically allow Render external hostname
+render_host = config('RENDER_EXTERNAL_HOSTNAME', default='')
+if render_host and render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_host)
+
 # Application definition
 INSTALLED_APPS =[
 'unfold', # Must be before django.contrib.admin

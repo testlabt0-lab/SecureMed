@@ -821,44 +821,40 @@ class TelegramWebhookView(APIView):
                                           f"{original_text}\n\n❌ <b>تم حظر الجهاز</b>")
 
             elif data.startswith('ztna_approve_'):
+                from apps.security.models import ZTNAPendingApproval
+                from django.utils import timezone
                 req_id = data[len('ztna_approve_'):]
-                req_data = cache.get(f'ztna_pending_{req_id}')
-                if not req_data:
-                    answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
-                else:
-                    fingerprint = req_data['fingerprint']
-                    # Key shape must match the middleware's check
-                    # (ztna_approved_{fingerprint}, no IP suffix) — a stale
-                    # write here means the السماح button "does nothing".
-                    cache.set(f'ztna_approved_{fingerprint}', True, timeout=None)
-                    cache.delete(f'ztna_pending_{req_id}')
+                try:
+                    req = ZTNAPendingApproval.objects.get(id=req_id)
+                    req.is_approved = True
+                    req.approved_at = timezone.now()
+                    req.save(update_fields=['is_approved', 'approved_at'])
                     answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
                                           f"{original_text}\n\n✅ <b>تمت الموافقة وتم فك الحظر عن الشبكة</b>")
+                except ZTNAPendingApproval.DoesNotExist:
+                    answer_callback_query(callback_id, 'الطلب غير موجود أو محذوف', show_alert=True)
 
             elif data.startswith('ztna_reject_'):
+                from apps.security.models import ZTNAPendingApproval
                 req_id = data[len('ztna_reject_'):]
-                req_data = cache.get(f'ztna_pending_{req_id}')
-                if not req_data:
-                    answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
-                else:
-                    fingerprint = req_data['fingerprint']
-                    client_ip = req_data['ip']
+                try:
+                    req = ZTNAPendingApproval.objects.get(id=req_id)
                     BlockedDevice.objects.update_or_create(
-                        device_fingerprint=fingerprint,
+                        device_fingerprint=req.device_fingerprint,
                         defaults={
                             'reason': 'حظر ZTNA من تيليجرام',
                             'is_active': True,
                         }
                     )
-                    cache.set(f'waf_device_blacklist:{fingerprint}', True, timeout=None)
-                    cache.set(f'waf_blacklist:{client_ip}', True, timeout=None)
-                    cache.delete(f'ztna_pending_{req_id}')
-                    answer_callback_query(callback_id, 'تم حظر الجهاز والشبكة نهائياً')
+                    req.delete()
+                    answer_callback_query(callback_id, 'تم حظر الجهاز نهائياً')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
-                                          f"{original_text}\n\n❌ <b>تم حظر الجهاز والشبكة</b>")
+                                          f"{original_text}\n\n❌ <b>تم حظر الجهاز نهائياً</b>")
+                except ZTNAPendingApproval.DoesNotExist:
+                    answer_callback_query(callback_id, 'الطلب غير موجود أو محذوف', show_alert=True)
             else:
                 answer_callback_query(callback_id, 'إجراء غير معروف', show_alert=True)
         except Exception as e:

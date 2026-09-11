@@ -8,6 +8,7 @@ import logging
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
 from apps.accounts.models import RolePermission
@@ -24,8 +25,24 @@ from apps.audit.utils import log_security_event
 logger = logging.getLogger('security')
 
 
+class IsPermissionsManager(BasePermission):
+    """إدارة صلاحيات الأدوار: SUPER_ADMIN و HOSPITAL_ADMIN فقط.
+
+    أصعب من ``security.IsAdmin`` عمداً — مدير مركز لا يجوز أن يغيّر خريطة
+    صلاحيات الأدوار على مستوى النظام كله.
+    """
+
+    def has_permission(self, request, view):
+        return (
+            request.user and request.user.is_authenticated
+            and request.user.role in ('SUPER_ADMIN', 'HOSPITAL_ADMIN')
+        )
+
+
 class RolePermissionViewSet(viewsets.ViewSet):
     """إدارة صلاحيات الأدوار — SUPER_ADMIN/HOSPITAL_ADMIN فقط."""
+
+    permission_classes = [IsPermissionsManager]
 
     def list(self, request):
         return Response(role_permission_matrix())

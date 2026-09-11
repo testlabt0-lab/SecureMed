@@ -827,8 +827,10 @@ class TelegramWebhookView(APIView):
                     answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
                 else:
                     fingerprint = req_data['fingerprint']
-                    client_ip = req_data['ip']
-                    cache.set(f'ztna_approved_{fingerprint}_{client_ip}', True, timeout=None)
+                    # Key shape must match the middleware's check
+                    # (ztna_approved_{fingerprint}, no IP suffix) — a stale
+                    # write here means the السماح button "does nothing".
+                    cache.set(f'ztna_approved_{fingerprint}', True, timeout=None)
                     cache.delete(f'ztna_pending_{req_id}')
                     answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
                     if message_id is not None:
@@ -915,16 +917,47 @@ class ZTNARequestView(APIView):
         telegram_error = ''
         bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', '')
         chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', '')
-        
-        user_agent = request.META.get('HTTP_USER_AGENT', 'غير متوفر')
-        platform = request.META.get('HTTP_SEC_CH_UA_PLATFORM', 'غير متوفر').strip('"')
-        
+
+        import html as _html
+        from apps.security.netinfo import MAC_SOURCE_LABELS, peer_profile
+
+        peer = peer_profile(request)
+        ip_display = peer['ip'] + (' (محلي — نفس جهاز الخادم)' if peer['is_loopback'] else '')
+        mac_note = MAC_SOURCE_LABELS.get(peer['mac_source'], '')
+        lines = [
+            '🔐 <b>طلب وصول جديد ZTNA</b>',
+            '',
+            '<b>الجهاز:</b>',
+            f"• بصمة الجهاز: <code>{_html.escape(fingerprint)}</code>",
+        ]
+        if peer['platform']:
+            lines.append(f"• نظام التشغيل: {_html.escape(peer['platform'])}")
+        if peer['user_agent']:
+            lines.append(f"• المتصفح: <code>{_html.escape(peer['user_agent'][:80])}</code>")
+        lines += [
+            '',
+            '<b>الشبكة:</b>',
+            f"• عنوان IP: <code>{_html.escape(ip_display)}</code>",
+            f"• عنوان MAC: <code>{_html.escape(peer['mac'] or 'غير متاح')}</code>"
+            + (f" — {_html.escape(mac_note)}" if mac_note else ''),
+        ]
+        if peer['lan_hint']:
+            lines.append(
+                f"• عناوين الخادم على الشبكة المحلية: <code>{_html.escape(peer['lan_hint'])}</code>"
+            )
+        if not peer['mac'] and not peer['is_private']:
+            lines.append(
+                '• <i>ملاحظة: عنوان MAC لا يُنقل عبر الراوترات — يتوفر فقط لزوار '
+                'الشبكة المحلية نفسها أو من تطبيق الأندرويد الذي يرسله مع الطلب.</i>'
+            )
+        text = '\n'.join(lines)
+
         if bot_token and chat_id:
             import requests
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             payload = {
                 "chat_id": chat_id,
-                "text": f"🔐 <b>طلب وصول جديد ZTNA</b>\n\n<b>بصمة الجهاز:</b> <code>{fingerprint}</code>\n<b>عنوان IP:</b> <code>{ip}</code>\n<b>نظام التشغيل:</b> {platform}\n<b>المتصفح:</b> <code>{user_agent[:50]}...</code>",
+                "text": text,
                 "parse_mode": "HTML",
                 "reply_markup": {
                     "inline_keyboard": [

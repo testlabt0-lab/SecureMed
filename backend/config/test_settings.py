@@ -13,6 +13,14 @@ DATABASES ={
 }
 }
 
+# The ZTNA consent firewall answers 403 to every /api/ request that does not
+# carry an approved device fingerprint, which is correct in production but
+# means DRF tests can never reach a view. No test exercises the consent wall
+# itself, so it is lifted here; ZTNA flows are covered by the views it calls.
+MIDDLEWARE =[
+mw for mw in MIDDLEWARE if 'ZeroTrustConsentFirewallMiddleware' not in mw
+]
+
 # Disable SSL for tests
 for db in DATABASES .values ():
     db .get ('OPTIONS',{}).pop ('sslmode',None )

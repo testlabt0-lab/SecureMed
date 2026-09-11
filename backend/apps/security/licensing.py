@@ -74,7 +74,7 @@ def issue_license(device, issued_by='system', days=None, notes=''):
             notes=(notes or '')[:255],
         )
         _log_license_event(device, 'DEVICE_LICENSE_ISSUED',
-                           issued_by=issued_by, license=license_obj, request=None)
+                           issued_by=issued_by, lic=license_obj, request=None)
         _notify_owner_licensed(device, license_obj)
         return license_obj, True
 
@@ -95,7 +95,7 @@ def reactivate_existing(license_obj, issued_by='system', days=None):
     license_obj.issued_by = issued_by
     license_obj.save(update_fields=updates)
     _log_license_event(license_obj.device, 'DEVICE_LICENSE_ACTIVATED',
-                       issued_by=issued_by, license=license_obj, request=None)
+                       issued_by=issued_by, lic=license_obj, request=None)
     _notify_owner_licensed(license_obj.device, license_obj)
     return license_obj
 
@@ -126,7 +126,7 @@ def deactivate_license(device, via='telegram', request=None, suspend=False, noti
     SessionManager.force_logout_user(device.user_id)
 
     event = 'DEVICE_LICENSE_SUSPENDED' if suspend else 'DEVICE_LICENSE_DEACTIVATED'
-    _log_license_event(device, event, issued_by=via, license=license_obj, request=request)
+    _log_license_event(device, event, issued_by=via, lic=license_obj, request=request)
     if notify_owner:
         _notify_owner_licensed(device, license_obj, revoked=not suspend, suspended=suspend)
     return license_obj
@@ -170,7 +170,7 @@ def ensure_device_license(device, issued_by='system'):
     return license_obj
 
 
-def _log_license_event(device, event_type, issued_by, license_obj, request=None):
+def _log_license_event(device, event_type, issued_by, lic=None, request=None):
     try:
         from apps.audit.utils import log_security_event
         log_security_event(
@@ -181,10 +181,10 @@ def _log_license_event(device, event_type, issued_by, license_obj, request=None)
                 'device_id': str(device.id),
                 'device_fingerprint': device.device_fingerprint,
                 'mac_address': device.mac_address,
-                'license_key': license_obj.license_key,
-                'license_status': license_obj.effective_status,
+                'license_key': lic.license_key,
+                'license_status': lic.effective_status,
                 'expires_at': (
-                    license_obj.expires_at.isoformat() if license_obj.expires_at else None
+                    lic.expires_at.isoformat() if lic.expires_at else None
                 ),
                 'via': issued_by,
             },
@@ -194,7 +194,7 @@ def _log_license_event(device, event_type, issued_by, license_obj, request=None)
         logger.error(f'License audit event {event_type} failed: {e}')
 
 
-def _notify_owner_licensed(device, license_obj, revoked=False, suspended=False):
+def _notify_owner_licensed(device, lic, revoked=False, suspended=False):
     """In-app heads-up to the device owner, best-effort — إشعار صاحب الجهاز."""
     if revoked or suspended:
         title = 'تم تعليق ترخيص أحد أجهزتك' if suspended else 'تم إلغاء ترخيص أحد أجهزتك'
@@ -219,7 +219,7 @@ def _notify_owner_licensed(device, license_obj, revoked=False, suspended=False):
             title=title,
             message=message,
             priority=priority,
-            data={'device_id': str(device.id), 'license_key': license_obj.license_key},
+            data={'device_id': str(device.id), 'license_key': lic.license_key},
         )
     except Exception as e:
         logger.error(f'License owner notification failed: {e}')

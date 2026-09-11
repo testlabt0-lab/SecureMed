@@ -818,7 +818,7 @@ class ZTNARequestView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        fingerprint = request.data.get('fingerprint')
+        fingerprint = request.data.get('fingerprint') or request.COOKIES.get('ztna_device_id')
         ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
         if ip and ',' in ip:
             ip = ip.split(',')[0].strip()
@@ -857,7 +857,7 @@ class ZTNAStatusView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        fingerprint = request.query_params.get('fingerprint')
+        fingerprint = request.query_params.get('fingerprint') or request.COOKIES.get('ztna_device_id')
         ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
         if ip and ',' in ip:
             ip = ip.split(',')[0].strip()

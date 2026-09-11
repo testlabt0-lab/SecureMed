@@ -812,3 +812,67 @@ class TelegramWebhookView(APIView):
 
         return Response({'ok': True})
 
+import uuid
+
+class ZTNARequestView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        fingerprint = request.data.get('fingerprint')
+        ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
+        if ip and ',' in ip:
+            ip = ip.split(',')[0].strip()
+            
+        if not fingerprint:
+            return Response({'error': 'Missing fingerprint'}, status=400)
+            
+        req_id = str(uuid.uuid4())
+        cache.set(f'ztna_pending_{req_id}', {'fingerprint': fingerprint, 'ip': ip}, timeout=3600)
+        
+        # Send to telegram
+        bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+        chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', None)
+        if bot_token and chat_id:
+            import requests
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": f"🔐 <b>طلب وصول جديد ZTNA</b>\n\n<b>بصمة الجهاز:</b> <code>{fingerprint}</code>\n<b>عنوان IP:</b> <code>{ip}</code>",
+                "parse_mode": "HTML",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "✅ السماح بالدخول", "callback_data": f"ztna_approve_{req_id}"}],
+                        [{"text": "❌ حظر نهائي", "callback_data": f"ztna_reject_{req_id}"}]
+                    ]
+                }
+            }
+            try:
+                requests.post(url, json=payload, timeout=5)
+            except Exception as e:
+                logger.error(f"Error sending ZTNA request to telegram: {e}")
+                
+        return Response({'message': 'Request sent to admin', 'req_id': req_id})
+
+class ZTNAStatusView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        fingerprint = request.query_params.get('fingerprint')
+        ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
+        if ip and ',' in ip:
+            ip = ip.split(',')[0].strip()
+            
+        if not fingerprint:
+            return Response({'error': 'Missing fingerprint'}, status=400)
+            
+        is_approved = cache.get(f'ztna_approved_{fingerprint}_{ip}')
+        if is_approved:
+            return Response({'status': 'approved'})
+            
+        is_blocked = cache.get(f'waf_device_blacklist:{fingerprint}') or cache.get(f'waf_blacklist:{ip}')
+        if is_blocked:
+            return Response({'status': 'rejected'})
+            
+        return Response({'status': 'pending'})
+
+

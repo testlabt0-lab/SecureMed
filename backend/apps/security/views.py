@@ -13,6 +13,7 @@ from django .utils import timezone
 from django.core.cache import cache
 
 from apps .security .permissions import IsAdmin ,IsAuditor 
+from apps .security .models import BlockedDevice
 from apps .security .blocklist_views import DeviceRegistrySerializer 
 from apps .security .port_scanner import scan_host_ports 
 from apps .security .vulnerability_scanner import run_vulnerability_scan 

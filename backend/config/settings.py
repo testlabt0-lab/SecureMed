@@ -743,7 +743,7 @@ if not DEBUG:
 # Only trust X-Forwarded-For / X-Real-IP when the app really sits behind a proxy
 # we control (nginx, Render, an ALB). Trusting it by default lets any client
 # forge the IP recorded in audit logs, rate limits and IP blocklists.
-TRUST_X_FORWARDED_FOR = config('TRUST_X_FORWARDED_FOR', default=False, cast=bool)
+TRUST_X_FORWARDED_FOR = config('TRUST_X_FORWARDED_FOR', default=not DEBUG, cast=bool)
 # Number of trusted proxies appended to X-Forwarded-For; the client IP is the
 # Nth entry from the right, so a single reverse proxy means 1.
 TRUSTED_PROXY_COUNT = config('TRUSTED_PROXY_COUNT', default=1, cast=int)

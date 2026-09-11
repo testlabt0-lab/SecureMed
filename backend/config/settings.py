@@ -19,11 +19,16 @@ else:
     SECRET_KEY = config('SECRET_KEY')
 
 
-ALLOWED_HOSTS =config (
-'ALLOWED_HOSTS',
-default ='localhost,127.0.0.1,0.0.0.0',
-cast =lambda v :[s .strip ()for s in v .split (',')]
+ALLOWED_HOSTS = config(
+    'ALLOWED_HOSTS',
+    default='localhost,127.0.0.1,0.0.0.0',
+    cast=lambda v: [s.strip() for s in v.split(',')]
 )
+
+# Automatically allow all hosts in Railway environments to permit internal health checks
+if config('RAILWAY_ENVIRONMENT_ID', default=''):
+    if '*' not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append('*')
 
 # Application definition
 INSTALLED_APPS =[

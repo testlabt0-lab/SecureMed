@@ -915,12 +915,16 @@ class ZTNARequestView(APIView):
         telegram_error = ''
         bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', '')
         chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', '')
+        
+        user_agent = request.META.get('HTTP_USER_AGENT', 'غير متوفر')
+        platform = request.META.get('HTTP_SEC_CH_UA_PLATFORM', 'غير متوفر').strip('"')
+        
         if bot_token and chat_id:
             import requests
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             payload = {
                 "chat_id": chat_id,
-                "text": f"🔐 <b>طلب وصول جديد ZTNA</b>\n\n<b>بصمة الجهاز:</b> <code>{fingerprint}</code>\n<b>عنوان IP:</b> <code>{ip}</code>",
+                "text": f"🔐 <b>طلب وصول جديد ZTNA</b>\n\n<b>بصمة الجهاز:</b> <code>{fingerprint}</code>\n<b>عنوان IP:</b> <code>{ip}</code>\n<b>نظام التشغيل:</b> {platform}\n<b>المتصفح:</b> <code>{user_agent[:50]}...</code>",
                 "parse_mode": "HTML",
                 "reply_markup": {
                     "inline_keyboard": [

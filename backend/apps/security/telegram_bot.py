@@ -451,6 +451,7 @@ def _process_callback(callback_query, request):
 
     device = None
     action = None
+    ztna_req_id = None
     for prefix in ('approve_', 'reject_', 'deactivate_'):
         if data.startswith(prefix):
             action = prefix[:-1]
@@ -458,7 +459,16 @@ def _process_callback(callback_query, request):
                 id=data[len(prefix):]
             ).select_related('user').first()
             break
-    if device is None:
+            
+    if action is None:
+        if data.startswith('ztna_approve_'):
+            action = 'ztna_approve'
+            ztna_req_id = data[len('ztna_approve_'):]
+        elif data.startswith('ztna_reject_'):
+            action = 'ztna_reject'
+            ztna_req_id = data[len('ztna_reject_'):]
+            
+    if action in ('approve', 'reject', 'deactivate') and device is None:
         if callback_id:
             answer_callback_query(callback_id, 'الجهاز غير موجود', show_alert=True)
         return True
@@ -535,13 +545,60 @@ def _process_callback(callback_query, request):
                               f"{original_text}\n\n❌ <b>تم حظر الجهاز</b>")
         return True
 
-    # deactivate — same rule as the dashboard (via _deactivate_device)
-    from apps.security.views import _deactivate_device
-    _deactivate_device(device, request, via='telegram')
-    if callback_id:
-        answer_callback_query(callback_id, 'تم إلغاء تفعيل الجهاز وحظره')
-    if message_id is not None:
-        edit_message_text(chat_id, message_id,
-                          f"{original_text}\n\n🔒 <b>تم إلغاء التفعيل وحظر الجهاز</b>")
+    if action == 'deactivate':
+        # deactivate — same rule as the dashboard (via _deactivate_device)
+        from apps.security.views import _deactivate_device
+        _deactivate_device(device, request, via='telegram')
+        if callback_id:
+            answer_callback_query(callback_id, 'تم إلغاء تفعيل الجهاز وحظره')
+        if message_id is not None:
+            edit_message_text(chat_id, message_id,
+                              f"{original_text}\n\n🔒 <b>تم إلغاء التفعيل وحظر الجهاز</b>")
+        return True
+
+    if action == 'ztna_approve':
+        from django.core.cache import cache
+        req_data = cache.get(f'ztna_pending_{ztna_req_id}')
+        if not req_data:
+            if callback_id:
+                answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
+        else:
+            fingerprint = req_data['fingerprint']
+            client_ip = req_data['ip']
+            cache.set(f'ztna_approved_{fingerprint}_{client_ip}', True, timeout=None)
+            cache.delete(f'ztna_pending_{ztna_req_id}')
+            if callback_id:
+                answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
+            if message_id is not None:
+                edit_message_text(chat_id, message_id,
+                                  f"{original_text}\n\n✅ <b>تمت الموافقة وتم فك الحظر عن الشبكة</b>")
+        return True
+
+    if action == 'ztna_reject':
+        from django.core.cache import cache
+        from apps.security.models import BlockedDevice
+        req_data = cache.get(f'ztna_pending_{ztna_req_id}')
+        if not req_data:
+            if callback_id:
+                answer_callback_query(callback_id, 'انتهت صلاحية الطلب', show_alert=True)
+        else:
+            fingerprint = req_data['fingerprint']
+            client_ip = req_data['ip']
+            # We can optionally block it in BlockedDevice
+            BlockedDevice.objects.update_or_create(
+                device_fingerprint=fingerprint,
+                defaults={
+                    'reason': 'حظر ZTNA من تيليجرام',
+                    'is_active': True,
+                },
+            )
+            cache.delete(f'ztna_pending_{ztna_req_id}')
+            if callback_id:
+                answer_callback_query(callback_id, 'تم حظر الجهاز نهائياً')
+            if message_id is not None:
+                edit_message_text(chat_id, message_id,
+                                  f"{original_text}\n\n❌ <b>تم حظر الجهاز نهائياً</b>")
+        return True
+
     return True
 

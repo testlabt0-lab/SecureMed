@@ -11,8 +11,24 @@ from apps .core .net import get_client_ip
 
 from rest_framework .decorators import action 
 from rest_framework .response import Response 
+from rest_framework .permissions import BasePermission
 from django .http import HttpResponse 
 import json 
+
+
+class HasAuditView (BasePermission ):
+    """بوابة audit.view الديناميكية (متطلب د. مجد — إدارة الصلاحيات).
+
+    تُركَّب مع الأصناف الثابتة (IsAdmin | IsAuditor): الأدوار المسموحة
+    تبقى كما هي، لكن سحب صلاحية audit.view من أي دور من صفحة إدارة
+    الصلاحيات يمنعه من قراءة سجل التدقيق فوراً — والعكس، منحها لدور
+    إضافي يفتحها له دون نشر كود.
+    """
+    message = 'لا تملك صلاحية عرض سجل التدقيق'
+
+    def has_permission (self ,request ,view ):
+        from apps .accounts .permissions import user_has_permission
+        return user_has_permission (request .user ,'audit.view')
 
 class AuditLogSerializer (serializers .ModelSerializer ):
     """Serializer for AuditLog."""
@@ -57,7 +73,11 @@ class AuditLogViewSet (viewsets .ReadOnlyModelViewSet ):
     """View audit logs (admin/auditor only)."""
     queryset =AuditLog .objects .all ().order_by ('-timestamp')
     serializer_class =AuditLogSerializer 
-    permission_classes =[IsAdmin |IsAuditor ]
+    # بوابة audit.view الديناميكية تحل محل IsAdmin|IsAuditor: افتراضيات
+    # المصفوفة (SUPER_ADMIN/HOSPITAL_ADMIN/CENTER_ADMIN/AUDITOR) مطابقة
+    # تماماً للأصناف الثابتة، مع إضافة المنح والسحب الديناميكي لكلا
+    # الاتجاهين من صفحة إدارة الصلاحيات.
+    permission_classes =[HasAuditView ]
     filterset_class =AuditLogFilter 
     search_fields =['user__email','user__full_name','path','ip_address','mac_address']
     ordering_fields =['timestamp','severity','event_type','risk_score']

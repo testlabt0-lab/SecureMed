@@ -234,3 +234,28 @@ class DeviceLicense(models.Model):
     def mark_verified(self):
         self.last_verified_at = timezone.now()
         self.save(update_fields=['last_verified_at'])
+
+
+class ZTNAPendingApproval(models.Model):
+    """
+    Stores ZTNA (Zero-Trust Network Access) device approval requests and their states.
+    Replaces ephemeral cache storage to ensure approvals persist across workers and restarts.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device_fingerprint = models.CharField(_('بصمة الجهاز'), max_length=255, db_index=True)
+    ip_address = models.GenericIPAddressField(_('عنوان IP'), null=True, blank=True)
+    mac_address = models.CharField(_('عنوان MAC'), max_length=100, blank=True)
+    os_info = models.CharField(_('نظام التشغيل'), max_length=255, blank=True)
+    browser_info = models.CharField(_('المتصفح'), max_length=255, blank=True)
+    
+    is_approved = models.BooleanField(_('موافق عليه'), default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    approved_at = models.DateTimeField(_('وقت الموافقة'), null=True, blank=True)
+    
+    class Meta:
+        verbose_name = _('طلب ZTNA')
+        verbose_name_plural = _('طلبات ZTNA')
+        ordering = ['-created_at']
+        
+    def __str__(self):
+        return f"ZTNA Request: {self.device_fingerprint} - Approved: {self.is_approved}"

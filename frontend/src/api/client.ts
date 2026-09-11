@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 import { getDeviceFingerprint } from '../utils/deviceFingerprint';
+import toast from 'react-hot-toast';
 
 const API_BASE_URL = '/api/v1';
 
@@ -109,10 +110,19 @@ api.interceptors.response.use(
         processQueue(null, newAccessToken);
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
-      } catch (err) {
+      } catch (err: any) {
         processQueue(err, null);
         useAuthStore.getState().logout();
-        window.location.href = '/login';
+        const detail = err?.response?.data?.detail;
+        if (detail) {
+          toast.error(detail, { duration: 5000 });
+        } else {
+          toast.error('انتهت الجلسة، يرجى تسجيل الدخول مجدداً');
+        }
+        // Short delay to allow the toast to be seen if possible before redirect
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 1500);
         return Promise.reject(err);
       } finally {
         isRefreshing = false;
@@ -245,6 +255,18 @@ export const securityAPI = {
     trust: (id: string) => api.post(`/security/devices/${id}/trust/`),
     deactivate: (id: string) => api.post(`/security/devices/${id}/deactivate/`),
   },
+  // تراخيص الأجهزة (متطلب د. مجد): شاشة القفل لا تُرفع إلا للأجهزة المرخصة،
+  // والتفعيل/إلغاء التفعيل مرتبط بتلجرام ولوحة التحكم معاً.
+  licenses: {
+    list: () => api.get('/security/licenses/'),
+    issue: (deviceId: string, days?: number | null, notes?: string) =>
+      api.post('/security/licenses/issue/', {
+        device_id: deviceId,
+        ...(days ? { days } : {}),
+        notes: notes || '',
+      }),
+    deactivate: (id: string) => api.post(`/security/licenses/${id}/deactivate/`),
+  },
   sessions: {
     list: () => api.get('/security/sessions/'),
     end: (sessionId: string) =>
@@ -287,4 +309,13 @@ export const securityAPI = {
 export const auditAPI = {
   list: (params?: any) => api.get('/audit/logs/', { params }),
   export: (params?: any) => api.get('/audit/logs/export/', { params, responseType: 'blob' }),
+};
+
+// ============== إدارة الصلاحيات (مصفوفة الأدوار × الصلاحيات) ==============
+export const permissionsAPI = {
+  matrix: () => api.get('/auth/permissions/'),
+  set: (role: string, permission: string, allowed: boolean) =>
+    api.post('/auth/permissions/set/', { role, permission, allowed }),
+  reset: (role: string, permission: string) =>
+    api.post('/auth/permissions/reset/', { role, permission }),
 };

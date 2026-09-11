@@ -116,3 +116,10 @@ export const TELEMEDICINE_ROLES: Role[] = [...ADMIN_ROLES, 'DOCTOR'];
 
 /** Whole-platform operations that are not delegated. */
 export const PLATFORM_OWNER_ROLES: Role[] = ['SUPER_ADMIN'];
+
+/**
+ * Who may change the role-permission matrix (/security/permissions).
+ * Mirrors the backend's IsPermissionsManager: CENTER_ADMIN is excluded on
+ * purpose — a centre admin must not rewrite platform-wide role permissions.
+ */
+export const PERMISSIONS_MANAGER_ROLES: Role[] = ['SUPER_ADMIN', 'HOSPITAL_ADMIN'];

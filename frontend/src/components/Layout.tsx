@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, FolderKanban, Users, Shield, ScrollText,
+  LayoutDashboard, FolderKanban, Users, Shield, ShieldCheck, ScrollText,
   User as UserIcon, LogOut, Stethoscope, Menu, X,
   Sun, Moon, Bell, BarChart3, Bot, Building2, DatabaseBackup,
   Calendar, FileText, Settings, MonitorSmartphone, History, KeyRound,
@@ -16,7 +16,7 @@ import { notificationsApi } from '../api/extendedApis';
 import {
   roleLabel, ADMIN_ROLES, CARE_TEAM_ROLES, OVERSIGHT_ROLES, REPORTING_ROLES,
   REPORT_EXPORT_ROLES, PHARMACY_ROLES, BILLING_ROLES, LAB_ROLES, WARD_ROLES,
-  TELEMEDICINE_ROLES, PLATFORM_OWNER_ROLES,
+  TELEMEDICINE_ROLES, PLATFORM_OWNER_ROLES, PERMISSIONS_MANAGER_ROLES,
 } from '../constants/roles';
 import GlobalSearch from './GlobalSearch';
 import AIAssistant from './AIAssistant';
@@ -173,6 +173,7 @@ export default function Layout() {
     { path: '/reports', label: 'التقارير', icon: FileText, roles: REPORT_EXPORT_ROLES },
     { path: '/security', label: 'لوحة الأمان', icon: Shield, roles: OVERSIGHT_ROLES },
     { path: '/security/devices', label: 'إدارة الأجهزة والحظر', icon: MonitorSmartphone, roles: OVERSIGHT_ROLES },
+    { path: '/security/permissions', label: 'إدارة الصلاحيات', icon: ShieldCheck, roles: PERMISSIONS_MANAGER_ROLES },
     { path: '/security/login-history', label: 'سجل محاولات الدخول', icon: History, roles: OVERSIGHT_ROLES },
     { path: '/security/settings', label: 'إعدادات الأمان', icon: KeyRound },
     { path: '/audit', label: 'سجلات التدقيق', icon: ScrollText, roles: OVERSIGHT_ROLES },

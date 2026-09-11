@@ -1,11 +1,35 @@
 import React, { useEffect, useState } from 'react';
 import { securityAPI } from '../api/client';
 import { useAuthStore } from '../store/authStore';
-import { Laptop, Smartphone, ShieldCheck, ShieldAlert, RefreshCw, CheckCircle2, Ban, Unlock, Download, Network, ShieldOff } from 'lucide-react';
+import { Laptop, Smartphone, ShieldCheck, ShieldAlert, RefreshCw, CheckCircle2, Ban, Unlock, Download, Network, ShieldOff, KeyRound, BadgeCheck, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import toast from 'react-hot-toast';
+
+// ترخيص الجهاز كما يعرض في لوحة الإدارة — يطابق شارات بوت تلجرام.
+const LICENSE_BADGES: Record<string, { label: string; className: string }> = {
+  ACTIVE: {
+    label: 'مرخص',
+    className: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+  },
+  SUSPENDED: {
+    label: 'ترخيص معلق',
+    className: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  },
+  REVOKED: {
+    label: 'ترخيص ملغى',
+    className: 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+  },
+  EXPIRED: {
+    label: 'ترخيص منتهي',
+    className: 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+  },
+  MISSING: {
+    label: 'بلا ترخيص',
+    className: 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700',
+  },
+};
 
 export const DeviceManagement = () => {
   const role = useAuthStore((s) => s.user?.role);
@@ -14,12 +38,14 @@ export const DeviceManagement = () => {
   const [devices, setDevices] = useState<any[]>([]);
   const [blockedDevices, setBlockedDevices] = useState<any[]>([]);
   const [blockedIps, setBlockedIps] = useState<any[]>([]);
+  const [licenses, setLicenses] = useState<any[]>([]);
   const [deviceTypes, setDeviceTypes] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [trustingId, setTrustingId] = useState<string | null>(null);
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [blockingId, setBlockingId] = useState<string | null>(null);
   const [unblockingId, setUnblockingId] = useState<string | null>(null);
+  const [licensingId, setLicensingId] = useState<string | null>(null);
   const [ipInput, setIpInput] = useState('');
   const [ipReason, setIpReason] = useState('');
 
@@ -30,11 +56,29 @@ export const DeviceManagement = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      await Promise.all([fetchDevices(), fetchDeviceTypes(), fetchBlockedDevices(), fetchBlockedIps()]);
+      await Promise.all([fetchDevices(), fetchDeviceTypes(), fetchBlockedDevices(), fetchBlockedIps(), fetchLicenses()]);
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchLicenses = async () => {
+    try {
+      const response = await securityAPI.licenses.list();
+      const data = response?.data;
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+      setLicenses(list);
+    } catch (error) {
+      console.error('Error fetching licenses:', error);
+      setLicenses([]);
+    }
+  };
+
+  // خريطة device_id → ترخيص لعرض الحالة بجانب كل جهاز
+  const licenseByDevice: Record<string, any> = {};
+  for (const lic of licenses) {
+    licenseByDevice[lic.device] = lic;
+  }
 
   const fetchDevices = async () => {
     try {
@@ -117,6 +161,52 @@ export const DeviceManagement = () => {
       toast.error(msg, { id: toastId });
     } finally {
       setDeactivatingId(null);
+    }
+  };
+
+  const issueLicense = async (device: any) => {
+    const input = prompt(
+      'مدة الترخيص بالأيام (اتركه فارغاً لترخيص دائم):',
+      ''
+    );
+    if (input === null) return;
+    const days = input.trim() ? parseInt(input.trim(), 10) : null;
+    if (input.trim() && (!days || days < 1)) {
+      toast.error('أدخل عدداً صحيحاً من الأيام أو اتركه فارغاً');
+      return;
+    }
+    setLicensingId(device.id);
+    const toastId = toast.loading('جاري إصدار الترخيص...');
+    try {
+      const res = await securityAPI.licenses.issue(device.id, days);
+      toast.success(
+        `${res?.data?.detail || 'تم الترخيص'} — المفتاح: ${res?.data?.license_key}`,
+        { id: toastId, duration: 6000 }
+      );
+      await Promise.all([fetchLicenses(), fetchDevices()]);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'فشل إصدار الترخيص', { id: toastId });
+    } finally {
+      setLicensingId(null);
+    }
+  };
+
+  const revokeLicense = async (device: any) => {
+    if (!confirm(
+      'إلغاء الترخيص سيقفل الجهاز فوراً (شاشة القفل تعود) وينهي جلساته، ' +
+      'دون إضافته للقائمة السوداء. يمكن إعادة الترخيص لاحقاً. متابعة؟'
+    )) return;
+    setLicensingId(device.id);
+    const toastId = toast.loading('جاري إلغاء الترخيص...');
+    try {
+      const lic = licenseByDevice[device.id];
+      await securityAPI.licenses.deactivate(lic.id);
+      toast.success('تم إلغاء ترخيص الجهاز وقفله', { id: toastId });
+      await fetchLicenses();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'فشل إلغاء الترخيص', { id: toastId });
+    } finally {
+      setLicensingId(null);
     }
   };
 
@@ -372,20 +462,21 @@ export const DeviceManagement = () => {
                       <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">المتصفح</th>
                       <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">آخر IP</th>
                       <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الحالة</th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الترخيص</th>
                       <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">الإجراءات</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700/40">
                     {loading ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                           <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-500" />
                           جاري تحميل الأجهزة...
                         </td>
                       </tr>
                     ) : filteredDevices.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
                           <Laptop className="w-10 h-10 mx-auto mb-2 opacity-30" />
                           لا توجد أجهزة مطابقة لهذا الفلتر
                         </td>
@@ -432,8 +523,32 @@ export const DeviceManagement = () => {
                               </span>
                             )}
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {(() => {
+                              const lic = licenseByDevice[device.id];
+                              const status = lic
+                                ? (lic.status === 'ACTIVE' && lic.expires_at && new Date(lic.expires_at) <= new Date()
+                                    ? 'EXPIRED' : lic.status)
+                                : 'MISSING';
+                              const badge = LICENSE_BADGES[status] || LICENSE_BADGES.MISSING;
+                              return (
+                                <div className="space-y-1">
+                                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full border ${badge.className}`}>
+                                    {status === 'ACTIVE' ? <BadgeCheck className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                                    {badge.label}
+                                  </span>
+                                  {lic && (
+                                    <div className="text-[10px] text-gray-400 font-mono" title={lic.license_key}>
+                                      {lic.license_key}
+                                      {lic.expires_at ? ` — حتى ${new Date(lic.expires_at).toLocaleDateString('ar-SA')}` : ' — دائم'}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               {!device.is_trusted && isAdmin && (
                                 <button
                                   onClick={() => trustDevice(device.id)}
@@ -442,6 +557,28 @@ export const DeviceManagement = () => {
                                 >
                                   <CheckCircle2 className="w-3.5 h-3.5" />
                                   توثيق
+                                </button>
+                              )}
+                              {isAdmin && (!licenseByDevice[device.id] || ['REVOKED', 'SUSPENDED', 'EXPIRED'].includes(licenseByDevice[device.id]?.status)) && (
+                                <button
+                                  onClick={() => issueLicense(device)}
+                                  disabled={licensingId === device.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                                  title="إصدار/تجديد ترخيص الجهاز — يرفع شاشة القفل"
+                                >
+                                  <KeyRound className="w-3.5 h-3.5" />
+                                  {licensingId === device.id ? 'جاري الترخيص...' : 'ترخيص'}
+                                </button>
+                              )}
+                              {isAdmin && licenseByDevice[device.id]?.status === 'ACTIVE' && (
+                                <button
+                                  onClick={() => revokeLicense(device)}
+                                  disabled={licensingId === device.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                                  title="إلغاء الترخيص — شاشة القفل تعود دون قائمة سوداء"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                  إلغاء الترخيص
                                 </button>
                               )}
                               {device.is_trusted && isAdmin && (

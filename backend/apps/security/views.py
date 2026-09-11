@@ -899,17 +899,37 @@ class ZTNARequestView(APIView):
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
 
-        rate_key = f'ztna_req_rate:{fingerprint}'
-        recent = cache.get(rate_key, 0) + 1
-        cache.set(rate_key, recent, timeout=3600)
-        if recent > self.RATE_LIMIT:
+        from apps.security.models import ZTNAPendingApproval
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        one_hour_ago = timezone.now() - timedelta(hours=1)
+        recent_requests = ZTNAPendingApproval.objects.filter(
+            device_fingerprint=fingerprint,
+            created_at__gte=one_hour_ago
+        ).count()
+        
+        if recent_requests >= self.RATE_LIMIT:
             return Response(
                 {'error': 'تم إرسال طلبك مسبقاً. يرجى انتظار موافقة الإدارة.'},
                 status=429,
             )
 
-        req_id = str(uuid.uuid4())
-        cache.set(f'ztna_pending_{req_id}', {'fingerprint': fingerprint, 'ip': ip}, timeout=3600)
+        from apps.security.models import ZTNAPendingApproval
+        from apps.core.net import get_mac_address
+        from apps.security.netinfo import MAC_SOURCE_LABELS, peer_profile
+        
+        peer = peer_profile(request)
+        mac_address = get_mac_address(ip)
+        
+        approval = ZTNAPendingApproval.objects.create(
+            device_fingerprint=fingerprint,
+            ip_address=ip,
+            mac_address=mac_address,
+            os_info=peer.get('platform', ''),
+            browser_info=peer.get('user_agent', '')
+        )
+        req_id = str(approval.id)
 
         # The result must be honest: a visitor told "sent" while Telegram was
         # never configured waits for a message that never arrives.
@@ -919,9 +939,7 @@ class ZTNARequestView(APIView):
         chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', '')
 
         import html as _html
-        from apps.security.netinfo import MAC_SOURCE_LABELS, peer_profile
-
-        peer = peer_profile(request)
+        
         ip_display = peer['ip'] + (' (محلي — نفس جهاز الخادم)' if peer['is_loopback'] else '')
         mac_note = MAC_SOURCE_LABELS.get(peer['mac_source'], '')
         lines = [
@@ -938,7 +956,7 @@ class ZTNARequestView(APIView):
             '',
             '<b>الشبكة:</b>',
             f"• عنوان IP: <code>{_html.escape(ip_display)}</code>",
-            f"• عنوان MAC: <code>{_html.escape(peer['mac'] or 'غير متاح')}</code>"
+            f"• عنوان MAC: <code>{_html.escape(mac_address or peer['mac'] or 'غير متاح')}</code>"
             + (f" — {_html.escape(mac_note)}" if mac_note else ''),
         ]
         if peer['lan_hint']:
@@ -1015,7 +1033,8 @@ class ZTNAStatusView(APIView):
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
 
-        is_approved = cache.get(f'ztna_approved_{fingerprint}')
+        from apps.security.models import ZTNAPendingApproval
+        is_approved = ZTNAPendingApproval.objects.filter(device_fingerprint=fingerprint, is_approved=True).exists()
         if is_approved:
             return Response({'status': 'approved'})
             

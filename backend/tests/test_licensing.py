@@ -260,3 +260,100 @@ class TestTelegramGateOnLoginDeniedForUnlicensed:
         res = _check(APIClient(), device.device_fingerprint)
         assert res.data['state'] == 'unlicensed'
         assert User.objects.filter(pk=device.user_id).exists()
+
+
+class TestLoginLicenseGate:
+    """بوابة الترخيص داخل مسارات الدخول نفسها — نداء API مباشر بمسار
+    الدخول لا يتفادى شاشة القفل."""
+
+    def _login(self, client, user, fingerprint, mac):
+        return client.post(
+            '/api/v1/auth/login/',
+            {'email': user.email, 'password': 'Test-Pass-123'},
+            format='json',
+            HTTP_X_DEVICE_FINGERPRINT=fingerprint,
+            HTTP_X_MAC_ADDRESS=mac,
+        )
+
+    def _user_with_password(self):
+        user = UserFactory()
+        user.set_password('Test-Pass-123')
+        user.save(update_fields=['password'])
+        return user
+
+    def test_login_refused_for_unlicensed_trusted_device(self, settings):
+        settings.AUDIT_LOG_ASYNC = False
+        user = self._user_with_password()
+        device = _make_device(user=user, fingerprint='AND-gate-1',
+                              mac='AA:BB:CC:00:00:01', trusted=True)
+        DeviceLicense.objects.create(
+            device=device, license_key='SMED-LOGIN00-KEY1-2345-6789',
+            status=DeviceLicense.Status.REVOKED,
+        )
+        res = self._login(APIClient(), user, 'AND-gate-1', 'AA:BB:CC:00:00:01')
+        assert res.status_code == 403
+        assert res.data['code'] == 'DEVICE_UNLICENSED'
+        assert 'tokens' not in res.data
+        # and the denial is audited with the license status
+        assert AuditLog.objects.filter(
+            event_type='LOGIN_FAILED',
+            details__reason='unlicensed_device',
+        ).exists()
+
+    def test_login_succeeds_for_licensed_trusted_device(self, settings):
+        settings.AUDIT_LOG_ASYNC = False
+        user = self._user_with_password()
+        device = _make_device(user=user, fingerprint='AND-gate-ok',
+                              mac='AA:BB:CC:00:00:02', trusted=True)
+        DeviceLicense.objects.create(
+            device=device, license_key='SMED-LOGINOK-KEY1-2345-6789',
+            status=DeviceLicense.Status.ACTIVE,
+        )
+        res = self._login(APIClient(), user, 'AND-gate-ok', 'AA:BB:CC:00:00:02')
+        assert res.status_code == 200
+        assert 'tokens' in res.data
+
+    def test_login_auto_licenses_legacy_trusted_device(self, settings):
+        """جهاز موثوق قديم بلا ترخيص يُرخَّص تلقائياً ويدخل — نفس قاعدة check-device."""
+        settings.AUDIT_LOG_ASYNC = False
+        user = self._user_with_password()
+        _make_device(user=user, fingerprint='AND-gate-old',
+                     mac='AA:BB:CC:00:00:03', trusted=True)
+        res = self._login(APIClient(), user, 'AND-gate-old', 'AA:BB:CC:00:00:03')
+        assert res.status_code == 200
+        assert DeviceLicense.objects.filter(
+            device__device_fingerprint='AND-gate-old',
+        ).exists()
+
+    def test_mfa_login_refused_for_unlicensed_trusted_device(self, settings):
+        import pyotp
+        from apps.security.crypto import encrypt_field
+
+        settings.AUDIT_LOG_ASYNC = False
+        settings.ADAPTIVE_MFA_ENABLED = True
+        user = UserFactory()
+        raw_secret = pyotp.random_base32()
+        user.set_password('Test-Pass-123')
+        user.mfa_enabled = True
+        user.mfa_secret = encrypt_field(raw_secret)
+        user.save(update_fields=['password', 'mfa_enabled', 'mfa_secret'])
+
+        device = _make_device(user=user, fingerprint='AND-gate-mfa',
+                              mac='AA:BB:CC:00:00:04', trusted=True)
+        DeviceLicense.objects.create(
+            device=device, license_key='SMED-MFAGATE-KEY1-2345-6789',
+            status=DeviceLicense.Status.REVOKED,
+        )
+
+        import django.core.cache as django_cache
+        django_cache.cache.set('mfa_pending:tok-gate', str(user.id), timeout=300)
+        res = APIClient().post(
+            '/api/v1/auth/2fa/login/',
+            {'mfa_token': 'tok-gate',
+             'code': pyotp.TOTP(raw_secret).now()},
+            format='json',
+            HTTP_X_DEVICE_FINGERPRINT='AND-gate-mfa',
+        )
+        assert res.status_code == 403
+        assert res.data['code'] == 'DEVICE_UNLICENSED'
+        assert 'tokens' not in res.data

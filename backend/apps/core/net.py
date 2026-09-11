@@ -19,8 +19,14 @@ UNKNOWN_IP = '0.0.0.0'
 def get_client_ip(request):
     """Return the caller's IP, honouring proxy headers only when configured to."""
     remote_addr = request.META.get('REMOTE_ADDR') or UNKNOWN_IP
+    
+    # If not trusting X-Forwarded-For generally, we can still trust it if running locally
+    # behind ngrok/proxy (where REMOTE_ADDR is 127.0.0.1 and DEBUG is True)
+    trust_x_forwarded = getattr(settings, 'TRUST_X_FORWARDED_FOR', False)
+    if not trust_x_forwarded and settings.DEBUG and remote_addr == '127.0.0.1':
+        trust_x_forwarded = True
 
-    if not getattr(settings, 'TRUST_X_FORWARDED_FOR', False):
+    if not trust_x_forwarded:
         return remote_addr
 
     forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
@@ -33,6 +39,35 @@ def get_client_ip(request):
     depth = max(1, int(getattr(settings, 'TRUSTED_PROXY_COUNT', 1)))
     index = max(0, len(chain) - depth)
     return chain[index]
+
+
+def get_mac_address(ip_address):
+    """Attempt to find the physical MAC address for an IP on the local network using ARP."""
+    import subprocess
+    import platform
+    import re
+    
+    if not ip_address or ip_address in ['127.0.0.1', 'localhost', '::1', '0.0.0.0']:
+        return ""
+        
+    try:
+        # Works on Windows and Linux for local network devices
+        if platform.system().lower() == 'windows':
+            output = subprocess.check_output(['arp', '-a', ip_address], timeout=2).decode('utf-8', errors='ignore')
+            # Look for xx-xx-xx-xx-xx-xx
+            match = re.search(r'([0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){5})', output)
+            if match:
+                return match.group(1).replace('-', ':').upper()
+        else:
+            output = subprocess.check_output(['arp', '-n', ip_address], timeout=2).decode('utf-8', errors='ignore')
+            # Look for xx:xx:xx:xx:xx:xx
+            match = re.search(r'([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})', output)
+            if match:
+                return match.group(1).upper()
+    except Exception:
+        pass
+        
+    return ""
 
 
 def client_fingerprint(request):

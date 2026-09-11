@@ -56,6 +56,10 @@ DEFAULT_ROLE_PERMISSIONS = {
         'appointments.view', 'appointments.manage',
         'pharmacy.manage', 'billing.view',
         'channels.use', 'channels.manage', 'reports.view', 'users.view',
+        # اتساق مع الصلاحيات الفعلية قبل المصفوفة: مدير المركز كان يملك
+        # إدارة المستخدمين وقراءة التدقيق (IsAdmin)، والافتراضي يحافظ على
+        # ذلك ويمكن الآن سحبه ديناميكياً من صفحة إدارة الصلاحيات.
+        'users.manage', 'audit.view',
     ],
     'DOCTOR': [
         'patients.view', 'patients.create', 'patients.edit',

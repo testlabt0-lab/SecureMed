@@ -499,10 +499,9 @@ class ZeroTrustConsentFirewallMiddleware:
                 fingerprint = str(uuid.uuid4())
                 is_new_cookie = True
 
-        # 2. Check if approved in Redis
-        # The approval is bound to fingerprint only
-        approval_key = f'ztna_approved_{fingerprint}'
-        is_approved = cache.get(approval_key)
+        # 2. Check if approved in Database
+        from apps.security.models import ZTNAPendingApproval
+        is_approved = ZTNAPendingApproval.objects.filter(device_fingerprint=fingerprint, is_approved=True).exists()
 
         if is_approved:
             response = self.get_response(request)
@@ -526,9 +525,17 @@ class ZeroTrustConsentFirewallMiddleware:
         # Otherwise, it's a browser requesting HTML. Render the Consent page.
         # We must set the cookie so the subsequent API call to ztna-request has it.
         try:
-            # Check if there is already a pending request
-            rate_key = f'ztna_req_rate:{fingerprint}'
-            is_pending = bool(cache.get(rate_key))
+            # Check if there is already a recent pending request (last 1 hour)
+            from apps.security.models import ZTNAPendingApproval
+            from django.utils import timezone
+            from datetime import timedelta
+            
+            one_hour_ago = timezone.now() - timedelta(hours=1)
+            is_pending = ZTNAPendingApproval.objects.filter(
+                device_fingerprint=fingerprint,
+                is_approved=False,
+                created_at__gte=one_hour_ago
+            ).exists()
             
             html = render_to_string('ztna_consent.html', {'is_pending': is_pending})
             response = HttpResponse(html, status=403)

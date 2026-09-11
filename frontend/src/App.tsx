@@ -5,7 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import {
   ADMIN_ROLES, CARE_TEAM_ROLES, OVERSIGHT_ROLES, REPORTING_ROLES,
   REPORT_EXPORT_ROLES, PHARMACY_ROLES, BILLING_ROLES, LAB_ROLES, WARD_ROLES,
-  TELEMEDICINE_ROLES, PLATFORM_OWNER_ROLES,
+  TELEMEDICINE_ROLES, PLATFORM_OWNER_ROLES, PERMISSIONS_MANAGER_ROLES,
 } from './constants/roles';
 
 // Lazy load pages
@@ -29,6 +29,7 @@ const Appointments = lazy(() => import('./pages/Appointments'));
 const Reports = lazy(() => import('./pages/Reports'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const DeviceManagement = lazy(() => import('./pages/DeviceManagement').then(m => ({ default: m.DeviceManagement })));
+const PermissionsManagement = lazy(() => import('./pages/Permissions'));
 const LoginHistory = lazy(() => import('./pages/LoginHistory').then(m => ({ default: m.LoginHistory })));
 const SecuritySettings = lazy(() => import('./pages/SecuritySettings').then(m => ({ default: m.SecuritySettings })));
 const PharmacyDashboard = lazy(() => import('./pages/PharmacyDashboard'));
@@ -68,6 +69,7 @@ function App() {
 
           <Route path="/security" element={<ProtectedRoute requiredRole={OVERSIGHT_ROLES}><SecurityDashboard /></ProtectedRoute>} />
           <Route path="/security/devices" element={<ProtectedRoute requiredRole={OVERSIGHT_ROLES}><DeviceManagement /></ProtectedRoute>} />
+          <Route path="/security/permissions" element={<ProtectedRoute requiredRole={PERMISSIONS_MANAGER_ROLES}><PermissionsManagement /></ProtectedRoute>} />
           <Route path="/security/login-history" element={<ProtectedRoute requiredRole={OVERSIGHT_ROLES}><LoginHistory /></ProtectedRoute>} />
           {/* Self-service: every signed-in user manages their own password, 2FA and
               biometrics here, so this route is deliberately role-free — the outer

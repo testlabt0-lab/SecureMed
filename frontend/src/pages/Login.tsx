@@ -38,7 +38,7 @@ export default function Login() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [blockedAlert, setBlockedAlert] = useState<string | null>(null);
-  type DeviceState = 'loading' | 'authorized' | 'unknown' | 'pending' | 'blocked';
+  type DeviceState = 'loading' | 'authorized' | 'unknown' | 'pending' | 'blocked' | 'unlicensed';
   const [deviceState, setDeviceState] = useState<DeviceState>('loading');
   const [deviceCheckMessage, setDeviceCheckMessage] = useState('');
 
@@ -55,6 +55,9 @@ export default function Login() {
       .then((res) => {
         if (res.data.authorized) {
             setDeviceState('authorized');
+        } else if (res.data.state === 'unlicensed' || res.data.code === 'DEVICE_UNLICENSED') {
+            setDeviceState('unlicensed');
+            setDeviceCheckMessage(res.data.detail);
         } else {
             setDeviceState('pending');
             setDeviceCheckMessage(res.data.detail);
@@ -67,6 +70,8 @@ export default function Login() {
           const state = err.response.data.state || err.response.data.code || '';
           if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
             setDeviceState('blocked');
+          } else if (state === 'unlicensed' || state === 'DEVICE_UNLICENSED') {
+            setDeviceState('unlicensed');
           } else if (state === 'pending' || state === 'PENDING_DEVICE') {
             setDeviceState('pending');
           } else {
@@ -78,6 +83,42 @@ export default function Login() {
         }
       });
   }, []);
+
+  // Auto-poll if the device is pending approval so it logs in instantly when approved
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval>;
+    if (deviceState === 'pending' && deviceInfo) {
+      intervalId = setInterval(() => {
+        securityAPI.checkDevice({
+            device_fingerprint: deviceInfo.device_fingerprint,
+            mac_address: deviceInfo.mac_address
+        })
+        .then((res) => {
+            if (res.data.authorized) {
+                setDeviceState('authorized');
+                toast.success('تمت الموافقة على الجهاز بنجاح!');
+            } else if (res.data.state === 'unlicensed' || res.data.code === 'DEVICE_UNLICENSED') {
+                setDeviceState('unlicensed');
+                setDeviceCheckMessage(res.data.detail);
+            }
+        })
+        .catch((err) => {
+           const state = err.response?.data?.state || err.response?.data?.code || '';
+           if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
+               setDeviceState('blocked');
+               setDeviceCheckMessage(err.response?.data?.detail);
+           } else if (state === 'unlicensed' || state === 'DEVICE_UNLICENSED') {
+               setDeviceState('unlicensed');
+               setDeviceCheckMessage(err.response?.data?.detail);
+           }
+           // if still pending or unknown, just wait
+        });
+      }, 3000); // 3 seconds interval for quick UX
+    }
+    return () => {
+        if (intervalId) clearInterval(intervalId);
+    };
+  }, [deviceState, deviceInfo]);
 
   const handleRequestAccess = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -95,9 +136,24 @@ export default function Login() {
           if (res.data.authorized) setDeviceState('authorized');
       } catch (err: any) {
           if (err.response?.status === 403) {
-              setDeviceState('pending');
-              setDeviceCheckMessage(err.response.data.detail);
-              toast.success('تم إرسال طلب التفعيل إلى الإدارة');
+              const state = err.response.data.state || err.response.data.code || '';
+              
+              if (state === 'unknown' || state === 'DEVICE_UNKNOWN') {
+                  setDeviceState('unknown');
+                  toast.error(err.response.data.detail || 'البريد الإلكتروني غير مسجل في النظام');
+              } else if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
+                  setDeviceState('blocked');
+                  setDeviceCheckMessage(err.response.data.detail);
+              } else if (state === 'unlicensed' || state === 'DEVICE_UNLICENSED') {
+                  setDeviceState('unlicensed');
+                  setDeviceCheckMessage(err.response.data.detail);
+              } else {
+                  setDeviceState('pending');
+                  setDeviceCheckMessage(err.response.data.detail);
+                  toast.success(err.response.data.detail || 'تم إرسال طلب التفعيل');
+              }
+          } else {
+              toast.error('حدث خطأ في الاتصال بالخادم');
           }
       } finally {
           setLoading(false);
@@ -124,6 +180,9 @@ export default function Login() {
       .then((res) => {
         if (res.data.authorized) {
             setDeviceState('authorized');
+        } else if (res.data.state === 'unlicensed' || res.data.code === 'DEVICE_UNLICENSED') {
+            setDeviceState('unlicensed');
+            setDeviceCheckMessage(res.data.detail);
         } else {
             setDeviceState('pending');
             setDeviceCheckMessage(res.data.detail);
@@ -136,6 +195,8 @@ export default function Login() {
           const state = err.response.data.state || err.response.data.code || '';
           if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
             setDeviceState('blocked');
+          } else if (state === 'unlicensed' || state === 'DEVICE_UNLICENSED') {
+            setDeviceState('unlicensed');
           } else if (state === 'pending' || state === 'PENDING_DEVICE') {
             setDeviceState('pending');
           } else {
@@ -297,6 +358,34 @@ export default function Login() {
                     <ShieldAlert className="w-16 h-16 text-red-500" />
                     <h3 className="text-xl text-white font-bold">جهاز محظور</h3>
                     <p className="text-red-200 text-center">{deviceCheckMessage}</p>
+                </div>
+            )}
+
+            {deviceState === 'unlicensed' && (
+                /* شاشة القفل — لا تُرفع إلا بترخيص صادر من الإدارة (متطلب د. مجد) */
+                <div className="flex flex-col items-center justify-center py-10 space-y-4">
+                    <motion.div
+                        className="relative w-24 h-24 rounded-3xl bg-gradient-to-br from-gray-800 to-gray-900 border border-red-500/30 flex items-center justify-center"
+                        animate={{ rotate: [-2, 2, -2] }}
+                        transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
+                    >
+                        <span className="absolute inset-0 rounded-3xl bg-red-500/10 animate-pulse-ring" />
+                        <Lock className="w-11 h-11 text-red-400 relative" />
+                    </motion.div>
+                    <h3 className="text-xl text-white font-bold">الجهاز غير مرخص</h3>
+                    <p className="text-red-200 text-center text-sm leading-relaxed">
+                        {deviceCheckMessage || 'تم قفل هذا الجهاز حتى يصدر له ترخيص من الإدارة.'}
+                    </p>
+                    <div className="text-xs text-gray-400 text-center space-y-1">
+                        <p>الترخيص يتحقق من عنوان MAC وبصمة الجهاز معاً، ويُدار من وحدة تحكم الإدارة (تيليجرام).</p>
+                        <p>للتفعيل تواصل مع الإدارة أو اطلب تفعيل الجهاز من حساب موثوق آخر.</p>
+                    </div>
+                    <button
+                        onClick={recheckDevice}
+                        className="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-xl transition-colors shadow-sm"
+                    >
+                        فحص الحالة
+                    </button>
                 </div>
             )}
 

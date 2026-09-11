@@ -41,6 +41,7 @@ from apps .security .throttling import BiometricRateThrottle ,LoginRateThrottle
 from apps .security .crypto import encrypt_field ,decrypt_field 
 from apps .security .models import LoginHistory, BlockedDevice, DeviceRegistry
 from apps .security .authentication import BoundJWTAuthentication
+from apps .accounts .permissions import user_has_permission
 from apps .core .net import client_fingerprint ,get_client_ip as _canonical_client_ip
 from utils .email_service import send_securemed_email
 import hashlib
@@ -50,6 +51,52 @@ def get_client_ip(request):
     return _canonical_client_ip(request)
 
 REFRESH_COOKIE_NAME ='refresh_token'
+
+
+class ManageUsersPermission (permissions .BasePermission ):
+    """صلاحية users.manage من مصفوفة الصلاحيات الديناميكية.
+
+    تُستخدم مع الإجراءات التي تُنشئ حسابات أو تعدّل مستخدمين آخرين؛ تعديل
+    المستخدم لملفه الشخصي يبقى متاحاً للجميع عبر IsAdminOrSelf.
+    """
+    message = 'لا تملك صلاحية إدارة المستخدمين'
+
+    def has_permission (self ,request ,view ):
+        return user_has_permission (request .user ,'users.manage')
+
+
+def _device_license_gate (user ,device ,request ,reason ):
+    """بوابة الترخيص في مسارات الدخول (متطلب د. مجد).
+
+    شاشة القفل في check-device ليست الحماية الوحيدة: حتى نداء API مباشر
+    بمسار الدخول يُرفض لجهاز موثوق لكن ترخيصه ملغى/منتهي. الأجهزة الموثوقة
+    القديمة بلا ترخيص تُرخَّص تلقائياً مرة واحدة (نفس قاعدة check-device)،
+    وترخيص ملغى يبقى ملغى — قرار الإدارة لا يُتجاوز.
+
+    يعيد Response الرفض، أو None عند السماح.
+    """
+    if device is None:
+        return None
+    from apps .security import licensing
+    license_obj =licensing .ensure_device_license (device )
+    if license_obj is not None and license_obj .is_valid :
+        return None
+    log_security_event (
+    user =user ,
+    event_type ='LOGIN_FAILED',
+    request =request ,
+    details ={'reason':reason ,
+              'device_fingerprint':device .device_fingerprint ,
+              'mac_address':device .mac_address ,
+              'license_status':(license_obj .effective_status
+                                if license_obj else 'MISSING')},
+    severity ='WARNING',
+    )
+    return Response (
+    {'detail':'الجهاز غير مرخص. يرجى التواصل مع الإدارة لتفعيل الترخيص.',
+     'authorized':False ,'code':'DEVICE_UNLICENSED'},
+    status =status .HTTP_403_FORBIDDEN ,
+    )
 
 
 def set_refresh_cookie (response ,refresh_token ):
@@ -254,6 +301,12 @@ class LoginView (APIView ):
                 status=status.HTTP_403_FORBIDDEN
         )
 
+        # بوابة الترخيص: جهاز موثوق بلا ترخيص فعّال لا يحصل على رموز دخول
+        # (متطلب د. مجد — نفس قاعدة check-device).
+        license_response = _device_license_gate(user, device, request, 'unlicensed_device')
+        if license_response is not None:
+            return license_response
+
         # Determine if we need MFA (TOTP enabled)
         needs_mfa =False 
         mfa_method ='none'
@@ -448,6 +501,12 @@ class RefreshTokenView (APIView ):
         if denied_since and BoundJWTAuthentication ._issued_before (token ,denied_since ):
             return self ._reject ('الجلسة غير صالحة. يرجى تسجيل الدخول مرة أخرى.')
 
+        # Also check the per-session denylist, which enforces the concurrent-session
+        # limit (Single Session / MAX_CONCURRENT_SESSIONS).
+        from apps.security.session_security import SessionManager
+        if SessionManager.is_session_denied(token.get('sid')):
+            return self._reject('تم تسجيل الدخول من جهاز آخر. جلستك الحالية منتهية.')
+
         if user is None or not user .is_active :
             return self ._reject ('الحساب غير مفعّل')
 
@@ -637,6 +696,11 @@ class BiometricLoginView (APIView ):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # بوابة الترخيص — نفس قاعدة الدخول بكلمة المرور (متطلب د. مجد).
+        license_response = _device_license_gate(user, device, request, 'unlicensed_device_biometric')
+        if license_response is not None:
+            return license_response
+
         tokens =get_tokens_for_user (user ,request )
         SessionManager .register_session (user ,request ,token =tokens )
         
@@ -675,10 +739,25 @@ class UserViewSet (viewsets .ModelViewSet ):
 
     def get_permissions (self ):
         if self .action =='create':
-            return [permissions .IsAuthenticated (),IsAdmin ()]
+            return [permissions .IsAuthenticated (),IsAdmin (),ManageUsersPermission ()]
         if self .action in ['destroy','update','partial_update']:
             return [permissions .IsAuthenticated (),IsAdminOrSelf ()]
         return [permissions .IsAuthenticated ()]
+
+    def perform_update (self ,serializer ):
+        """بوابة users.manage الديناميكية عند تعديل مستخدم آخر.
+
+        تعديل المستخدم لملفه الشخصي يمر دائماً؛ تعديل حساب مستخدم آخر
+        (أدوار، حالة، بيانات) يتطلب صلاحية users.manage من مصفوفة
+        الصلاحيات — سحبها من دور ما يسري فوراً دون نشر كود.
+        """
+        target =serializer .instance
+        if target !=self .request .user and not user_has_permission (
+        self .request .user ,'users.manage'
+        ):
+            from rest_framework .exceptions import PermissionDenied
+            raise PermissionDenied ('لا تملك صلاحية إدارة المستخدمين')
+        super () .perform_update (serializer )
 
     def get_queryset (self ):
         qs =super ().get_queryset ()
@@ -721,9 +800,9 @@ class UserViewSet (viewsets .ModelViewSet ):
     @action (detail =True ,methods =['post'])
     def deactivate (self ,request ,pk =None ):
         """Deactivate a user (admin only)."""
-        if request .user .role not in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
+        if not user_has_permission (request .user ,'users.manage'):
             return Response (
-            {'detail':'غير مصرح'},
+            {'detail':'لا تملك صلاحية إدارة المستخدمين'},
             status =status .HTTP_403_FORBIDDEN 
             )
         user =self .get_object ()
@@ -740,9 +819,9 @@ class UserViewSet (viewsets .ModelViewSet ):
     @action (detail =True ,methods =['post'])
     def activate (self ,request ,pk =None ):
         """Re-activate a deactivated user (admin only)."""
-        if request .user .role not in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
+        if not user_has_permission (request .user ,'users.manage'):
             return Response (
-            {'detail':'غير مصرح'},
+            {'detail':'لا تملك صلاحية إدارة المستخدمين'},
             status =status .HTTP_403_FORBIDDEN 
             )
         user =self .get_object ()
@@ -976,6 +1055,13 @@ class MFALoginView (APIView ):
                      'authorized':False ,'code':'PENDING_DEVICE'},
                     status =status .HTTP_403_FORBIDDEN ,
                     )
+                # بوابة الترخيص — جهاز موثوق بترخيص ملغى/منتهٍ لا يكمل
+                # التحقق بخطوتين (متطلب د. مجد).
+                license_response = _device_license_gate(
+                    user, device, request, 'unlicensed_device_mfa',
+                )
+                if license_response is not None:
+                    return license_response
 
         # Trust this device if requested. Self-trust is the historical
         # adaptive-auth behaviour, and it is a hole in Dr. Majed's activation

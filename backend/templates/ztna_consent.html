@@ -64,25 +64,36 @@
     <div class="container">
         <h1>🛡️ جدار الحماية للثقة الصفرية (ZTNA)</h1>
         <div id="content-box">
-            <p>
-                عفواً، هذا النظام يخضع لرقابة أمنية مشددة (Zero-Trust). <br><br>
-                للأمان، يجب عليك طلب تصريح من الإدارة. هل توافق على إرسال بيانات جهازك (البصمة، ونوع المتصفح، والشبكة) للمدير لغرض التحقق؟
-            </p>
-            <button id="agree-btn" onclick="requestAccess()">✅ أوافق، أرسل طلب التصريح</button>
-            <div id="loading-msg" class="loading">جاري إرسال الطلب... يرجى الانتظار لحين موافقة الإدارة.</div>
+            {% if is_pending %}
+                <h3 style="color:#38bdf8;">⏳ طلبك قيد المراجعة بالفعل</h3>
+                <p>تم إرسال طلبك للإدارة مسبقاً. يرجى الانتظار لحين الموافقة.</p>
+                <div id="loading-msg" class="loading" style="display: block;">جاري انتظار الموافقة...</div>
+            {% else %}
+                <p>
+                    عفواً، هذا النظام يخضع لرقابة أمنية مشددة (Zero-Trust). <br><br>
+                    للأمان، يجب عليك طلب تصريح من الإدارة. هل توافق على إرسال بيانات جهازك (البصمة، ونوع المتصفح، والشبكة) للمدير لغرض التحقق؟
+                </p>
+                <button id="agree-btn" onclick="requestAccess()">✅ أوافق، أرسل طلب التصريح</button>
+                <div id="loading-msg" class="loading">جاري إرسال الطلب... يرجى الانتظار لحين موافقة الإدارة.</div>
+            {% endif %}
         </div>
     </div>
 
     <script>
         let statusTimer = null;
+        
+        {% if is_pending %}
+        // Start polling immediately if already pending
+        statusTimer = setInterval(checkStatus, 5000);
+        {% endif %}
 
         function requestAccess() {
             const btn = document.getElementById('agree-btn');
             const loading = document.getElementById('loading-msg');
             const contentBox = document.getElementById('content-box');
 
-            btn.disabled = true;
-            loading.style.display = 'block';
+            if (btn) btn.disabled = true;
+            if (loading) loading.style.display = 'block';
 
             // Extract fingerprint from cookie if exists, or pass empty string (middleware will handle it)
             fetch('/api/v1/security/ztna-request/', {
@@ -104,15 +115,15 @@
                     contentBox.innerHTML = '<h3 style="color:#38bdf8;">⏳ طلبك قيد المراجعة بالفعل</h3><p>يرجى الانتظار لحين موافقة الإدارة.</p>';
                     statusTimer = setInterval(checkStatus, 5000);
                 } else {
-                    loading.style.display = 'none';
-                    btn.disabled = false;
+                    if (loading) loading.style.display = 'none';
+                    if (btn) btn.disabled = false;
                     contentBox.innerHTML = '<h3 style="color:#ef4444;">⚠️ تعذر إرسال الطلب</h3><p>' +
                         (data.message || data.error || 'حدث خطأ غير متوقع. يرجى إعادة المحاولة أو التواصل مع الإدارة.') + '</p>';
                 }
             })
             .catch(error => {
-                loading.style.display = 'none';
-                btn.disabled = false;
+                if (loading) loading.style.display = 'none';
+                if (btn) btn.disabled = false;
                 contentBox.innerHTML = '<h3 style="color:#ef4444;">⚠️ تعذر الاتصال بالخادم</h3><p>يرجى إعادة المحاولة.</p>';
             });
         }

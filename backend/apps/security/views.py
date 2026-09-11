@@ -897,9 +897,9 @@ class ZTNARequestView(APIView):
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
 
-        rate_key = f'ztna_req_rate:{fingerprint}:{ip}'
+        rate_key = f'ztna_req_rate:{fingerprint}'
         recent = cache.get(rate_key, 0) + 1
-        cache.set(rate_key, recent, timeout=self.RATE_WINDOW)
+        cache.set(rate_key, recent, timeout=3600)
         if recent > self.RATE_LIMIT:
             return Response(
                 {'error': 'تم إرسال طلبك مسبقاً. يرجى انتظار موافقة الإدارة.'},
@@ -982,7 +982,7 @@ class ZTNAStatusView(APIView):
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
 
-        is_approved = cache.get(f'ztna_approved_{fingerprint}_{ip}')
+        is_approved = cache.get(f'ztna_approved_{fingerprint}')
         if is_approved:
             return Response({'status': 'approved'})
             

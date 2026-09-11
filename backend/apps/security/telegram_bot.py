@@ -565,7 +565,7 @@ def _process_callback(callback_query, request):
         else:
             fingerprint = req_data['fingerprint']
             client_ip = req_data['ip']
-            cache.set(f'ztna_approved_{fingerprint}_{client_ip}', True, timeout=None)
+            cache.set(f'ztna_approved_{fingerprint}', True, timeout=None)
             cache.delete(f'ztna_pending_{ztna_req_id}')
             if callback_id:
                 answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')

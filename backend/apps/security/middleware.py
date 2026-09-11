@@ -500,8 +500,8 @@ class ZeroTrustConsentFirewallMiddleware:
                 is_new_cookie = True
 
         # 2. Check if approved in Redis
-        # The approval is bound to BOTH fingerprint and IP address
-        approval_key = f'ztna_approved_{fingerprint}_{client_ip}'
+        # The approval is bound to fingerprint only
+        approval_key = f'ztna_approved_{fingerprint}'
         is_approved = cache.get(approval_key)
 
         if is_approved:
@@ -526,7 +526,11 @@ class ZeroTrustConsentFirewallMiddleware:
         # Otherwise, it's a browser requesting HTML. Render the Consent page.
         # We must set the cookie so the subsequent API call to ztna-request has it.
         try:
-            html = render_to_string('ztna_consent.html')
+            # Check if there is already a pending request
+            rate_key = f'ztna_req_rate:{fingerprint}'
+            is_pending = bool(cache.get(rate_key))
+            
+            html = render_to_string('ztna_consent.html', {'is_pending': is_pending})
             response = HttpResponse(html, status=403)
             # A cached consent wall would keep covering the site after the
             # admin has already approved this device.

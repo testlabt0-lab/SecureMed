@@ -10,3 +10,6 @@ python manage.py collectstatic --no-input
 
 echo "Running database migrations..."
 python manage.py migrate
+
+echo "Creating cache table if needed..."
+python manage.py createcachetable securemed_cache_table

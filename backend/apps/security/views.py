@@ -10,6 +10,7 @@ from rest_framework .viewsets import ViewSet
 
 from django .conf import settings
 from django .utils import timezone
+from django.core.cache import cache
 
 from apps .security .permissions import IsAdmin ,IsAuditor 
 from apps .security .blocklist_views import DeviceRegistrySerializer 

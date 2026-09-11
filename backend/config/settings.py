@@ -1010,11 +1010,13 @@ if not DEBUG and not _TESTING:
             "'python manage.py createcachetable' once."
         )
     if 'InMemoryChannelLayer' in CHANNEL_LAYERS.get('default', {}).get('BACKEND', ''):
-        raise ImproperlyConfigured(
-            "CHANNEL_LAYERS['default'] is InMemoryChannelLayer while DEBUG=False. "
-            "WebSocket group broadcasts would only reach consumers inside the same "
-            "process. Set REDIS_URL so channels_redis is used."
-        )
+        if not config('ALLOW_IN_MEMORY_CHANNELS', default=False, cast=bool):
+            raise ImproperlyConfigured(
+                "CHANNEL_LAYERS['default'] is InMemoryChannelLayer while DEBUG=False. "
+                "WebSocket group broadcasts would only reach consumers inside the same "
+                "process. Set REDIS_URL so channels_redis is used. If this is a "
+                "single-process deployment (like a free tier), set ALLOW_IN_MEMORY_CHANNELS=1."
+            )
 
     # An operator who sets JWT_ALGORITHM=RS256 has decided that access tokens must
     # be verifiable without the signing secret. Falling back to HS256 because a PEM

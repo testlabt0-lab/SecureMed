@@ -5,10 +5,13 @@ Telegram admin console — control the platform from the chat itself.
 it into a command surface so the admin never needs the dashboard open:
 
     /pending              الأجهزة بانتظار الموافقة
-    /approve <id>         تفعيل جهاز
+    /approve <id>         تفعيل جهاز (+ إصدار ترخيص)
     /block <id>           حظر جهاز (سحب ثقة + قائمة سوداء + قتل جلسة)
     /unblock <fp-prefix>  رفع حظر عن جهاز
     /devices [n]          آخر الأجهزة المسجلة
+    /licenses [n]         تراخيص الأجهزة وحالتها
+    /license <id> [أيام]  ترخيص/تجديد ترخيص جهاز (بدون أيام = دائم)
+    /revoke <id>          إلغاء ترخيص جهاز (شاشة القفل تظل ظاهرة)
     /users [بحث]          المستخدمون (بريد، دور، حالة)
     /stats                إحصاءات المنصة
     /backups [n]          آخر النسخ الاحتياطية وحالة تسليمها
@@ -38,12 +41,15 @@ MAX_LIST = 10
 
 HELP_TEXT = (
     "🛡 <b>SecureMed — وحدة تحكم الإدارة</b>\n\n"
-    "<b>الأجهزة</b>\n"
+    "<b>الأجهزة والترخيص</b>\n"
     "/pending — الأجهزة بانتظار الموافقة\n"
-    "/approve &lt;id&gt; — تفعيل جهاز\n"
+    "/approve &lt;id&gt; — تفعيل جهاز (+ إصدار ترخيص)\n"
     "/block &lt;id&gt; — حظر جهاز (سحب ثقة + قائمة سوداء + إنهاء جلسة)\n"
     "/unblock &lt;بصمة&gt; — رفع حظر عن جهاز\n"
-    "/devices [عدد] — آخر الأجهزة المسجلة\n\n"
+    "/devices [عدد] — آخر الأجهزة المسجلة\n"
+    "/licenses [عدد] — تراخيص الأجهزة\n"
+    "/license &lt;id&gt; [أيام] — ترخيص/تجديد جهاز (بدون أيام = دائم)\n"
+    "/revoke &lt;id&gt; — إلغاء ترخيص جهاز\n\n"
     "<b>المستخدمون والمنصة</b>\n"
     "/users [بحث] — المستخدمون\n"
     "/stats — إحصاءات المنصة\n\n"
@@ -65,7 +71,8 @@ def _fmt_device(d, with_buttons_hint=False):
     status = '✅ موثوق' if d.is_trusted else '⏳ بانتظار الموافقة'
     blocked = '⛔ محظور' if BlockedDevice.objects.enforceable().filter(
         device_fingerprint=d.device_fingerprint).exists() else ''
-    state = ' '.join(x for x in (status, blocked) if x)
+    license_label = _license_badge(d)
+    state = ' '.join(x for x in (status, blocked, license_label) if x)
     return (
         f"<code>{d.id}</code>\n"
         f"👤 {d.user.email}\n"
@@ -74,6 +81,27 @@ def _fmt_device(d, with_buttons_hint=False):
         f"الحالة: {state}\n"
         f"🕒 {timezone.localtime(d.last_login).strftime('%m-%d %H:%M')}"
     )
+
+
+_LICENSE_BADGES = {
+    'ACTIVE': '🪪 مرخص',
+    'SUSPENDED': '⏸ ترخيص معلق',
+    'REVOKED': '🚫 ترخيص ملغى',
+    'EXPIRED': '⌛ ترخيص منتهي',
+    'MISSING': '❔ بلا ترخيص',
+}
+
+
+def _license_badge(device):
+    """ترخيص الجهاز كما يظهر في قوائم البوت — بلا استعلام إضافي إن أمكن."""
+    if hasattr(device, 'license'):
+        lic = device.license  # select_related ready when the caller prefetches
+    else:
+        from apps.security.models import DeviceLicense
+        lic = DeviceLicense.objects.filter(device=device).first()
+    if lic is None:
+        return _LICENSE_BADGES['MISSING']
+    return _LICENSE_BADGES.get(lic.effective_status, lic.effective_status)
 
 
 def _cmd_pending():
@@ -109,6 +137,10 @@ def _cmd_approve(ref):
         return "ℹ️ الجهاز موثوق بالفعل."
     device.is_trusted = True
     device.save(update_fields=['is_trusted'])
+    # تفعيل الجهاز يعني ترخيصه: الموافقة تُصدر الترخيص تلقائياً فيرفع
+    # شاشة القفل عن الجهاز فوراً.
+    from apps.security.licensing import issue_license
+    license_obj, _created = issue_license(device, issued_by='telegram-command')
     from apps.security.views import log_security_event
     log_security_event(
         user=device.user,
@@ -118,7 +150,6 @@ def _cmd_approve(ref):
                  'device_fingerprint': device.device_fingerprint,
                  'granted_by': 'telegram-command'},
     )
-    from apps.security.telegram_service import send_device_deactivated_notification
     from apps.notifications.utils import send_notification
     send_notification(
         recipient=device.user,
@@ -132,7 +163,11 @@ def _cmd_approve(ref):
         priority='MEDIUM',
         data={'device_id': str(device.id)},
     )
-    return f"✅ تم تفعيل جهاز <b>{device.user.email}</b>\n<code>{device.device_fingerprint[:32]}</code>"
+    return (
+        f"✅ تم تفعيل وترخيص جهاز <b>{device.user.email}</b>\n"
+        f"<code>{device.device_fingerprint[:32]}</code>\n"
+        f"🪪 مفتاح الترخيص: <code>{license_obj.license_key}</code>"
+    )
 
 
 def _cmd_block(ref):
@@ -168,7 +203,7 @@ def _cmd_unblock(fp_prefix):
 
 
 def _cmd_devices(limit):
-    devices = DeviceRegistry.objects.select_related('user').order_by(
+    devices = DeviceRegistry.objects.select_related('user', 'license').order_by(
         '-last_login'
     )[:min(max(limit, 1), MAX_LIST)]
     if not devices:
@@ -176,6 +211,69 @@ def _cmd_devices(limit):
     lines = [f"🖥 <b>آخر الأجهزة ({devices.count()}):</b>\n"]
     lines += [_fmt_device(d) for d in devices]
     return "\n".join(lines)
+
+
+def _cmd_licenses(limit):
+    from apps.security.models import DeviceLicense
+    licenses = DeviceLicense.objects.select_related(
+        'device__user',
+    ).order_by('-issued_at')[:min(max(limit, 1), MAX_LIST)]
+    if not licenses:
+        return "لا توجد تراخيص بعد. ترخيص جهاز: /license &lt;id&gt;"
+    lines = [f"🪪 <b>تراخيص الأجهزة:</b>\n"]
+    for lic in licenses:
+        d = lic.device
+        lines.append(
+            f"• <code>{lic.license_key}</code>\n"
+            f"  👤 {d.user.email} — MAC: <code>{d.mac_address or '؟'}</code>\n"
+            f"  الحالة: {_LICENSE_BADGES.get(lic.effective_status, lic.effective_status)}"
+            + (
+                f" — ينتهي: {timezone.localtime(lic.expires_at).strftime('%m-%d %H:%M')}"
+                if lic.expires_at else ' — دائم'
+            )
+        )
+    return "\n".join(lines)
+
+
+def _cmd_license(ref, days=None):
+    """ترخيص/تجديد جهاز: /license <id> [أيام] — الإلغاء عبر /revoke."""
+    from apps.security.licensing import issue_license
+    device = _find_device(ref)
+    if device is None:
+        return f"❌ لم أجد جهازاً بالمعرف/البصمة: <code>{ref}</code>"
+    license_obj, created = issue_license(device, issued_by='telegram-command', days=days)
+    expiry = (
+        f'ينتهي في {timezone.localtime(license_obj.expires_at).strftime("%m-%d %H:%M")}'
+        if license_obj.expires_at else 'دائم'
+    )
+    action = 'أُصدر ترخيص جديد' if created else 'جُدّد التفعيل'
+    return (
+        f"🪪 {action} لجهاز <b>{device.user.email}</b>\n"
+        f"<code>{device.device_fingerprint[:32]}</code>\n"
+        f"المفتاح: <code>{license_obj.license_key}</code>\n"
+        f"المدة: {expiry}"
+    )
+
+
+def _cmd_revoke(ref):
+    """إلغاء ترخيص جهاز: شاشة القفل تظل ظاهرة دون قائمة سوداء."""
+    from apps.security.licensing import deactivate_license
+    from apps.security.models import DeviceLicense
+    device = _find_device(ref)
+    if device is None:
+        return f"❌ لم أجد جهازاً بالمعرف/البصمة: <code>{ref}</code>"
+    if not DeviceLicense.objects.filter(device=device).exists():
+        return "ℹ️ هذا الجهاز لا يحمل ترخيصاً أصلاً."
+    if DeviceLicense.objects.filter(
+        device=device, status=DeviceLicense.Status.REVOKED,
+    ).exists():
+        return "ℹ️ ترخيص هذا الجهاز ملغى بالفعل."
+    deactivate_license(device, via='telegram-command')
+    return (
+        f"🚫 أُلغي ترخيص جهاز <b>{device.user.email}</b>\n"
+        f"<code>{device.device_fingerprint[:32]}</code>\n"
+        "شاشة القفل تمنع الدخول الآن. إعادة الترخيص: /license."
+    )
 
 
 def _cmd_users(query):
@@ -273,6 +371,14 @@ def _route_command(text):
         return _cmd_unblock(arg)
     if cmd == '/devices':
         return _cmd_devices(int(arg) if arg.isdigit() else 5)
+    if cmd == '/licenses':
+        return _cmd_licenses(int(arg) if arg.isdigit() else 5)
+    if cmd == '/license' and arg:
+        parts = arg.split()
+        days = parts[1] if len(parts) > 1 and parts[1].isdigit() else None
+        return _cmd_license(parts[0], days=days)
+    if cmd == '/revoke' and arg:
+        return _cmd_revoke(arg)
     if cmd == '/users':
         return _cmd_users(arg)
     if cmd == '/backups':
@@ -360,12 +466,16 @@ def _process_callback(callback_query, request):
     if action == 'approve':
         device.is_trusted = True
         device.save(update_fields=['is_trusted'])
+        # الموافقة عبر الأزرار تُرخّص الجهاز تلقائياً — نفس قاعدة /approve.
+        from apps.security.licensing import issue_license
+        license_obj, _created = issue_license(device, issued_by='telegram')
         log_security_event(
             user=device.user,
             event_type='DEVICE_APPROVED_VIA_TELEGRAM',
             request=request,
             details={'device_id': str(device.id),
-                     'device_fingerprint': device.device_fingerprint},
+                     'device_fingerprint': device.device_fingerprint,
+                     'license_key': license_obj.license_key},
             severity='INFO',
         )
         from apps.security.views import _notify_user

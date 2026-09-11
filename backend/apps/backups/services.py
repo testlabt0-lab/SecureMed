@@ -177,7 +177,13 @@ def create_backup (created_by =None ,kind =BackupRecord .Kind .MANUAL ,note ='',
         with open(out_path, 'wb') as f:
             f.write(encrypted_data)
     except Exception as e:
-        logging.getLogger('security').error(f"Failed to encrypt backup: {e}")
+        # A plaintext PHI archive on disk is worse than no archive: the old
+        # best-effort behaviour left an unencrypted backup behind and even
+        # shipped it off-site. The run is aborted instead — the scheduled
+        # task retries, and no unencrypted copy ever exists after this point.
+        out_path.unlink(missing_ok=True)
+        logging.getLogger('security').error(f"Backup aborted: encryption failed: {e}")
+        raise RuntimeError(f'فشل تشفير النسخة الاحتياطية — أُلغيت العملية: {e}') from e
 
     duration_ms =int ((time .time ()-started )*1000 )
     record =BR .objects .create (

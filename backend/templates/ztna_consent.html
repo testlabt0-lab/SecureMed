@@ -74,11 +74,13 @@
     </div>
 
     <script>
+        let statusTimer = null;
+
         function requestAccess() {
             const btn = document.getElementById('agree-btn');
             const loading = document.getElementById('loading-msg');
             const contentBox = document.getElementById('content-box');
-            
+
             btn.disabled = true;
             loading.style.display = 'block';
 
@@ -91,24 +93,44 @@
                 },
                 body: JSON.stringify({})
             })
-            .then(response => {
-                contentBox.innerHTML = '<h3 style="color:#22c55e;">✅ تم إرسال طلبك بنجاح!</h3><p>يرجى إبقاء هذه الصفحة مفتوحة. سيتم تحديثها تلقائياً بمجرد موافقة الإدارة.</p>';
-                // Start polling status every 5 seconds
-                setInterval(checkStatus, 5000);
+            .then(async (response) => {
+                let data = {};
+                try { data = await response.json(); } catch (e) { data = {}; }
+
+                if (response.ok && data.telegram_sent) {
+                    contentBox.innerHTML = '<h3 style="color:#22c55e;">✅ تم إرسال طلبك بنجاح!</h3><p>يرجى إبقاء هذه الصفحة مفتوحة. سيتم تحديثها تلقائياً بمجرد موافقة الإدارة.</p>';
+                    statusTimer = setInterval(checkStatus, 5000);
+                } else if (response.status === 429) {
+                    contentBox.innerHTML = '<h3 style="color:#38bdf8;">⏳ طلبك قيد المراجعة بالفعل</h3><p>يرجى الانتظار لحين موافقة الإدارة.</p>';
+                    statusTimer = setInterval(checkStatus, 5000);
+                } else {
+                    loading.style.display = 'none';
+                    btn.disabled = false;
+                    contentBox.innerHTML = '<h3 style="color:#ef4444;">⚠️ تعذر إرسال الطلب</h3><p>' +
+                        (data.message || data.error || 'حدث خطأ غير متوقع. يرجى إعادة المحاولة أو التواصل مع الإدارة.') + '</p>';
+                }
             })
             .catch(error => {
-                loading.innerText = 'حدث خطأ. يرجى إعادة المحاولة.';
+                loading.style.display = 'none';
                 btn.disabled = false;
+                contentBox.innerHTML = '<h3 style="color:#ef4444;">⚠️ تعذر الاتصال بالخادم</h3><p>يرجى إعادة المحاولة.</p>';
             });
         }
 
         function checkStatus() {
             fetch('/api/v1/security/ztna-status/')
-            .then(response => {
-                if(response.ok) {
+            .then(response => response.ok ? response.json() : null)
+            .then(data => {
+                if (!data) return;
+                if (data.status === 'approved') {
                     window.location.reload(); // Reload page when approved
+                } else if (data.status === 'rejected') {
+                    clearInterval(statusTimer);
+                    document.getElementById('content-box').innerHTML =
+                        '<h3 style="color:#ef4444;">❌ تم رفض طلبك</h3><p>تم حظر هذا الجهاز من قبل الإدارة. تواصل مع الإدارة لمعرفة السبب.</p>';
                 }
-            });
+            })
+            .catch(() => {});
         }
 
         function getCookie(name) {

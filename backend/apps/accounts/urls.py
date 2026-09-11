@@ -14,10 +14,12 @@ PasswordResetRequestView ,PasswordResetConfirmView ,
 GrantPermissionView ,RevokePermissionView ,
 DeleteAccountView ,
 )
+from apps .accounts .permissions_api import RolePermissionViewSet
 
 router =DefaultRouter ()
 router .register (r'users',UserViewSet ,basename ='user')
 router .register (r'biometric-profiles',BiometricProfileViewSet ,basename ='biometric-profile')
+router .register (r'permissions',RolePermissionViewSet ,basename ='role-permissions')
 
 urlpatterns =[
 path ('',include (router .urls )),

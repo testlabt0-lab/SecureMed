@@ -360,10 +360,14 @@ class CheckDeviceView(APIView):
     """
     Pre-flight device authorization check.
 
-    Three outcomes are conveyed via a `state` field so clients can render the
+    Outcomes are conveyed via a `state` field so clients can render the
     right message without pattern-matching on the localized `detail`:
 
-    * `authorized` — the fingerprint matches a trusted DeviceRegistry row.
+    * `authorized` — the fingerprint matches a trusted DeviceRegistry row
+                      holding a valid device license (ترخيص فعّال).
+    * `unlicensed` — the device is trusted but its license is revoked,
+                      suspended or expired: شاشة القفل تبقى ظاهرة. No
+                      blacklist entry — إعادة الترخيص ترفع القفل فوراً.
     * `blocked`   — the fingerprint is on the BlockedDevice list (WAF still
                     enforces this independently; this answer is purely UX).
     * `pending`   — a DeviceRegistry row exists but is not yet trusted. The
@@ -382,6 +386,7 @@ class CheckDeviceView(APIView):
     # pattern-match the localized `detail` text.
     STATE_CODES = {
         'authorized': 'AUTHORIZED',
+        'unlicensed': 'DEVICE_UNLICENSED',
         'blocked': 'DEVICE_BLOCKED',
         'pending': 'PENDING_DEVICE',
         'unknown': 'DEVICE_UNKNOWN',
@@ -434,7 +439,51 @@ class CheckDeviceView(APIView):
 
         if device is not None:
             if device.is_trusted:
-                return Response(self._state('authorized', True, 'الجهاز مصرح'))
+                # License gate (متطلب د. مجد): الثقة وحدها لا ترفع شاشة
+                # القفل — الجهاز يحتاج ترخيصاً فعّالاً. الأجهزة الموثوقة
+                # السابقة تُرخَّص تلقائياً مرة واحدة (lazy provisioning)
+                # ثم يصبح الإلغاء قرار إدارة من تلجرام أو اللوحة.
+                from apps.security import licensing
+                license_obj = licensing.ensure_device_license(device)
+                if license_obj is not None and license_obj.is_valid:
+                    return Response(self._state(
+                        'authorized', True, 'الجهاز مصرح ومرخص',
+                        licensed=True,
+                        license_status=license_obj.effective_status,
+                        license_expires_at=(
+                            license_obj.expires_at.isoformat()
+                            if license_obj.expires_at else None
+                        ),
+                    ))
+                # Trusted-but-unlicensed: lock, don't blacklist. Audited so
+                # the admin sees repeated denial attempts in the audit trail
+                # (throttled upstream to 10/min per fingerprint).
+                log_security_event(
+                    user=device.user,
+                    event_type='DEVICE_UNLICENSED_ACCESS',
+                    request=request,
+                    details={
+                        'device_id': str(device.id),
+                        'device_fingerprint': fingerprint,
+                        'mac_address': mac_address,
+                        'license_status': (
+                            license_obj.effective_status if license_obj else 'MISSING'
+                        ),
+                    },
+                    severity='WARNING',
+                )
+                status_label = (
+                    license_obj.effective_status if license_obj else 'غير موجود'
+                )
+                return Response(self._state(
+                    'unlicensed', False,
+                    f'الجهاز غير مرخص (حالة الترخيص: {status_label}). '
+                    f'يرجى التواصل مع الإدارة لتفعيل الترخيص.',
+                    licensed=False,
+                    license_status=(
+                        license_obj.effective_status if license_obj else 'MISSING'
+                    ),
+                ), status=status.HTTP_403_FORBIDDEN)
             return Response(self._state('pending', False,
                                         'الجهاز غير مصرح، بانتظار موافقة الإدارة'),
                             status=status.HTTP_403_FORBIDDEN)
@@ -540,6 +589,12 @@ def _deactivate_device(device, request, via, block=True, notify_owner=True):
     """
     device.is_trusted = False
     device.save(update_fields=['is_trusted'])
+
+    # سحب الترخيص مع إلغاء التفعيل — القاعدة الموحدة (متطلب د. مجد):
+    # جهاز غير مفعّل لا يبقى مرخصاً. الإشعار المخصص للترخيص مكتوم لأن
+    # إشعار إلغاء التفعيل أدناه يكفي، وتدقيق الترخيص يبقى مسجلاً.
+    from apps.security import licensing
+    licensing.deactivate_license(device, via=via, request=request, notify_owner=False)
 
     from apps.security.models import BlockedDevice
     if block:
@@ -774,6 +829,7 @@ class TelegramWebhookView(APIView):
                     fingerprint = req_data['fingerprint']
                     client_ip = req_data['ip']
                     cache.set(f'ztna_approved_{fingerprint}_{client_ip}', True, timeout=None)
+                    cache.delete(f'ztna_pending_{req_id}')
                     answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
@@ -796,6 +852,7 @@ class TelegramWebhookView(APIView):
                     )
                     cache.set(f'waf_device_blacklist:{fingerprint}', True, timeout=None)
                     cache.set(f'waf_blacklist:{client_ip}', True, timeout=None)
+                    cache.delete(f'ztna_pending_{req_id}')
                     answer_callback_query(callback_id, 'تم حظر الجهاز والشبكة نهائياً')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
@@ -816,22 +873,48 @@ import uuid
 
 class ZTNARequestView(APIView):
     permission_classes = [permissions.AllowAny]
+    # Deliberately no DRF throttles: the default AnonRateThrottle (20/hour)
+    # keys on REMOTE_ADDR, which behind Render's proxy is one shared address
+    # for every visitor — the status poller alone burns the whole bucket in
+    # about two minutes and every later consent click 429s silently. The
+    # per-fingerprint cap below is the anti-spam control instead.
+    authentication_classes = []
+    throttle_classes = []
+
+    RATE_LIMIT = 3
+    RATE_WINDOW = 600
 
     def post(self, request):
+        from apps.core.net import get_client_ip
+
         fingerprint = request.data.get('fingerprint') or request.COOKIES.get('ztna_device_id')
-        ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
-        if ip and ',' in ip:
-            ip = ip.split(',')[0].strip()
-            
+        # The approval key the middleware checks is built from
+        # get_client_ip(), so the pending record must carry the same
+        # resolution — a raw X-Forwarded-For leftmost value never matches and
+        # a Telegram "allow" would unlock nothing.
+        ip = get_client_ip(request)
+
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
-            
+
+        rate_key = f'ztna_req_rate:{fingerprint}:{ip}'
+        recent = cache.get(rate_key, 0) + 1
+        cache.set(rate_key, recent, timeout=self.RATE_WINDOW)
+        if recent > self.RATE_LIMIT:
+            return Response(
+                {'error': 'تم إرسال طلبك مسبقاً. يرجى انتظار موافقة الإدارة.'},
+                status=429,
+            )
+
         req_id = str(uuid.uuid4())
         cache.set(f'ztna_pending_{req_id}', {'fingerprint': fingerprint, 'ip': ip}, timeout=3600)
-        
-        # Send to telegram
-        bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
-        chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', None)
+
+        # The result must be honest: a visitor told "sent" while Telegram was
+        # never configured waits for a message that never arrives.
+        telegram_sent = False
+        telegram_error = ''
+        bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', '')
+        chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', '')
         if bot_token and chat_id:
             import requests
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -847,24 +930,54 @@ class ZTNARequestView(APIView):
                 }
             }
             try:
-                requests.post(url, json=payload, timeout=5)
+                tg_response = requests.post(url, json=payload, timeout=5)
+                telegram_sent = tg_response.status_code == 200
+                if not telegram_sent:
+                    telegram_error = f'telegram_http_{tg_response.status_code}'
+                    logger.error(
+                        f"ZTNA telegram send failed: {tg_response.status_code} "
+                        f"{tg_response.text[:200]}"
+                    )
             except Exception as e:
+                telegram_error = 'telegram_unreachable'
                 logger.error(f"Error sending ZTNA request to telegram: {e}")
-                
-        return Response({'message': 'Request sent to admin', 'req_id': req_id})
+        else:
+            telegram_error = 'telegram_not_configured'
+            logger.error(
+                "ZTNA request dropped: TELEGRAM_BOT_TOKEN / "
+                "TELEGRAM_ADMIN_CHAT_ID not configured"
+            )
+
+        message = (
+            'تم إرسال طلبك للإدارة. يرجى إبقاء الصفحة مفتوحة لحين الموافقة.'
+            if telegram_sent else
+            'تعذر إرسال الطلب للإدارة حالياً. يرجى المحاولة لاحقاً أو التواصل مع الإدارة.'
+        )
+        body = {
+            'message': message,
+            'req_id': req_id,
+            'telegram_sent': telegram_sent,
+        }
+        if telegram_error:
+            body['telegram_error'] = telegram_error
+        return Response(body)
 
 class ZTNAStatusView(APIView):
     permission_classes = [permissions.AllowAny]
+    # Polled every few seconds by the waiting consent page — the shared
+    # anonymous throttle would starve it (see ZTNARequestView).
+    authentication_classes = []
+    throttle_classes = []
 
     def get(self, request):
+        from apps.core.net import get_client_ip
+
         fingerprint = request.query_params.get('fingerprint') or request.COOKIES.get('ztna_device_id')
-        ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
-        if ip and ',' in ip:
-            ip = ip.split(',')[0].strip()
-            
+        ip = get_client_ip(request)
+
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
-            
+
         is_approved = cache.get(f'ztna_approved_{fingerprint}_{ip}')
         if is_approved:
             return Response({'status': 'approved'})

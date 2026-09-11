@@ -528,6 +528,9 @@ class ZeroTrustConsentFirewallMiddleware:
         try:
             html = render_to_string('ztna_consent.html')
             response = HttpResponse(html, status=403)
+            # A cached consent wall would keep covering the site after the
+            # admin has already approved this device.
+            response['Cache-Control'] = 'no-store'
             if is_new_cookie:
                 response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
             return response

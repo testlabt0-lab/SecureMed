@@ -277,3 +277,44 @@ class BiometricChallenge (models .Model ):
         self .used =True
         self .save (update_fields =['used'])
 
+
+class RolePermission (models .Model ):
+    """تجاوز ديناميكي لصلاحية دور — إدارة الصلاحيات (متطلب د. مجد).
+
+    الأدوار الثابتة (``User.Role``) تحدد الافتراضي في
+    ``apps.accounts.permissions.DEFAULT_ROLE_PERMISSIONS``، وهذا الموديل
+    يسمح للإدارة بتعديل حكم أي دور على أي صلاحية من الواجهة دون نشر كود:
+    سجل موجود هنا يسري فوراً، وغيابه يعني تطبيق الافتراضي.
+
+    لا يمكن قصر SUPER_ADMIN على صلاحية: ``effective_allows`` تعيده دائماً
+    مفعلاً حتى لو سُجل تجاوز ضده — منع الإدارة من إغلاقها لنفسها.
+    """
+
+    id =models .UUIDField (primary_key =True ,default =uuid .uuid4 ,editable =False )
+    role =models .CharField (
+    _ ('الدور'),max_length =20 ,choices =User .Role .choices ,db_index =True
+    )
+    permission =models .CharField (_ ('الصلاحية'),max_length =100 ,db_index =True )
+    allowed =models .BooleanField (_ ('مسموح'),default =True )
+    updated_by =models .ForeignKey (
+    User ,on_delete =models .SET_NULL ,null =True ,blank =True ,
+    related_name ='role_permission_changes',verbose_name =_ ('آخر تعديل بواسطة')
+    )
+    created_at =models .DateTimeField (auto_now_add =True )
+    updated_at =models .DateTimeField (auto_now =True )
+
+    class Meta :
+        verbose_name =_ ('صلاحية دور')
+        verbose_name_plural =_ ('صلاحيات الأدوار')
+        unique_together =['role','permission']
+        ordering =['role','permission']
+
+    def __str__ (self ):
+        state ='مسموح'if self .allowed else 'ممنوع'
+        return f'{self .role }: {self .permission } ({state })'
+
+    def clean (self ):
+        from apps .accounts .permissions import _PERMISSIONS_BY_CODE
+        if self .permission not in _PERMISSIONS_BY_CODE :
+            raise ValidationError (_ ('صلاحية غير معروفة في الكتالوج'))
+

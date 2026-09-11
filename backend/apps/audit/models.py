@@ -121,6 +121,17 @@ class AuditLog (models .Model ):
         FILE_UPLOADED ='FILE_UPLOADED',_ ('رفع ملف')
         FILE_DOWNLOADED ='FILE_DOWNLOADED',_ ('تحميل ملف')
 
+        # Device licensing (ترخيص الأجهزة — شاشة القفل)
+        DEVICE_LICENSE_ISSUED ='DEVICE_LICENSE_ISSUED',_ ('إصدار ترخيص جهاز')
+        DEVICE_LICENSE_ACTIVATED ='DEVICE_LICENSE_ACTIVATED',_ ('تفعيل ترخيص جهاز')
+        DEVICE_LICENSE_DEACTIVATED ='DEVICE_LICENSE_DEACTIVATED',_ ('إلغاء ترخيص جهاز')
+        DEVICE_LICENSE_SUSPENDED ='DEVICE_LICENSE_SUSPENDED',_ ('تعليق ترخيص جهاز')
+        DEVICE_UNLICENSED_ACCESS ='DEVICE_UNLICENSED_ACCESS',_ ('محاولة دخول من جهاز غير مرخص')
+
+        # Dynamic role permissions (إدارة الصلاحيات)
+        ROLE_PERMISSION_CHANGED ='ROLE_PERMISSION_CHANGED',_ ('تغيير صلاحية دور')
+        ROLE_PERMISSION_RESET ='ROLE_PERMISSION_RESET',_ ('إعادة صلاحية دور للوضع الافتراضي')
+
         # Generic Data Mutations
         DATA_CREATED ='DATA_CREATED',_ ('إنشاء بيانات')
         DATA_MODIFIED ='DATA_MODIFIED',_ ('تعديل بيانات')

@@ -12,9 +12,11 @@ from apps.security.stats_views import DashboardStatsView, ActivityFeedView
 from apps.security.blocklist_views import (
     DeviceRegistryViewSet, BlockedDeviceViewSet, BlockedIPViewSet, LoginHistoryViewSet
 )
+from apps.security.license_views import DeviceLicenseViewSet
 
 router = DefaultRouter()
 router.register(r'devices', DeviceRegistryViewSet, basename='devices')
+router.register(r'licenses', DeviceLicenseViewSet, basename='licenses')
 router.register(r'blocked-devices', BlockedDeviceViewSet, basename='blocked-devices')
 router.register(r'blocked-ips', BlockedIPViewSet, basename='blocked-ips')
 router.register(r'login-history', LoginHistoryViewSet, basename='login-history')

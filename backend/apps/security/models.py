@@ -160,3 +160,77 @@ class DeviceVerificationOTP(models.Model):
         from django.utils import timezone
         import datetime
         return not self.is_used and (timezone.now() - self.created_at) < datetime.timedelta(minutes=10)
+
+
+class DeviceLicense(models.Model):
+    """ترخيص الجهاز — the lock screen only opens for licensed devices.
+
+    متطلب د. مجد: شاشة القفل لا تُرفع إلا عن الأجهزة المرخصة، ويتحقق الترخيص
+    من عنوان MAC **و** بصمة الجهاز معاً، مع إدارة التفعيل/إلغاء التفعيل من
+    تلجرام. الاعتماد فقط على قيمة is_trusted كان يعني أن "تفعيل" الجهاز
+    لا يمكن إلغاؤه إلا بحظر كامل؛ الترخيص يفصل القرارين: الجهاز موثوق لكنه
+    غير مرخص → شاشة القفل تبقى ظاهرة دون قائمة سوداء.
+
+    ``expires_at = null`` يعني ترخيصاً دائماً؛ غير ذلك ينتهي تلقائياً في
+    التاريخ المحدد (ترخيص مؤقت لفترة تجريبية مثلاً).
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = 'ACTIVE', _('مفعّل')
+        SUSPENDED = 'SUSPENDED', _('معلّق مؤقتاً')
+        REVOKED = 'REVOKED', _('ملغى')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Public license key shown to admins so a device can be managed by key
+    # without exposing the row UUID. Rotated whenever a revoked license is
+    # re-issued so a revoked key cannot be replayed.
+    license_key = models.CharField(_('مفتاح الترخيص'), max_length=64, unique=True, editable=False)
+    device = models.OneToOneField(
+        DeviceRegistry,
+        on_delete=models.CASCADE,
+        related_name='license',
+        verbose_name=_('الجهاز'),
+    )
+    status = models.CharField(
+        _('الحالة'), max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True,
+    )
+    issued_by = models.CharField(
+        _('صادر بواسطة'), max_length=32, default='system',
+        help_text=_('telegram / dashboard / system'),
+    )
+    issued_at = models.DateTimeField(auto_now_add=True)
+    activated_at = models.DateTimeField(_('وقت التفعيل'), null=True, blank=True)
+    deactivated_at = models.DateTimeField(_('وقت إلغاء التفعيل'), null=True, blank=True)
+    expires_at = models.DateTimeField(_('ينتهي في'), null=True, blank=True)
+    last_verified_at = models.DateTimeField(_('آخر تحقق'), null=True, blank=True)
+    notes = models.CharField(_('ملاحظات'), max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = _('ترخيص جهاز')
+        verbose_name_plural = _('تراخيص الأجهزة')
+        ordering = ['-issued_at']
+
+    def __str__(self):
+        return f"{self.license_key} — {self.device}"
+
+    @property
+    def is_expired(self):
+        return self.expires_at is not None and self.expires_at <= timezone.now()
+
+    @property
+    def effective_status(self):
+        """ACTIVE that has passed its expiry reads as EXPIRED everywhere."""
+        if self.status == self.Status.ACTIVE and self.is_expired:
+            return 'EXPIRED'
+        return self.status
+
+    @property
+    def is_valid(self):
+        return (
+            self.status == self.Status.ACTIVE
+            and (self.expires_at is None or self.expires_at > timezone.now())
+        )
+
+    def mark_verified(self):
+        self.last_verified_at = timezone.now()
+        self.save(update_fields=['last_verified_at'])

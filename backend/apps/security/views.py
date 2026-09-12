@@ -823,6 +823,7 @@ class TelegramWebhookView(APIView):
             elif data.startswith('ztna_approve_'):
                 from apps.security.models import ZTNAPendingApproval
                 from django.utils import timezone
+                from django.core.exceptions import ValidationError
                 req_id = data[len('ztna_approve_'):]
                 try:
                     req = ZTNAPendingApproval.objects.get(id=req_id)
@@ -833,11 +834,12 @@ class TelegramWebhookView(APIView):
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
                                           f"{original_text}\n\n✅ <b>تمت الموافقة وتم فك الحظر عن الشبكة</b>")
-                except ZTNAPendingApproval.DoesNotExist:
+                except (ZTNAPendingApproval.DoesNotExist, ValidationError):
                     answer_callback_query(callback_id, 'الطلب غير موجود أو محذوف', show_alert=True)
 
             elif data.startswith('ztna_reject_'):
                 from apps.security.models import ZTNAPendingApproval
+                from django.core.exceptions import ValidationError
                 req_id = data[len('ztna_reject_'):]
                 try:
                     req = ZTNAPendingApproval.objects.get(id=req_id)
@@ -853,7 +855,7 @@ class TelegramWebhookView(APIView):
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
                                           f"{original_text}\n\n❌ <b>تم حظر الجهاز نهائياً</b>")
-                except ZTNAPendingApproval.DoesNotExist:
+                except (ZTNAPendingApproval.DoesNotExist, ValidationError):
                     answer_callback_query(callback_id, 'الطلب غير موجود أو محذوف', show_alert=True)
             else:
                 answer_callback_query(callback_id, 'إجراء غير معروف', show_alert=True)

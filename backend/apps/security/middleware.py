@@ -501,7 +501,11 @@ class ZeroTrustConsentFirewallMiddleware:
 
         # 2. Check if approved in Database
         from apps.security.models import ZTNAPendingApproval
-        is_approved = ZTNAPendingApproval.objects.filter(device_fingerprint=fingerprint, is_approved=True).exists()
+        try:
+            is_approved = ZTNAPendingApproval.objects.filter(device_fingerprint=fingerprint, is_approved=True).exists()
+        except Exception as e:
+            logger.error(f"ZTNA DB Check Failed: {e}")
+            is_approved = False
 
         if is_approved:
             response = self.get_response(request)

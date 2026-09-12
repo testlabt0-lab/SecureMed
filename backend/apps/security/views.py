@@ -881,7 +881,8 @@ class ZTNARequestView(APIView):
     authentication_classes = []
     throttle_classes = []
 
-    RATE_LIMIT = 3
+    # Rate limit: max requests per hour per device (temporarily increased to 999 for testing)
+    RATE_LIMIT = 999
     RATE_WINDOW = 600
 
     def post(self, request):

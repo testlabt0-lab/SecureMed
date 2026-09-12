@@ -86,44 +86,60 @@ class WAFMiddleware :
         }
 
     def __call__ (self ,request ):
-    # Skip WAF for admin and health check
-        if request .path .startswith ('/admin/')or request .path =='/health/':
+        # Skip WAF for admin, health check, and ZTNA workflow endpoints
+        if (request .path .startswith ('/admin/') or request .path =='/health/' or request.path.startswith('/health/') or
+            request .path in ['/api/v1/security/ztna-request/', '/api/v1/security/ztna-status/', '/api/v1/security/telegram-webhook/']):
             return self .get_response (request )
 
         client_ip =self ._get_client_ip (request )
         device_fingerprint =request .META .get ('HTTP_X_DEVICE_FINGERPRINT','')
 
-        # 1. Check IP Blacklist (cache first, then DB)
-        blacklist_key =f'waf_blacklist:{client_ip }'
+        # Check if explicitly approved via ZTNA
+        from apps.security.models import ZTNAPendingApproval
+        cookie_fp = request.COOKIES.get('ztna_device_id')
+        fps_to_check = [fp for fp in [cookie_fp, device_fingerprint] if fp]
+        is_ztna_whitelisted = False
         try:
-            if cache .get (blacklist_key ):
-                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
-        except Exception as e:
-            logger.error(f"WAF_CACHE_READ_FAILED | error={e}")
+            is_ztna_whitelisted = ZTNAPendingApproval.objects.filter(
+                device_fingerprint__in=fps_to_check,
+                ip_address=client_ip,
+                is_approved=True
+            ).exists() or any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
+        except Exception:
+            pass
 
-        try :
-            from apps .security .models import BlockedIP ,BlockedDevice
-            # ``enforceable()`` (not ``is_active=True``) so a block with an
-            # ``expires_at`` in the past stops being enforced when it expires.
-            blocked_ip =BlockedIP .objects .enforceable ().filter (ip_address =client_ip ).first ()
-            if blocked_ip is not None :
-                cache .set (blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_ip ))
-                return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
+        if not is_ztna_whitelisted:
+            # 1. Check IP Blacklist (cache first, then DB)
+            blacklist_key =f'waf_blacklist:{client_ip }'
+            try:
+                if cache .get (blacklist_key ):
+                    return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
+            except Exception as e:
+                logger.error(f"WAF_CACHE_READ_FAILED | error={e}")
 
-            if device_fingerprint :
-                dev_blacklist_key =f'waf_device_blacklist:{device_fingerprint }'
-                if cache .get (dev_blacklist_key ):
-                    return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
-                blocked_device =(
-                BlockedDevice .objects .enforceable ()
-                .filter (device_fingerprint =device_fingerprint )
-                .first ()
-                )
-                if blocked_device is not None :
-                    cache .set (dev_blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_device ))
-                    return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
-        except Exception as e :
-            logger.error(f"WAF_BLOCKLIST_CHECK_FAILED | error={e}")
+            try :
+                from apps .security .models import BlockedIP ,BlockedDevice
+                # ``enforceable()`` (not ``is_active=True``) so a block with an
+                # ``expires_at`` in the past stops being enforced when it expires.
+                blocked_ip =BlockedIP .objects .enforceable ().filter (ip_address =client_ip ).first ()
+                if blocked_ip is not None :
+                    cache .set (blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_ip ))
+                    return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
+
+                if device_fingerprint :
+                    dev_blacklist_key =f'waf_device_blacklist:{device_fingerprint }'
+                    if cache .get (dev_blacklist_key ):
+                        return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
+                    blocked_device =(
+                    BlockedDevice .objects .enforceable ()
+                    .filter (device_fingerprint =device_fingerprint )
+                    .first ()
+                    )
+                    if blocked_device is not None :
+                        cache .set (dev_blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_device ))
+                        return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
+            except Exception as e :
+                logger.error(f"WAF_BLOCKLIST_CHECK_FAILED | error={e}")
 
             # Check request for attacks
         attack_detected =self ._detect_attacks (request )

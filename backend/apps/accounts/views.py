@@ -170,8 +170,30 @@ class LoginView (APIView ):
         os_info = request.META.get('HTTP_X_OS_INFO', '')
         browser_info = request.META.get('HTTP_X_BROWSER_INFO', '')
         
+        # Check ZTNA approval status for this IP/device
+        cookie_fp = request.COOKIES.get('ztna_device_id')
+        fps_to_check = [fp for fp in [cookie_fp, fingerprint] if fp]
+        ztna_approved = False
+        try:
+            from apps.security.models import ZTNAPendingApproval
+            ztna_approved = ZTNAPendingApproval.objects.filter(
+                device_fingerprint__in=fps_to_check,
+                ip_address=ip_address,
+                is_approved=True
+            ).exists()
+        except Exception:
+            pass
+        if not ztna_approved:
+            ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
+
         # Check if currently blocked
-        if fingerprint:
+        if ztna_approved:
+            for fp in fps_to_check:
+                cache.delete(f"blocked_device_{fp}")
+                cache.delete(f"failed_login_device_{fp}")
+                cache.delete(f"failed_login_level_{fp}")
+                cache.delete(f"waf_device_blacklist:{fp}")
+        elif fingerprint:
             block_key = f"blocked_device_{fingerprint}"
             if cache.get(block_key):
                 # A Response, not ValidationError: DRF would wrap the dict

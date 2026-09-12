@@ -446,6 +446,14 @@ class CheckDeviceView(APIView):
         if not ztna_approved:
             ztna_approved = any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
 
+        if ztna_approved:
+            BlockedDevice.objects.filter(device_fingerprint__in=fps_to_check).delete()
+            for fp in fps_to_check:
+                cache.delete(f'blocked_device_{fp}')
+                cache.delete(f'failed_login_device_{fp}')
+                cache.delete(f'failed_login_level_{fp}')
+                cache.delete(f'waf_device_blacklist:{fp}')
+
         if BlockedDevice.objects.enforceable().filter(device_fingerprint=fingerprint).exists():
             return Response(self._state('blocked', False, 'هذا الجهاز محظور'),
                             status=status.HTTP_403_FORBIDDEN)
@@ -873,7 +881,7 @@ class TelegramWebhookView(APIView):
                                           f"{original_text}\n\n❌ <b>تم حظر الجهاز</b>")
 
             elif data.startswith('ztna_approve_'):
-                from apps.security.models import ZTNAPendingApproval
+                from apps.security.models import ZTNAPendingApproval, BlockedDevice, BlockedIP, DeviceRegistry
                 from django.utils import timezone
                 from django.core.exceptions import ValidationError
                 req_id = data[len('ztna_approve_'):]
@@ -884,6 +892,28 @@ class TelegramWebhookView(APIView):
                     req.save(update_fields=['is_approved', 'approved_at'])
                     if req.ip_address:
                         cache.set(f'ztna_approved_{req.device_fingerprint}_{req.ip_address}', True, timeout=86400 * 30)
+
+                    # Explicitly unblock device and IP in DB and cache
+                    BlockedDevice.objects.filter(device_fingerprint=req.device_fingerprint).delete()
+                    if req.ip_address:
+                        BlockedIP.objects.filter(ip_address=req.ip_address).delete()
+                        cache.delete(f'waf_blacklist:{req.ip_address}')
+                        cache.delete(f'waf_blocked:{req.ip_address}')
+                    cache.delete(f'blocked_device_{req.device_fingerprint}')
+                    cache.delete(f'failed_login_device_{req.device_fingerprint}')
+                    cache.delete(f'failed_login_level_{req.device_fingerprint}')
+                    cache.delete(f'waf_device_blacklist:{req.device_fingerprint}')
+
+                    # Trust the device if registered and ensure license
+                    dev = DeviceRegistry.objects.filter(device_fingerprint=req.device_fingerprint).first()
+                    if dev:
+                        dev.is_trusted = True
+                        if req.ip_address:
+                            dev.last_ip_address = req.ip_address
+                        dev.save(update_fields=['is_trusted', 'last_ip_address'])
+                        from apps.security import licensing
+                        licensing.ensure_device_license(dev)
+
                     answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
@@ -974,13 +1004,13 @@ class ZTNARequestView(APIView):
         from apps.security.netinfo import MAC_SOURCE_LABELS, peer_profile
         
         peer = peer_profile(request)
-        mac_address = get_mac_address(ip)
+        mac_address = get_mac_address(ip) or peer.get('mac', '') or request.data.get('mac_address', '')
         
         approval = ZTNAPendingApproval.objects.create(
             device_fingerprint=fingerprint,
             ip_address=ip,
             mac_address=mac_address,
-            os_info=peer.get('platform', ''),
+            os_info=peer.get('platform', '') or request.data.get('os_info', ''),
             browser_info=peer.get('user_agent', '')
         )
         req_id = str(approval.id)

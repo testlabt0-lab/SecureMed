@@ -70,7 +70,14 @@ api.interceptors.response.use(
       error.response?.status === 403 &&
       BLOCK_CODES.includes(errorCode as any)
     ) {
-      window.location.href = '/blocked';
+      if (
+        !window.location.pathname.startsWith('/login') &&
+        !window.location.pathname.startsWith('/blocked') &&
+        !originalRequest?.url?.includes('/auth/login') &&
+        !originalRequest?.url?.includes('/security/check-device')
+      ) {
+        window.location.href = '/blocked';
+      }
       return Promise.reject(error);
     }
 

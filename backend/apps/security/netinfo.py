@@ -174,6 +174,6 @@ def peer_profile(request) -> dict:
         'mac_source': mac_source,
         'mac_note': MAC_SOURCE_LABELS.get(mac_source, ''),
         'lan_hint': ', '.join(server_lan_ips()) if is_loopback else '',
-        'platform': (request.META.get('HTTP_SEC_CH_UA_PLATFORM') or '').strip().strip('"'),
+        'platform': (request.META.get('HTTP_X_OS_INFO') or request.META.get('HTTP_SEC_CH_UA_PLATFORM') or '').strip().strip('"'),
         'user_agent': request.META.get('HTTP_USER_AGENT', ''),
     }

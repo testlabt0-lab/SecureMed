@@ -287,6 +287,28 @@ class LoginView (APIView ):
         # Enforce Dr. Majed's requirement: No login from unauthorized devices.
         # The setting exists so a deployment can opt out for testing without
         # deleting the code path; the default is True (deny).
+        if device and not device.is_trusted:
+            from apps.security.models import ZTNAPendingApproval
+            cookie_fp = request.COOKIES.get('ztna_device_id')
+            fps_to_check = [fp for fp in [cookie_fp, fingerprint] if fp]
+            ztna_approved = False
+            try:
+                ztna_approved = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    ip_address=ip_address,
+                    is_approved=True
+                ).exists()
+            except Exception:
+                pass
+            if not ztna_approved:
+                ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
+
+            if ztna_approved or user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
+                device.is_trusted = True
+                device.save(update_fields=['is_trusted'])
+                from apps.security import licensing
+                licensing.ensure_device_license(device)
+
         if getattr(settings, 'ENFORCE_DEVICE_AUTHORIZATION', True) and device and not device.is_trusted:
             log_security_event(
                 user=user,
@@ -299,7 +321,7 @@ class LoginView (APIView ):
                 {'detail': 'الجهاز غير مصرح بالدخول. يرجى التواصل مع الإدارة للتفعيل.',
                  'authorized': False, 'code': 'PENDING_DEVICE'},
                 status=status.HTTP_403_FORBIDDEN
-        )
+            )
 
         # بوابة الترخيص: جهاز موثوق بلا ترخيص فعّال لا يحصل على رموز دخول
         # (متطلب د. مجد — نفس قاعدة check-device).

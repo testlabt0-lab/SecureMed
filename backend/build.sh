@@ -2,6 +2,12 @@
 # exit on error
 set -o errexit
 
+echo "Building SecureMed Frontend..."
+cd ../frontend
+npm install
+npm run build
+cd ../backend
+
 echo "Building SecureMed Backend for Render..."
 pip install -r requirements.txt
 

@@ -15,30 +15,42 @@ from django.conf import settings
 
 UNKNOWN_IP = '0.0.0.0'
 
+import ipaddress
+
+def _is_internal_or_private(ip_str):
+    try:
+        ip = ipaddress.ip_address(ip_str.strip())
+        return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
+    except (ValueError, AttributeError):
+        return False
+
 
 def get_client_ip(request):
-    """Return the caller's IP, honouring proxy headers only when configured to."""
-    remote_addr = request.META.get('REMOTE_ADDR') or UNKNOWN_IP
-    
-    # If not trusting X-Forwarded-For generally, we can still trust it if running locally
-    # behind ngrok/proxy (where REMOTE_ADDR is 127.0.0.1 and DEBUG is True)
-    trust_x_forwarded = getattr(settings, 'TRUST_X_FORWARDED_FOR', False)
-    if not trust_x_forwarded and settings.DEBUG and remote_addr == '127.0.0.1':
-        trust_x_forwarded = True
+    """Return the real client's public IP, properly handling reverse proxies (Render, Cloudflare, Nginx)."""
+    # 1. Cloudflare connecting IP
+    cf_ip = (request.META.get('HTTP_CF_CONNECTING_IP') or '').strip()
+    if cf_ip and not _is_internal_or_private(cf_ip):
+        return cf_ip
 
-    if not trust_x_forwarded:
-        return remote_addr
-
+    # 2. X-Forwarded-For header (standard for Render and most cloud providers)
     forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-    chain = [part.strip() for part in forwarded.split(',') if part.strip()]
-    if not chain:
-        return request.META.get('HTTP_X_REAL_IP', '').strip() or remote_addr
+    if forwarded:
+        chain = [part.strip() for part in forwarded.split(',') if part.strip()]
+        # First non-private IP in the chain is the actual client IP
+        for candidate in chain:
+            if candidate and not _is_internal_or_private(candidate):
+                return candidate
+        if chain:
+            return chain[0]
 
-    # With N trusted proxies in front of us, chain[-N] is the address the
-    # outermost trusted proxy observed. Anything further left is client-supplied.
-    depth = max(1, int(getattr(settings, 'TRUSTED_PROXY_COUNT', 1)))
-    index = max(0, len(chain) - depth)
-    return chain[index]
+    # 3. X-Real-IP header
+    real_ip = (request.META.get('HTTP_X_REAL_IP') or '').strip()
+    if real_ip and not _is_internal_or_private(real_ip):
+        return real_ip
+
+    # 4. Fallback to REMOTE_ADDR
+    remote_addr = (request.META.get('REMOTE_ADDR') or UNKNOWN_IP).strip()
+    return remote_addr
 
 
 def get_mac_address(ip_address):

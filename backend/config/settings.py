@@ -278,6 +278,11 @@ DEFAULT_AUTO_FIELD ='django.db.models.BigAutoField'
 # Security requirement #1: Secure Cookie flags
 SESSION_COOKIE_SECURE =True 
 SESSION_COOKIE_HTTPONLY =True 
+
+# Reverse proxy (Render / Cloudflare) settings
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+TRUST_X_FORWARDED_FOR = True 
 SESSION_COOKIE_SAMESITE ='Strict'
 CSRF_COOKIE_SECURE =True 
 CSRF_COOKIE_HTTPONLY =True 

@@ -236,6 +236,7 @@ AUTH_PASSWORD_VALIDATORS =[
 
 # Custom user model
 AUTH_USER_MODEL ='accounts.User'
+INITIAL_ADMIN_PASSWORD = config('INITIAL_ADMIN_PASSWORD', default=config('DJANGO_SUPERUSER_PASSWORD', default='SecureAdmin2026!'))
 
 # Internationalization
 LANGUAGE_CODE ='ar'

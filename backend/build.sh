@@ -3,12 +3,12 @@
 set -o errexit
 
 echo "Building SecureMed Frontend..."
-cd ../frontend
+cd "$(dirname "$0")/../frontend"
 npm install
 npm run build
-cd ../backend
 
 echo "Building SecureMed Backend for Render..."
+cd ../backend
 pip install -r requirements.txt
 
 echo "Collecting static files..."

@@ -64,12 +64,21 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const errorCode = getErrorCode(error.response?.data);
 
     if (
       error.response?.status === 403 &&
-      BLOCK_CODES.includes(getErrorCode(error.response?.data) as any)
+      BLOCK_CODES.includes(errorCode as any)
     ) {
       window.location.href = '/blocked';
+      return Promise.reject(error);
+    }
+
+    if (
+      error.response?.status === 403 &&
+      (errorCode === 'ZTNA_BLOCKED' || String(error.response?.data?.error).includes('ZTNA'))
+    ) {
+      window.location.reload();
       return Promise.reject(error);
     }
 

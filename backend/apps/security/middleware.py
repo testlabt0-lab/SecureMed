@@ -488,66 +488,116 @@ class ZeroTrustConsentFirewallMiddleware:
 
         from apps.core.net import get_client_ip
         client_ip = get_client_ip(request)
-        
-        # 1. Get fingerprint from Header (Android) or Cookie (Browser)
-        fingerprint = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
-        is_new_cookie = False
-        
-        if not fingerprint:
-            fingerprint = request.COOKIES.get('ztna_device_id')
-            if not fingerprint:
-                fingerprint = str(uuid.uuid4())
-                is_new_cookie = True
 
-        # 2. Check if approved in Database
+        cookie_fp = request.COOKIES.get('ztna_device_id')
+        header_fp = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
+        is_new_cookie = False
+
+        if not cookie_fp:
+            cookie_fp = str(uuid.uuid4())
+            is_new_cookie = True
+
+        fps_to_check = [fp for fp in [cookie_fp, header_fp] if fp]
+
+        # 2. Check if approved in Database or Cache FOR THIS IP
+        # Zero-Trust Network Access: Approval is strictly bound to (Device Fingerprint + Network IP)
+        # If the network (IP address) changes, approval is automatically invalidated and a new request is required!
         from apps.security.models import ZTNAPendingApproval
+        is_approved = False
+        approved_fp = None
+
         try:
-            is_approved = ZTNAPendingApproval.objects.filter(device_fingerprint=fingerprint, is_approved=True).exists()
+            matching = ZTNAPendingApproval.objects.filter(
+                device_fingerprint__in=fps_to_check,
+                ip_address=client_ip,
+                is_approved=True
+            )
+            if matching.exists():
+                is_approved = True
+                approved_fp = matching.first().device_fingerprint
         except Exception as e:
             logger.error(f"ZTNA DB Check Failed: {e}")
             is_approved = False
 
+        # Fallback to cache
+        if not is_approved:
+            for fp in fps_to_check:
+                if cache.get(f'ztna_approved_{fp}_{client_ip}'):
+                    is_approved = True
+                    approved_fp = fp
+                    break
+
         if is_approved:
+            # Associate header_fp for this client_ip if cookie was approved so Axios calls match
+            if header_fp and header_fp != approved_fp:
+                cache.set(f'ztna_approved_{header_fp}_{client_ip}', True, timeout=86400 * 30)
+                try:
+                    from django.utils import timezone
+                    ZTNAPendingApproval.objects.get_or_create(
+                        device_fingerprint=header_fp,
+                        ip_address=client_ip,
+                        defaults={
+                            'is_approved': True,
+                            'approved_at': timezone.now(),
+                            'os_info': request.META.get('HTTP_X_OS_INFO', ''),
+                            'browser_info': request.META.get('HTTP_X_BROWSER_INFO', ''),
+                        }
+                    )
+                except Exception:
+                    pass
+
             response = self.get_response(request)
             if is_new_cookie:
-                response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
+                response.set_cookie('ztna_device_id', cookie_fp, max_age=60*60*24*365, httponly=True, samesite='Lax')
             return response
 
-        # 3. Not approved => Block
-        
-        # If it's an API request (from Android or Javascript), return JSON
+        # 3. Not approved for this IP / Network => Block
+        fingerprint = header_fp or cookie_fp
         if request.path.startswith('/api/'):
             response = JsonResponse({
-                'error': 'الوصول مرفوض. يجب طلب صلاحية من الإدارة.',
+                'error': 'الوصول مرفوض. تم رصد شبكة جديدة أو جهاز غير مصرح. يجب طلب صلاحية من الإدارة.',
                 'code': 'ZTNA_BLOCKED',
                 'fingerprint': fingerprint
             }, status=403)
             if is_new_cookie:
-                response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
+                response.set_cookie('ztna_device_id', cookie_fp, max_age=60*60*24*365, httponly=True, samesite='Lax')
             return response
 
-        # Otherwise, it's a browser requesting HTML. Render the Consent page.
-        # We must set the cookie so the subsequent API call to ztna-request has it.
+        # Otherwise, render the Consent page
         try:
-            # Check if there is already a recent pending request (last 1 hour)
-            from apps.security.models import ZTNAPendingApproval
             from django.utils import timezone
             from datetime import timedelta
-            
             one_hour_ago = timezone.now() - timedelta(hours=1)
-            is_pending = ZTNAPendingApproval.objects.filter(
-                device_fingerprint=fingerprint,
-                is_approved=False,
-                created_at__gte=one_hour_ago
-            ).exists()
-            
-            html = render_to_string('ztna_consent.html', {'is_pending': is_pending})
+            is_pending = False
+            try:
+                is_pending = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    ip_address=client_ip,
+                    is_approved=False,
+                    created_at__gte=one_hour_ago
+                ).exists()
+            except Exception:
+                is_pending = any(cache.get(f'ztna_pending_{fp}_{client_ip}') for fp in fps_to_check)
+
+            # Check if this device was previously approved on another IP (Network change detection!)
+            is_network_changed = False
+            try:
+                is_network_changed = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    is_approved=True
+                ).exclude(ip_address=client_ip).exists()
+            except Exception:
+                pass
+
+            html = render_to_string('ztna_consent.html', {
+                'is_pending': is_pending,
+                'is_network_changed': is_network_changed,
+                'client_ip': client_ip
+            })
             response = HttpResponse(html, status=403)
-            # A cached consent wall would keep covering the site after the
-            # admin has already approved this device.
             response['Cache-Control'] = 'no-store'
             if is_new_cookie:
-                response.set_cookie('ztna_device_id', fingerprint, max_age=60*60*24*365, httponly=True, samesite='Lax')
+                response.set_cookie('ztna_device_id', cookie_fp, max_age=60*60*24*365, httponly=True, samesite='Lax')
             return response
         except Exception as e:
             logger.error(f"Failed to render ztna_consent.html: {e}")

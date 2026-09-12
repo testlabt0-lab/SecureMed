@@ -68,7 +68,10 @@ export default function Login() {
           // `state`/`code` are machine-readable (CheckDeviceView); matching on
           // them instead of the localized detail text.
           const state = err.response.data.state || err.response.data.code || '';
-          if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
+          if (state === 'network_changed' || state === 'ZTNA_BLOCKED') {
+            window.location.reload();
+            return;
+          } else if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
             setDeviceState('blocked');
           } else if (state === 'unlicensed' || state === 'DEVICE_UNLICENSED') {
             setDeviceState('unlicensed');
@@ -138,7 +141,10 @@ export default function Login() {
           if (err.response?.status === 403) {
               const state = err.response.data.state || err.response.data.code || '';
               
-              if (state === 'unknown' || state === 'DEVICE_UNKNOWN') {
+              if (state === 'network_changed' || state === 'ZTNA_BLOCKED') {
+                  window.location.reload();
+                  return;
+              } else if (state === 'unknown' || state === 'DEVICE_UNKNOWN') {
                   setDeviceState('unknown');
                   toast.error(err.response.data.detail || 'البريد الإلكتروني غير مسجل في النظام');
               } else if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
@@ -193,7 +199,10 @@ export default function Login() {
           // `state`/`code` are machine-readable (CheckDeviceView); matching on
           // them instead of the localized detail text.
           const state = err.response.data.state || err.response.data.code || '';
-          if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
+          if (state === 'network_changed' || state === 'ZTNA_BLOCKED') {
+            window.location.reload();
+            return;
+          } else if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
             setDeviceState('blocked');
           } else if (state === 'unlicensed' || state === 'DEVICE_UNLICENSED') {
             setDeviceState('unlicensed');

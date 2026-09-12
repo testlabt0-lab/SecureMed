@@ -58,12 +58,31 @@
             font-size: 14px;
             color: #94a3b8;
         }
+        .network-alert {
+            background-color: rgba(180, 83, 9, 0.25);
+            border: 1px solid #f59e0b;
+            color: #fef3c7;
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 22px;
+            font-size: 14px;
+            text-align: right;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🛡️ جدار الحماية للثقة الصفرية (ZTNA)</h1>
         <div id="content-box">
+            {% if is_network_changed %}
+                <div class="network-alert">
+                    ⚠️ <strong>تم رصد تغيير في شبكة الاتصال لهذا الجهاز:</strong><br>
+                    تم التحقق من بصمات هذا الجهاز سابقاً، ولكن تم رصد اتصال من شبكة مختلفة 
+                    {% if client_ip %}(IP: <code>{{ client_ip }}</code>){% endif %}.<br>
+                    وفقاً لمعايير الثقة الصفرية (Zero-Trust)، يلزم إعادة طلب إذن الوصول من الإدارة لتأكيد أمان اتصالك عبر هذه الشبكة الجديدة.
+                </div>
+            {% endif %}
             {% if is_pending %}
                 <h3 style="color:#38bdf8;">⏳ طلبك قيد المراجعة بالفعل</h3>
                 <p>تم إرسال طلبك للإدارة مسبقاً. يرجى الانتظار لحين الموافقة.</p>
@@ -73,7 +92,9 @@
                     عفواً، هذا النظام يخضع لرقابة أمنية مشددة (Zero-Trust). <br><br>
                     للأمان، يجب عليك طلب تصريح من الإدارة. هل توافق على إرسال بيانات جهازك (البصمة، ونوع المتصفح، والشبكة) للمدير لغرض التحقق؟
                 </p>
-                <button id="agree-btn" onclick="requestAccess()">✅ أوافق، أرسل طلب التصريح</button>
+                <button id="agree-btn" onclick="requestAccess()">
+                    {% if is_network_changed %}🔄 أوافق، أرسل طلب التصريح للشبكة الجديدة{% else %}✅ أوافق، أرسل طلب التصريح{% endif %}
+                </button>
                 <div id="loading-msg" class="loading">جاري إرسال الطلب... يرجى الانتظار لحين موافقة الإدارة.</div>
             {% endif %}
         </div>

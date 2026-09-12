@@ -428,6 +428,23 @@ class CheckDeviceView(APIView):
         from apps.security.models import DeviceRegistry, BlockedDevice
         from apps.accounts.models import User
         from apps.core.net import get_client_ip
+        client_ip = get_client_ip(request)
+        cookie_fp = request.COOKIES.get('ztna_device_id')
+        fps_to_check = [fp for fp in [cookie_fp, fingerprint] if fp]
+        from apps.security.models import ZTNAPendingApproval
+
+        ztna_approved = False
+        try:
+            ztna_approved = ZTNAPendingApproval.objects.filter(
+                device_fingerprint__in=fps_to_check,
+                ip_address=client_ip,
+                is_approved=True
+            ).exists()
+        except Exception:
+            pass
+
+        if not ztna_approved:
+            ztna_approved = any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
 
         if BlockedDevice.objects.enforceable().filter(device_fingerprint=fingerprint).exists():
             return Response(self._state('blocked', False, 'هذا الجهاز محظور'),
@@ -439,6 +456,19 @@ class CheckDeviceView(APIView):
 
         if device is not None:
             if device.is_trusted:
+                # Zero-Trust network validation: If the device connects from a new network (IP changed),
+                # it MUST be approved via ZTNA for this new network first!
+                if device.last_ip_address and device.last_ip_address != client_ip and not ztna_approved:
+                    return Response(self._state(
+                        'network_changed', False,
+                        'تم رصد تغيير في شبكة الاتصال لهذا الجهاز. يلزم الحصول على موافقة الإدارة للشبكة الجديدة.',
+                        code='ZTNA_BLOCKED'
+                    ), status=status.HTTP_403_FORBIDDEN)
+
+                if device.last_ip_address != client_ip:
+                    device.last_ip_address = client_ip
+                    device.save(update_fields=['last_ip_address'])
+
                 # License gate (متطلب د. مجد): الثقة وحدها لا ترفع شاشة
                 # القفل — الجهاز يحتاج ترخيصاً فعّالاً. الأجهزة الموثوقة
                 # السابقة تُرخَّص تلقائياً مرة واحدة (lazy provisioning)
@@ -488,12 +518,34 @@ class CheckDeviceView(APIView):
                                         'الجهاز غير مصرح، بانتظار موافقة الإدارة'),
                             status=status.HTTP_403_FORBIDDEN)
 
-        # Unknown fingerprint. We never register a device row without a
-        # matching user account: a DeviceRegistry.user FK to nothing would
-        # either crash the insert or orphan the row, and an attacker calling
-        # this endpoint with random fingerprints would otherwise pollute the
-        # admin's Telegram. Returning `unknown` lets the client ask the user
-        # for an email and retry.
+        # Unknown fingerprint. Check if this device on this client_ip was already approved via ZTNA (Telegram):
+        if ztna_approved:
+            # Device and network were already authorized by the admin via Telegram ZTNA!
+            # If user email is provided, bind and trust the device immediately:
+            if user is not None:
+                device, _ = DeviceRegistry.objects.get_or_create(
+                    user=user,
+                    device_fingerprint=fingerprint,
+                    defaults={
+                        'mac_address': mac_address,
+                        'os_info': request.META.get('HTTP_X_OS_INFO', ''),
+                        'browser_info': request.META.get('HTTP_X_BROWSER_INFO', ''),
+                        'last_ip_address': client_ip,
+                        'is_trusted': True,
+                    },
+                )
+                if not device.is_trusted:
+                    device.is_trusted = True
+                    device.save(update_fields=['is_trusted'])
+                from apps.security import licensing
+                licensing.ensure_device_license(device)
+
+            return Response(self._state(
+                'authorized', True, 'تم التحقق من أمان الجهاز والشبكة بنجاح عبر ZTNA',
+                licensed=True,
+                license_status='ACTIVE'
+            ))
+
         if user is None:
             return Response(self._state('unknown', False,
                                         'الجهاز غير معروف. يرجى إدخال بريدك الإلكتروني لطلب التفعيل.'),
@@ -830,6 +882,8 @@ class TelegramWebhookView(APIView):
                     req.is_approved = True
                     req.approved_at = timezone.now()
                     req.save(update_fields=['is_approved', 'approved_at'])
+                    if req.ip_address:
+                        cache.set(f'ztna_approved_{req.device_fingerprint}_{req.ip_address}', True, timeout=86400 * 30)
                     answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
                     if message_id is not None:
                         edit_message_text(chat_id, message_id,
@@ -888,7 +942,9 @@ class ZTNARequestView(APIView):
     def post(self, request):
         from apps.core.net import get_client_ip
 
-        fingerprint = request.data.get('fingerprint') or request.COOKIES.get('ztna_device_id')
+        cookie_fp = request.COOKIES.get('ztna_device_id')
+        header_fp = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
+        fingerprint = request.data.get('fingerprint') or cookie_fp or header_fp
         # The approval key the middleware checks is built from
         # get_client_ip(), so the pending record must carry the same
         # resolution — a raw X-Forwarded-For leftmost value never matches and
@@ -914,7 +970,6 @@ class ZTNARequestView(APIView):
                 status=429,
             )
 
-        from apps.security.models import ZTNAPendingApproval
         from apps.core.net import get_mac_address
         from apps.security.netinfo import MAC_SOURCE_LABELS, peer_profile
         
@@ -930,6 +985,17 @@ class ZTNARequestView(APIView):
         )
         req_id = str(approval.id)
 
+        # Check if this device was previously approved on another IP (Network change)
+        fps_to_check = [fp for fp in [fingerprint, cookie_fp, header_fp] if fp]
+        is_network_changed = False
+        try:
+            is_network_changed = ZTNAPendingApproval.objects.filter(
+                device_fingerprint__in=fps_to_check,
+                is_approved=True
+            ).exclude(ip_address=ip).exists()
+        except Exception:
+            pass
+
         # The result must be honest: a visitor told "sent" while Telegram was
         # never configured waits for a message that never arrives.
         telegram_sent = False
@@ -941,12 +1007,15 @@ class ZTNARequestView(APIView):
         
         ip_display = peer['ip'] + (' (محلي — نفس جهاز الخادم)' if peer['is_loopback'] else '')
         mac_note = MAC_SOURCE_LABELS.get(peer['mac_source'], '')
+        title = '🔄 <b>طلب وصول ZTNA (تغيير شبكة اتصال الجهاز)</b>' if is_network_changed else '🔐 <b>طلب وصول جديد ZTNA</b>'
         lines = [
-            '🔐 <b>طلب وصول جديد ZTNA</b>',
+            title,
             '',
             '<b>الجهاز:</b>',
             f"• بصمة الجهاز: <code>{_html.escape(fingerprint)}</code>",
         ]
+        if is_network_changed:
+            lines.append('⚠️ <i>تنبيه: هذا الجهاز مصرح له مسبقاً، ولكنه يتصل الآن من شبكة جديدة (IP مختلف).</i>')
         if peer['platform']:
             lines.append(f"• نظام التشغيل: {_html.escape(peer['platform'])}")
         if peer['user_agent']:
@@ -1026,21 +1095,37 @@ class ZTNAStatusView(APIView):
     def get(self, request):
         from apps.core.net import get_client_ip
 
-        fingerprint = request.query_params.get('fingerprint') or request.COOKIES.get('ztna_device_id')
+        cookie_fp = request.COOKIES.get('ztna_device_id')
+        header_fp = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
+        fingerprint = request.query_params.get('fingerprint') or cookie_fp or header_fp
         ip = get_client_ip(request)
 
         if not fingerprint:
             return Response({'error': 'Missing fingerprint'}, status=400)
 
+        fps_to_check = [fp for fp in [fingerprint, cookie_fp, header_fp] if fp]
+
         from apps.security.models import ZTNAPendingApproval
-        is_approved = ZTNAPendingApproval.objects.filter(device_fingerprint=fingerprint, is_approved=True).exists()
+        is_approved = False
+        try:
+            is_approved = ZTNAPendingApproval.objects.filter(
+                device_fingerprint__in=fps_to_check,
+                ip_address=ip,
+                is_approved=True
+            ).exists()
+        except Exception:
+            pass
+
+        if not is_approved:
+            is_approved = any(cache.get(f'ztna_approved_{fp}_{ip}') for fp in fps_to_check)
+
         if is_approved:
             return Response({'status': 'approved'})
-            
-        is_blocked = cache.get(f'waf_device_blacklist:{fingerprint}') or cache.get(f'waf_blacklist:{ip}')
+
+        is_blocked = any(cache.get(f'waf_device_blacklist:{fp}') for fp in fps_to_check) or cache.get(f'waf_blacklist:{ip}')
         if is_blocked:
             return Response({'status': 'rejected'})
-            
+
         return Response({'status': 'pending'})
 
 

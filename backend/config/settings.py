@@ -196,6 +196,12 @@ if _DATABASE_URL .startswith (('file:','file://','sqlite:')):
 elif _DATABASE_URL :
     import dj_database_url 
 
+    # If pointing to Supabase pooler on port 5432 (Session mode, limited to 15 clients),
+    # automatically upgrade to port 6543 (Transaction mode, unlimited clients) to prevent
+    # FATAL: (EMAXCONNSESSION) max clients reached in session mode!
+    if 'pooler.supabase.com' in _DATABASE_URL and ':5432' in _DATABASE_URL:
+        _DATABASE_URL = _DATABASE_URL.replace(':5432', ':6543')
+
     # For Supabase Transaction Pooler (port 6543), conn_max_age must be 0
     # because the pooler manages connections and drops idle clients.
     _is_pooler = ':6543' in _DATABASE_URL or config('DB_DISABLE_SERVER_SIDE_CURSORS', default=False, cast=bool)

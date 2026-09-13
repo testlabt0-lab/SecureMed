@@ -27,7 +27,14 @@ def _check_database ():
         latency_ms =round ((time .monotonic ()-t0 )*1000 ,2 )
         return {'status':'ok','latency_ms':latency_ms }
     except Exception as exc :
-        return {'status':'error','detail':str (exc )}
+        try :
+            connection .close ()
+            with connection .cursor ()as cur :
+                cur .execute ("SELECT 1")
+            latency_ms =round ((time .monotonic ()-t0 )*1000 ,2 )
+            return {'status':'ok','latency_ms':latency_ms }
+        except Exception as retry_exc :
+            return {'status':'error','detail':str (retry_exc )}
 
 
 def _check_redis ():

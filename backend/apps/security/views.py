@@ -96,6 +96,12 @@ class SecurityDashboardView (APIView ):
     permission_classes =[IsAdmin |IsAuditor ]
 
     def get (self ,request ):
+        from django.core.cache import cache
+        cache_key = 'security_dashboard_overview_cache'
+        cached_result = cache.get(cache_key)
+        if cached_result:
+            return Response(cached_result)
+
         try :
         # Run vulnerability scan (quick)
             vuln_report =run_vulnerability_scan ()
@@ -103,7 +109,7 @@ class SecurityDashboardView (APIView ):
             # Quick port scan of localhost
             port_report =scan_host_ports ('localhost')
 
-            return Response ({
+            result_data = {
             'vulnerability_scan':{
             'risk_score':vuln_report ['risk_score'],
             'summary':vuln_report ['summary'],
@@ -119,7 +125,9 @@ class SecurityDashboardView (APIView ):
             'risk_assessment':port_report ['risk_assessment'],
             },
             'security_features':self ._security_features (request ),
-            })
+            }
+            cache.set(cache_key, result_data, timeout=300)
+            return Response (result_data)
         except Exception as e :
             logger .error (f"Security dashboard failed: {e }")
             return Response (

@@ -13,6 +13,9 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      staleTime: 60 * 1000, // 1 minute fresh cache (instant page navigation)
+      gcTime: 5 * 60 * 1000, // Keep in memory for 5 minutes
+      refetchOnMount: false, // Serve from cache immediately on remount
     },
   },
 });

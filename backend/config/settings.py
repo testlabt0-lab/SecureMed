@@ -196,18 +196,23 @@ if _DATABASE_URL .startswith (('file:','file://','sqlite:')):
 elif _DATABASE_URL :
     import dj_database_url 
 
+    # For Supabase Transaction Pooler (port 6543), conn_max_age must be 0
+    # because the pooler manages connections and drops idle clients.
+    _is_pooler = ':6543' in _DATABASE_URL or config('DB_DISABLE_SERVER_SIDE_CURSORS', default=False, cast=bool)
+    _default_conn_max_age = 0 if _is_pooler else 600
+
     DATABASES ={
     'default':dj_database_url .parse (
     _DATABASE_URL ,
-    conn_max_age =config ('CONN_MAX_AGE',default =600 ,cast =int ),
+    conn_max_age =config ('CONN_MAX_AGE',default =_default_conn_max_age ,cast =int ),
     ssl_require =True ,
     )
     }
     DATABASES ['default']['CONN_HEALTH_CHECKS']=True 
     DATABASES ['default']['ATOMIC_REQUESTS']=config ('DB_ATOMIC_REQUESTS',default =False ,cast =bool )
-    # Supabase Transaction Pooler (port 6543 / Supavisor) compatibility
-    if ':6543' in _DATABASE_URL or config ('DB_DISABLE_SERVER_SIDE_CURSORS',default =False ,cast =bool ):
+    if _is_pooler:
         DATABASES ['default']['DISABLE_SERVER_SIDE_CURSORS']=True 
+        DATABASES ['default']['CONN_MAX_AGE']=0
 elif config ('DB_ENGINE',default ='')=='sqlite':
     DATABASES ={
     'default':{

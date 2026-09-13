@@ -86,8 +86,9 @@ class WAFMiddleware :
         }
 
     def __call__ (self ,request ):
-        # Skip WAF for admin, health check, and ZTNA workflow endpoints
+        # Skip WAF for admin, health check, static assets, and ZTNA workflow endpoints
         if (request .path .startswith ('/admin/') or request .path =='/health/' or request.path.startswith('/health/') or
+            request .path .startswith ('/static/') or request .path .startswith ('/media/') or request .path == '/favicon.ico' or
             request .path in ['/api/v1/security/ztna-request/', '/api/v1/security/ztna-status/', '/api/v1/security/telegram-webhook/']):
             return self .get_response (request )
 

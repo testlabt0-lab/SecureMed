@@ -23,9 +23,15 @@ class Command(BaseCommand):
         record = create_backup(
             kind=options['kind'], note=options['note'], scope=options['scope'],
         )
-        self.stdout.write(self.style.SUCCESS(
+        msg = (
             f'تم إنشاء النسخة الاحتياطية [{record.get_scope_display()}]: {record.filename} '
             f'({record.size_bytes / 1024:.1f} KB، {record.duration_ms} ms، '
             f'بصمة: {record.checksum[:12] or "—"}...)'
-        ))
+        )
+        try:
+            self.stdout.write(self.style.SUCCESS(msg))
+        except UnicodeEncodeError:
+            self.stdout.write(self.style.SUCCESS(
+                f'Backup created [{record.scope}]: {record.filename} ({record.size_bytes / 1024:.1f} KB)'
+            ))
         self.stdout.write(str(record.filepath))

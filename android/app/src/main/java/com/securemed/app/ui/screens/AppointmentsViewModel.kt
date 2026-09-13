@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -49,15 +50,19 @@ class AppointmentsViewModel @Inject constructor(
     private var loadedPatients: List<Patient> = emptyList()
     private var loadedDoctors: List<User> = emptyList()
 
-    /** Prefetch the lists the booking dialog needs (best-effort). */
+    /** Prefetch the lists the booking dialog needs (concurrently). */
     fun prepareBookingData(onReady: (List<Patient>, List<User>) -> Unit) {
         viewModelScope.launch {
-            if (loadedPatients.isEmpty()) {
-                loadedPatients = repository.getPatients().getOrDefault(emptyList())
+            val patientsDeferred = async {
+                if (loadedPatients.isEmpty()) repository.getPatients().getOrDefault(emptyList())
+                else loadedPatients
             }
-            if (loadedDoctors.isEmpty()) {
-                loadedDoctors = repository.getDoctors().getOrDefault(emptyList())
+            val doctorsDeferred = async {
+                if (loadedDoctors.isEmpty()) repository.getDoctors().getOrDefault(emptyList())
+                else loadedDoctors
             }
+            loadedPatients = patientsDeferred.await()
+            loadedDoctors = doctorsDeferred.await()
             onReady(loadedPatients, loadedDoctors)
         }
     }

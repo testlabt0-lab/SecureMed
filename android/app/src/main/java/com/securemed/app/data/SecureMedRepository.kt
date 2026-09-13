@@ -395,6 +395,7 @@ class SecureMedRepository @Inject constructor(
 
         SecurePreferences.clearSession()
         LocalCache.clear()
+        memoryCache.clear()
     }
 
     /**
@@ -418,6 +419,7 @@ class SecureMedRepository @Inject constructor(
         }
         SecurePreferences.clearSession()
         LocalCache.clear()
+        memoryCache.clear()
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
@@ -461,35 +463,22 @@ class SecureMedRepository @Inject constructor(
      * working offline (by substring over the decrypted names the device
      * already holds).
      */
-    suspend fun getPatients(search: String?): Result<List<Patient>> = try {
-        val page = api.getPatients(search = search?.takeIf { it.isNotBlank() })
-        val patients = page.results
-        val entities = patients.map {
-            PatientEntity(
-                id = it.id,
-                fullName = it.fullName,
-                dateOfBirth = it.dateOfBirth,
-                gender = it.gender,
-                bloodType = it.bloodType,
-                age = it.age,
-                phone = it.phone,
-                chronicConditions = it.chronicConditions
-            )
+    suspend fun getPatients(search: String?, forceRefresh: Boolean = false): Result<List<Patient>> {
+        if (search.isNullOrBlank() && !forceRefresh) {
+            val mem = memoryCache["patients"]
+            if (mem != null && System.currentTimeMillis() - mem.first < CACHE_TTL_MS) {
+                @Suppress("UNCHECKED_CAST")
+                return Result.success(mem.second as List<Patient>)
+            }
         }
-        dao.insertPatients(entities)
-        Result.success(patients)
-    } catch (e: Exception) {
-        // Offline, or the API is unreachable: fall back to the Room cache.
-        // A search term filters the local copy the same way the server
-        // would, so the user sees one consistent behaviour either way.
-        val local = if (search.isNullOrBlank()) dao.getAllPatients()
-        else dao.getAllPatients().filter {
-            it.fullName.contains(search.trim(), ignoreCase = true) ||
-                it.phone?.contains(search.trim(), ignoreCase = true) == true
-        }
-        if (local.isNotEmpty()) {
-            val patients = local.map {
-                Patient(
+        return try {
+            val page = api.getPatients(search = search?.takeIf { it.isNotBlank() })
+            val patients = page.results
+            if (search.isNullOrBlank()) {
+                memoryCache["patients"] = System.currentTimeMillis() to (patients as Any)
+            }
+            val entities = patients.map {
+                PatientEntity(
                     id = it.id,
                     fullName = it.fullName,
                     dateOfBirth = it.dateOfBirth,
@@ -500,9 +489,37 @@ class SecureMedRepository @Inject constructor(
                     chronicConditions = it.chronicConditions
                 )
             }
+            dao.insertPatients(entities)
             Result.success(patients)
-        } else {
-            Result.failure(e)
+        } catch (e: Exception) {
+            // Offline, or the API is unreachable: fall back to the Room cache.
+            // A search term filters the local copy the same way the server
+            // would, so the user sees one consistent behaviour either way.
+            val local = if (search.isNullOrBlank()) dao.getAllPatients()
+            else dao.getAllPatients().filter {
+                it.fullName.contains(search.trim(), ignoreCase = true) ||
+                    it.phone?.contains(search.trim(), ignoreCase = true) == true
+            }
+            if (local.isNotEmpty()) {
+                val patients = local.map {
+                    Patient(
+                        id = it.id,
+                        fullName = it.fullName,
+                        dateOfBirth = it.dateOfBirth,
+                        gender = it.gender,
+                        bloodType = it.bloodType,
+                        age = it.age,
+                        phone = it.phone,
+                        chronicConditions = it.chronicConditions
+                    )
+                }
+                if (search.isNullOrBlank()) {
+                    memoryCache["patients"] = System.currentTimeMillis() to (patients as Any)
+                }
+                Result.success(patients)
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
@@ -519,6 +536,7 @@ class SecureMedRepository @Inject constructor(
      */
     suspend fun createPatient(request: PatientCreateRequest): Result<Patient> = try {
         val patient = api.createPatient(request)
+        memoryCache.remove("patients")
         Result.success(patient)
     } catch (e: HttpException) {
         Result.failure(e)
@@ -545,6 +563,8 @@ class SecureMedRepository @Inject constructor(
      */
     suspend fun createMedicalRecord(request: MedicalRecordCreateRequest): Result<MedicalRecord> = try {
         val record = api.createMedicalRecord(request)
+        memoryCache.remove("records")
+        memoryCache.keys.removeIf { it.startsWith("patient_profile_") || it.startsWith("channel_") }
         Result.success(record)
     } catch (e: HttpException) {
         Result.failure(e)
@@ -586,17 +606,18 @@ class SecureMedRepository @Inject constructor(
         recordType: String?,
         isCritical: Boolean?
     ): Result<MedicalRecord> = try {
-        Result.success(
-            api.updateMedicalRecord(
-                id,
-                MedicalRecordUpdateRequest(
-                    title = title,
-                    content = content,
-                    recordType = recordType,
-                    isCritical = isCritical
-                )
+        val record = api.updateMedicalRecord(
+            id,
+            MedicalRecordUpdateRequest(
+                title = title,
+                content = content,
+                recordType = recordType,
+                isCritical = isCritical
             )
         )
+        memoryCache.remove("records")
+        memoryCache.keys.removeIf { it.startsWith("patient_profile_") || it.startsWith("channel_") }
+        Result.success(record)
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -604,6 +625,8 @@ class SecureMedRepository @Inject constructor(
     /** Delete a record — server-gated the same way; 403 for viewers. */
     suspend fun deleteMedicalRecord(id: String): Result<Unit> = try {
         api.deleteMedicalRecord(id)
+        memoryCache.remove("records")
+        memoryCache.keys.removeIf { it.startsWith("patient_profile_") || it.startsWith("channel_") }
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
@@ -874,11 +897,8 @@ class SecureMedRepository @Inject constructor(
     }
 
     // ===== ANALYTICS =====
-    suspend fun getDashboardOverview(): Result<DashboardStats> = try {
-        Result.success(api.getDashboardOverview())
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
+    suspend fun getDashboardOverview(): Result<DashboardStats> =
+        cached("dashboard_overview", DashboardStats.serializer()) { api.getDashboardOverview() }
 
     // ===== MEDICATION PLANS (device-local, offline-first) =====
 

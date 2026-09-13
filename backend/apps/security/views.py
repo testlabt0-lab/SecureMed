@@ -446,6 +446,15 @@ class CheckDeviceView(APIView):
         if not ztna_approved:
             ztna_approved = any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
 
+        if not ztna_approved:
+            try:
+                ztna_approved = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    is_approved=True
+                ).exists()
+            except Exception:
+                pass
+
         if ztna_approved:
             BlockedDevice.objects.filter(device_fingerprint__in=fps_to_check).delete()
             for fp in fps_to_check:
@@ -1148,6 +1157,15 @@ class ZTNAStatusView(APIView):
 
         if not is_approved:
             is_approved = any(cache.get(f'ztna_approved_{fp}_{ip}') for fp in fps_to_check)
+
+        if not is_approved:
+            try:
+                is_approved = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    is_approved=True
+                ).exists()
+            except Exception:
+                pass
 
         if is_approved:
             return Response({'status': 'approved'})

@@ -9,6 +9,7 @@ import com.securemed.app.data.model.MedicalRecord
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -68,9 +69,13 @@ class ChannelDetailViewModel @Inject constructor(
     fun loadChannel(id: String) {
         _state.value = _state.value.copy(isLoading = true)
         viewModelScope.launch {
-            val channelResult = repository.getChannel(id)
-            val membersResult = repository.getChannelMembers(id)
-            val recordsResult = repository.getMedicalRecords(id)
+            val channelDeferred = async { repository.getChannel(id) }
+            val membersDeferred = async { repository.getChannelMembers(id) }
+            val recordsDeferred = async { repository.getMedicalRecords(id) }
+
+            val channelResult = channelDeferred.await()
+            val membersResult = membersDeferred.await()
+            val recordsResult = recordsDeferred.await()
 
             _state.value = _state.value.copy(
                 isLoading = false,

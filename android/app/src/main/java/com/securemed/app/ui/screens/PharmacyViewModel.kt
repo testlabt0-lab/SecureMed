@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -46,15 +47,19 @@ class PharmacyViewModel @Inject constructor(
     private var loadedPatients: List<Patient> = emptyList()
     private var loadedCatalog: List<InventoryMedication> = emptyList()
 
-    /** Best-effort prefetch of the patients and catalog the dialog needs. */
+    /** Prefetch patients and catalog concurrently for the prescription dialog. */
     fun preparePrescriptionData(onReady: (List<Patient>, List<InventoryMedication>) -> Unit) {
         viewModelScope.launch {
-            if (loadedPatients.isEmpty()) {
-                loadedPatients = repository.getPatients().getOrDefault(emptyList())
+            val patientsDeferred = async {
+                if (loadedPatients.isEmpty()) repository.getPatients().getOrDefault(emptyList())
+                else loadedPatients
             }
-            if (loadedCatalog.isEmpty()) {
-                loadedCatalog = repository.getMedicationCatalog().getOrDefault(emptyList())
+            val catalogDeferred = async {
+                if (loadedCatalog.isEmpty()) repository.getMedicationCatalog().getOrDefault(emptyList())
+                else loadedCatalog
             }
+            loadedPatients = patientsDeferred.await()
+            loadedCatalog = catalogDeferred.await()
             onReady(loadedPatients, loadedCatalog)
         }
     }

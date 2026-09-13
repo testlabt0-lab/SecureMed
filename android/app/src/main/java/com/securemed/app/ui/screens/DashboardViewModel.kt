@@ -10,6 +10,7 @@ import com.securemed.app.data.model.Patient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -44,17 +45,20 @@ class DashboardViewModel @Inject constructor(
     fun loadDashboard() {
         _state.value = _state.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
-            val channelsResult = repository.getChannels()
-            val patientsResult = repository.getPatients()
-
-            // Medication plans are device-local; user counts are admin-only.
-            val medicationsCount = MedicationStore.loadPlans().count { it.isActive }
-            var usersCount = 0
-            if (SecurePreferences.userRole in ADMIN_ROLES) {
-                // The envelope's count, not page-1 rows — the old approach
-                // read the first 20 users and called that the total.
-                usersCount = repository.getUsersTotalCount().getOrDefault(0)
+            val channelsDeferred = async { repository.getChannels() }
+            val patientsDeferred = async { repository.getPatients() }
+            val usersCountDeferred = async {
+                if (SecurePreferences.userRole in ADMIN_ROLES) {
+                    repository.getUsersTotalCount().getOrDefault(0)
+                } else 0
             }
+
+            // Medication plans are device-local; compute while network calls fly
+            val medicationsCount = MedicationStore.loadPlans().count { it.isActive }
+
+            val channelsResult = channelsDeferred.await()
+            val patientsResult = patientsDeferred.await()
+            val usersCount = usersCountDeferred.await()
 
             _state.value = DashboardState(
                 isLoading = false,

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securemed.app.data.SecureMedRepository
 import com.securemed.app.data.api.TwoFactorExpiredException
+import com.securemed.app.data.local.SecurePreferences
 import com.securemed.app.data.model.BiometricChallengeResponse
 import com.securemed.app.data.model.LoginResponse
 import com.securemed.app.data.model.MyDevice
@@ -240,12 +241,22 @@ class AuthViewModel @Inject constructor(
         _uiState.value = AuthUiState.CheckingDevice
         stopZtnaPolling()
 
+        // Fast path: if already marked authorized on this device, skip remote check
+        if (SecurePreferences.isDeviceAuthorized) {
+            _uiState.value = AuthUiState.DeviceAuthorized
+            return
+        }
+
         viewModelScope.launch {
             // First check if there is an existing ZTNA approval status
             val statusResult = repository.getZtnaStatus(fingerprint)
             val ztnaStatus = statusResult.getOrNull()?.status
 
-            if (ztnaStatus == "pending") {
+            if (ztnaStatus == "approved") {
+                SecurePreferences.isDeviceAuthorized = true
+                _uiState.value = AuthUiState.DeviceAuthorized
+                return@launch
+            } else if (ztnaStatus == "pending") {
                 _uiState.value = AuthUiState.ZtnaPending(
                     fingerprint = fingerprint,
                     message = "تم إرسال طلبك للإدارة مسبقاً. يرجى انتظار موافقة الإدارة عبر تيليجرام."
@@ -261,7 +272,10 @@ class AuthViewModel @Inject constructor(
             repository.checkDevice(fingerprint, macAddress, email)
                 .onSuccess { response ->
                     when (response.state) {
-                        "authorized" -> _uiState.value = AuthUiState.DeviceAuthorized
+                        "authorized" -> {
+                            SecurePreferences.isDeviceAuthorized = true
+                            _uiState.value = AuthUiState.DeviceAuthorized
+                        }
                         "blocked" -> _uiState.value = AuthUiState.DeviceUnauthorized(
                             response.detail ?: "هذا الجهاز محظور"
                         )
@@ -282,11 +296,12 @@ class AuthViewModel @Inject constructor(
                     val model = SecurityUtils.getDeviceModel()
                     val localIp = SecurityUtils.getLocalIpAddress()
 
-                    val isZtna = (error is HttpException && error.code() == 403) ||
-                        (error.message?.contains("ZTNA", ignoreCase = true) == true)
+                    val errorBody = (error as? HttpException)?.response()?.errorBody()?.string().orEmpty()
+                    val isZtna = errorBody.contains("ZTNA_BLOCKED", ignoreCase = true) ||
+                        errorBody.contains("zero trust", ignoreCase = true) ||
+                        error.message?.contains("ZTNA", ignoreCase = true) == true
 
-                    if (isZtna || ztnaStatus != "approved") {
-                        // The device or network requires manager ZTNA authorization
+                    if (isZtna) {
                         _uiState.value = AuthUiState.ZtnaRequired(
                             fingerprint = fingerprint,
                             macAddress = resolvedMac,
@@ -294,6 +309,15 @@ class AuthViewModel @Inject constructor(
                             deviceModel = model,
                             localIp = localIp,
                             message = "تم رصد شبكة جديدة أو جهاز غير مصرح به. يجب طلب تصريح من المدير للمتابعة."
+                        )
+                    } else if (error is HttpException && error.code() == 403) {
+                        _uiState.value = AuthUiState.ZtnaRequired(
+                            fingerprint = fingerprint,
+                            macAddress = resolvedMac,
+                            osInfo = osInfo,
+                            deviceModel = model,
+                            localIp = localIp,
+                            message = "يلزم طلب تصريح أمني من المدير للسماح لهذا الجهاز بالوصول إلى النظام."
                         )
                     } else {
                         _errorMessage.value = error.message ?: "فشل الاتصال بالخادم للتحقق من الجهاز"
@@ -350,6 +374,7 @@ class AuthViewModel @Inject constructor(
                         when (response.status) {
                             "approved" -> {
                                 stopZtnaPolling()
+                                SecurePreferences.isDeviceAuthorized = true
                                 _uiState.value = AuthUiState.DeviceAuthorized
                                 return@launch
                             }

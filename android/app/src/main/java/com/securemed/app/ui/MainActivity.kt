@@ -152,7 +152,14 @@ class MainActivity : FragmentActivity() {
                     val navController = rememberNavController()
                     val authViewModel: AuthViewModel = hiltViewModel()
 
-                    val startDestination = Route.DeviceCheck.route
+                    val startDestination = remember {
+                        when {
+                            SecurePreferences.isLoggedIn() && openMedications -> Route.Medications.route
+                            SecurePreferences.isLoggedIn() -> Route.Dashboard.route
+                            SecurePreferences.isDeviceAuthorized -> Route.Login.route
+                            else -> Route.DeviceCheck.route
+                        }
+                    }
 
                     // The single way out of a session: the logout buttons on the
                     // dashboard and the profile, the all-devices row in settings,
@@ -172,7 +179,8 @@ class MainActivity : FragmentActivity() {
                     // back press behind the login screen.
                     val signOut: (Boolean) -> Unit = { allDevices ->
                         authViewModel.logout(allDevices)
-                        navController.navigate(Route.DeviceCheck.route) {
+                        val target = if (SecurePreferences.isDeviceAuthorized) Route.Login.route else Route.DeviceCheck.route
+                        navController.navigate(target) {
                             popUpTo(0) { inclusive = true }
                         }
                     }
@@ -204,6 +212,7 @@ class MainActivity : FragmentActivity() {
 
                     LaunchedEffect(Unit) {
                         com.securemed.app.util.GlobalErrorHandler.ztnaBlockedFlow.collect {
+                            SecurePreferences.isDeviceAuthorized = false
                             navController.navigate(Route.DeviceCheck.route) {
                                 popUpTo(0) { inclusive = false }
                             }

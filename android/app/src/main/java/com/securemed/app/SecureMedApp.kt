@@ -1,6 +1,7 @@
 package com.securemed.app
 
 import android.app.Application
+import android.content.Context
 import com.securemed.app.data.ConnectivityObserver
 import com.securemed.app.data.local.LocalCache
 import com.securemed.app.data.local.MedicationStore
@@ -15,9 +16,11 @@ import javax.inject.Inject
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 
+import com.securemed.app.util.CrashHandler
+
 /**
  * Application class - initializes secure storage, the offline cache,
- * notification channels, connectivity observation and the theme.
+ * notification channels, connectivity observation, theme and crash reporting.
  *
  * @HiltAndroidApp triggers Hilt's code generation for the dependency
  * injection container that serves as the application's parent component.
@@ -45,19 +48,25 @@ class SecureMedApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // 1. Install crash handler first so any subsequent uncaught error is intercepted
+        CrashHandler.init(this)
+        
+        // 2. Initialize encrypted preferences with fully attached application context
         SecurePreferences.init(this)
-        // After SecurePreferences: the idle timeout is stored there. Before any
-        // screen exists, because MainActivity checks the lock in onResume and a
-        // process that was killed while locked must come back locked.
+
+        // 3. Security and cache setup
         AppLock.init()
         LocalCache.init(this)
-        // 3-4: medication plans/logs moved from encrypted JSON files into
-        // Room. The one-time import must run BEFORE the database is first
-        // opened elsewhere, because DatabaseModule's destructive fallback is
-        // the only thing that could drop these tables — and the files being
-        // deleted after a successful import make this migration idempotent.
-        MedicationStore.init(database.medicationDao())
-        MedicationStore.migrateFromLocalCache()
+
+        // 4. Safely initialize MedicationStore and run one-time cache migration
+        runCatching {
+            MedicationStore.init(database.medicationDao())
+            MedicationStore.migrateFromLocalCache()
+        }.onFailure { error ->
+            android.util.Log.e("SecureMedApp", "MedicationStore initialization warning", error)
+        }
+
+        // 5. System notification channels & theme
         NotificationHelper.ensureChannels(this)
         ThemeController.init(SecurePreferences.darkMode)
     }

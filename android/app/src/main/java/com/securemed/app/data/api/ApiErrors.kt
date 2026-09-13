@@ -74,7 +74,19 @@ object ApiErrors {
      */
     private fun JsonPrimitive.contentOrNullIfNotString(): String? =
         if (isString) content.takeIf { it.isNotBlank() } else null
+
+    fun isZtnaBlocked(throwable: Throwable): Boolean {
+        val http = throwable as? HttpException ?: return false
+        if (http.code() != 403) return false
+        val body = runCatching { http.response()?.errorBody()?.string() }.getOrNull() ?: return false
+        return body.contains("ZTNA_BLOCKED")
+    }
 }
+
+/**
+ * الجهاز أو الشبكة محظورة ضمن ZTNA ويتطلب موافقة المدير عبر تيليجرام.
+ */
+class ZtnaBlockedException(message: String, val fingerprint: String? = null) : Exception(message)
 
 /**
  * The 2FA challenge is no longer valid — its `mfa_token` aged out of the
@@ -87,3 +99,4 @@ object ApiErrors {
  * ViewModel without teaching it about HTTP status codes.
  */
 class TwoFactorExpiredException(message: String) : Exception(message)
+

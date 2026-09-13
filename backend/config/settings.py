@@ -203,7 +203,11 @@ elif _DATABASE_URL :
     ssl_require =True ,
     )
     }
-    DATABASES ['default']['ATOMIC_REQUESTS']=True 
+    DATABASES ['default']['CONN_HEALTH_CHECKS']=True 
+    DATABASES ['default']['ATOMIC_REQUESTS']=config ('DB_ATOMIC_REQUESTS',default =False ,cast =bool )
+    # Supabase Transaction Pooler (port 6543 / Supavisor) compatibility
+    if ':6543' in _DATABASE_URL or config ('DB_DISABLE_SERVER_SIDE_CURSORS',default =False ,cast =bool ):
+        DATABASES ['default']['DISABLE_SERVER_SIDE_CURSORS']=True 
 elif config ('DB_ENGINE',default ='')=='sqlite':
     DATABASES ={
     'default':{
@@ -221,7 +225,9 @@ else :
     'HOST':config ('DB_HOST',default ='localhost'),
     'PORT':config ('DB_PORT',default ='5432'),
     'OPTIONS':_DB_SSL_OPTIONS ,
-    'ATOMIC_REQUESTS':True ,
+    'CONN_MAX_AGE':config ('CONN_MAX_AGE',default =600 ,cast =int ),
+    'CONN_HEALTH_CHECKS':True ,
+    'ATOMIC_REQUESTS':config ('DB_ATOMIC_REQUESTS',default =False ,cast =bool ),
     }
     }
 

@@ -43,7 +43,14 @@ object NetworkModule {
                 addDeviceHeaders()
             }
             .build()
-        chain.proceed(request)
+        val response = chain.proceed(request)
+        if (response.code == 403) {
+            val peek = runCatching { response.peekBody(1024).string() }.getOrNull()
+            if (peek?.contains("ZTNA_BLOCKED") == true) {
+                com.securemed.app.util.GlobalErrorHandler.emitZtnaBlocked()
+            }
+        }
+        response
     }
 
     /**
@@ -73,6 +80,9 @@ object NetworkModule {
         addHeader("X-Device-Fingerprint", SecurePreferences.installId)
         addHeader("X-OS-Info", osInfo)
         addHeader("X-Browser-Info", appInfo)
+        addHeader("X-MAC-Address", com.securemed.app.security.SecurityUtils.getMacAddress())
+        addHeader("Sec-CH-UA-Platform", "\"Android\"")
+        addHeader("User-Agent", headerSafe("$appInfo ($osInfo)"))
     }
 
     /** e.g. `Android 14 (API 34); samsung SM-A546B`. */

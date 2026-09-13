@@ -62,7 +62,7 @@ class ChannelSerializer (serializers .ModelSerializer ):
 
     owner =UserSerializer (read_only =True )
     current_user_role =serializers .SerializerMethodField ()
-    members_count =serializers .IntegerField (source ='memberships.count',read_only =True )
+    members_count =serializers .SerializerMethodField ()
     status_display =serializers .CharField (source ='get_status_display',read_only =True )
     channel_type_display =serializers .CharField (
     source ='get_channel_type_display',read_only =True 
@@ -79,6 +79,13 @@ class ChannelSerializer (serializers .ModelSerializer ):
         'created_at','updated_at','closed_at',
         ]
         read_only_fields =['id','owner','created_at','updated_at','closed_at']
+
+    def get_members_count (self ,obj ):
+        if hasattr (obj ,'members_count_annotated'):
+            return obj .members_count_annotated 
+        if hasattr (obj ,'_prefetched_objects_cache')and 'memberships'in obj ._prefetched_objects_cache :
+            return len ([m for m in obj .memberships .all ()if m .is_active ])
+        return obj .memberships .filter (is_active =True ).count ()
 
     def get_current_user_role (self ,obj ):
         """DV: Return the single role of current user in this channel."""

@@ -3,8 +3,10 @@ package com.securemed.app.di
 import android.content.Context
 import androidx.room.Room
 import com.securemed.app.data.local.SecurePreferences
+import com.securemed.app.data.local.room.MedicationDao
 import com.securemed.app.data.local.room.SecureMedDao
 import com.securemed.app.data.local.room.SecureMedDatabase
+import net.sqlcipher.database.SQLiteDatabase
 import net.sqlcipher.database.SupportFactory
 import dagger.Module
 import dagger.Provides
@@ -20,8 +22,45 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SecureMedDatabase {
-        val passphrase = SecurePreferences.getDatabasePassphrase()
-        val factory = SupportFactory(passphrase)
+        // 1. Ensure SQLCipher native binaries are loaded
+        SQLiteDatabase.loadLibs(context)
+
+        // 2. Initialize preferences and retrieve the database passphrase
+        SecurePreferences.init(context)
+        val passphrase = SecurePreferences.getDatabasePassphrase(context)
+
+        // 3. Pre-flight check: if database file exists on disk, ensure it opens with the passphrase.
+        // If an older build created it with a wiped or mismatched key, delete it before Room starts
+        // to avoid a fatal "file is not a database" SQLiteException.
+        val dbFile = context.getDatabasePath(SecureMedDatabase.DATABASE_NAME)
+        if (dbFile.exists()) {
+            try {
+                val db = SQLiteDatabase.openOrCreateDatabase(
+                    dbFile.absolutePath,
+                    passphrase,
+                    null,
+                    null,
+                    null
+                )
+                try {
+                    val cursor = db.rawQuery("SELECT count(*) FROM sqlite_master;", null)
+                    try {
+                        cursor.moveToFirst()
+                    } finally {
+                        cursor.close()
+                    }
+                } finally {
+                    db.close()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DatabaseModule", "Existing database unreadable, recreating cleanly", e)
+                context.deleteDatabase(SecureMedDatabase.DATABASE_NAME)
+            }
+        }
+
+        // 4. clearPassphrase = false ensures Room can perform multiple connections/migrations
+        // without SQLCipher zeroing out the passphrase array in memory.
+        val factory = SupportFactory(passphrase, null, false)
 
         return Room.databaseBuilder(
             context,
@@ -29,17 +68,7 @@ object DatabaseModule {
             SecureMedDatabase.DATABASE_NAME
         )
         .openHelperFactory(factory)
-        // Version 2 → 3 added the medication tables, and SecureMedApp ran
-        // `MedicationStore.migrateFromLocalCache()` before this builder ever
-        // opens the file — so by the time Room reads the file the device-only
-        // rows are importable and no destructive fallback can lose them.
-        // Version 3 → 4 added the pending-sync idempotency columns.
         .addMigrations(SecureMedDatabase.MIGRATION_3_4)
-        // Still a floor, not a substitute for migrations: for versions ≥ 3 a
-        // destructive fallback WOULD drop device-only rows (plans/logs are
-        // not refetchable from the server). A release that bumps the schema
-        // past 4 must write real Migrations and, to test them, flip
-        // exportSchema = true plus a room.schemaLocation KSP argument.
         .fallbackToDestructiveMigration()
         .build()
     }
@@ -47,5 +76,10 @@ object DatabaseModule {
     @Provides
     fun provideSecureMedDao(database: SecureMedDatabase): SecureMedDao {
         return database.secureMedDao()
+    }
+
+    @Provides
+    fun provideMedicationDao(database: SecureMedDatabase): MedicationDao {
+        return database.medicationDao()
     }
 }

@@ -22,6 +22,20 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
     queryset =Patient .objects .select_related ('basin').order_by ('-created_at')
     serializer_class =PatientSerializer 
 
+    def handle_exception(self, exc):
+        from apps.core.mixins import BreakGlassAvailableDenied
+        if isinstance(exc, BreakGlassAvailableDenied):
+            return Response(
+                {
+                    'detail': str(exc),
+                    'break_glass_available': exc.break_glass_available,
+                    'patient_id': exc.patient_id,
+                    'code': 'BREAK_GLASS_AVAILABLE' if exc.break_glass_available else 'PERMISSION_DENIED'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().handle_exception(exc)
+
     def get_permissions (self ):
         if self .action in ['list','retrieve']:
             return [permissions .IsAuthenticated ()]
@@ -109,15 +123,15 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         viewable_channels = self.get_viewable_channels(user, patient)
 
             # Records belonging to those channels (access-scoped)
-        records =MedicalRecord .objects .filter (
+        records = list(MedicalRecord .objects .filter (
         channel__in =viewable_channels 
-        ).select_related ('channel','created_by').order_by ('-created_at')[:100 ]
+        ).select_related ('channel','created_by').order_by ('-created_at')[:100 ])
 
         # Medical files for those channels
         from apps .patients .models import MedicalFile 
-        files =MedicalFile .objects .filter (
+        files = list(MedicalFile .objects .filter (
         channel__in =viewable_channels 
-        ).order_by ('-created_at')[:50 ]
+        ).order_by ('-created_at')[:50 ])
 
         log_security_event (
         user =user ,
@@ -125,6 +139,28 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         request =request ,
         details ={'patient_id':str (patient .id ),'view':'full_profile'}
         )
+
+        # Check if current session was opened under Break-Glass
+        from apps.security.models import BreakGlassAccess
+        from django.utils import timezone
+        now_time = timezone.now()
+        active_bg = BreakGlassAccess.objects.filter(
+            user=user,
+            patient=patient,
+            status=BreakGlassAccess.Status.ACTIVE,
+            expires_at__gt=now_time
+        ).first()
+
+        bg_info = None
+        if active_bg:
+            bg_info = {
+                'id': str(active_bg.id),
+                'reason': active_bg.reason,
+                'department': active_bg.department,
+                'activated_at': active_bg.activated_at.isoformat(),
+                'expires_at': active_bg.expires_at.isoformat(),
+                'remaining_seconds': max(0, int((active_bg.expires_at - now_time).total_seconds())),
+            }
 
         return Response ({
         'patient':PatientSerializer (patient ).data ,
@@ -146,10 +182,11 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         for f in files 
         ],
         'stats':{
-        'total_records':records .count (),
+        'total_records': len(records),
         'total_channels':len (viewable_channels ),
         'total_files':len (files ),
         },
+        'break_glass': bg_info,
         })
 
     @action (detail =True ,methods =['post'],url_path ='ai-summary')

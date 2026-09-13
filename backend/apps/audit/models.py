@@ -82,6 +82,8 @@ class AuditLog (models .Model ):
         MEDICAL_RECORD_CREATED ='MEDICAL_RECORD_CREATED',_ ('إنشاء سجل طبي')
         MEDICAL_RECORD_UPDATED ='MEDICAL_RECORD_UPDATED',_ ('تعديل سجل طبي')
         MEDICAL_RECORD_DELETED ='MEDICAL_RECORD_DELETED',_ ('حذف سجل طبي')
+        BREAK_GLASS_ACTIVATED ='BREAK_GLASS_ACTIVATED',_ ('تفعيل وصول الطوارئ كسر الزجاج')
+        BREAK_GLASS_REVOKED ='BREAK_GLASS_REVOKED',_ ('إنهاء وصول الطوارئ كسر الزجاج')
 
         # Security tool events
         PORT_SCAN_EXECUTED ='PORT_SCAN_EXECUTED',_ ('تنفيذ مسح منافذ')

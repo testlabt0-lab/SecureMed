@@ -8,10 +8,15 @@ import com.securemed.app.data.model.BiometricChallengeResponse
 import com.securemed.app.data.model.LoginResponse
 import com.securemed.app.data.model.MyDevice
 import com.securemed.app.security.AppLock
+import com.securemed.app.security.SecurityUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 
 /**
@@ -225,13 +230,34 @@ class AuthViewModel @Inject constructor(
         _errorMessage.value = null
     }
 
+    private var ztnaPollingJob: Job? = null
+
     fun checkDeviceAuthorization(
         fingerprint: String,
         macAddress: String? = null,
         email: String? = null
     ) {
         _uiState.value = AuthUiState.CheckingDevice
+        stopZtnaPolling()
+
         viewModelScope.launch {
+            // First check if there is an existing ZTNA approval status
+            val statusResult = repository.getZtnaStatus(fingerprint)
+            val ztnaStatus = statusResult.getOrNull()?.status
+
+            if (ztnaStatus == "pending") {
+                _uiState.value = AuthUiState.ZtnaPending(
+                    fingerprint = fingerprint,
+                    message = "تم إرسال طلبك للإدارة مسبقاً. يرجى انتظار موافقة الإدارة عبر تيليجرام."
+                )
+                startZtnaPolling(fingerprint)
+                return@launch
+            } else if (ztnaStatus == "rejected") {
+                _uiState.value = AuthUiState.ZtnaRejected("تم حظر أو رفض هذا الجهاز من قبل الإدارة.")
+                return@launch
+            }
+
+            // Perform regular device check
             repository.checkDevice(fingerprint, macAddress, email)
                 .onSuccess { response ->
                     when (response.state) {
@@ -239,16 +265,11 @@ class AuthViewModel @Inject constructor(
                         "blocked" -> _uiState.value = AuthUiState.DeviceUnauthorized(
                             response.detail ?: "هذا الجهاز محظور"
                         )
-                        // Distinct pending screen: the request is in the
-                        // admin's queue, so the user needs "I'll wait" (and a
-                        // re-check button), not a generic error screen.
                         "pending" -> _uiState.value = AuthUiState.DevicePending(
-                            response.detail
-                                ?: "طلب تفعيل الجهاز بانتظار موافقة الإدارة"
+                            response.detail ?: "طلب تفعيل الجهاز بانتظار موافقة الإدارة"
                         )
                         "unknown", null -> _uiState.value = AuthUiState.DeviceUnknown(
-                            response.detail
-                                ?: "الجهاز غير معروف. أدخل بريدك الإلكتروني لطلب التفعيل."
+                            response.detail ?: "الجهاز غير معروف. أدخل بريدك الإلكتروني لطلب التفعيل."
                         )
                         else -> _uiState.value = AuthUiState.DeviceUnauthorized(
                             response.detail ?: "الجهاز غير مصرح به."
@@ -256,16 +277,103 @@ class AuthViewModel @Inject constructor(
                     }
                 }
                 .onFailure { error ->
-                    // Fail safe: a network error during a security check must
-                    // not silently degrade to "authorized". Show the same
-                    // unauthorized screen the user would see if the server
-                    // explicitly refused.
-                    _errorMessage.value = error.message ?: "فشل الاتصال بالخادم للتحقق من الجهاز"
-                    _uiState.value = AuthUiState.DeviceUnauthorized(
-                        "تعذر التحقق من الجهاز. يرجى التأكد من اتصالك بالإنترنت."
+                    val resolvedMac = macAddress ?: SecurityUtils.getMacAddress()
+                    val osInfo = SecurityUtils.getOsVersion()
+                    val model = SecurityUtils.getDeviceModel()
+                    val localIp = SecurityUtils.getLocalIpAddress()
+
+                    val isZtna = (error is HttpException && error.code() == 403) ||
+                        (error.message?.contains("ZTNA", ignoreCase = true) == true)
+
+                    if (isZtna || ztnaStatus != "approved") {
+                        // The device or network requires manager ZTNA authorization
+                        _uiState.value = AuthUiState.ZtnaRequired(
+                            fingerprint = fingerprint,
+                            macAddress = resolvedMac,
+                            osInfo = osInfo,
+                            deviceModel = model,
+                            localIp = localIp,
+                            message = "تم رصد شبكة جديدة أو جهاز غير مصرح به. يجب طلب تصريح من المدير للمتابعة."
+                        )
+                    } else {
+                        _errorMessage.value = error.message ?: "فشل الاتصال بالخادم للتحقق من الجهاز"
+                        _uiState.value = AuthUiState.DeviceUnauthorized(
+                            "تعذر التحقق من الجهاز. يرجى التأكد من اتصالك بالإنترنت."
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * إرسال طلب تصريح ZTNA إلى الخادم وبوت تيليجرام
+     */
+    fun sendZtnaAccessRequest(fingerprint: String, macAddress: String) {
+        _uiState.value = AuthUiState.ZtnaSending
+        stopZtnaPolling()
+
+        viewModelScope.launch {
+            repository.requestZtnaAccess(fingerprint, macAddress)
+                .onSuccess { response ->
+                    val msg = response.message ?: "تم إرسال طلبك للإدارة عبر تيليجرام. يرجى الانتظار لحين الموافقة."
+                    _uiState.value = AuthUiState.ZtnaPending(
+                        fingerprint = fingerprint,
+                        message = msg,
+                        telegramSent = response.telegramSent
+                    )
+                    startZtnaPolling(fingerprint)
+                }
+                .onFailure { error ->
+                    val resolvedMac = macAddress.ifBlank { SecurityUtils.getMacAddress() }
+                    _uiState.value = AuthUiState.ZtnaRequired(
+                        fingerprint = fingerprint,
+                        macAddress = resolvedMac,
+                        osInfo = SecurityUtils.getOsVersion(),
+                        deviceModel = SecurityUtils.getDeviceModel(),
+                        localIp = SecurityUtils.getLocalIpAddress(),
+                        message = error.message ?: "تعذر إرسال الطلب للإدارة. يرجى المحاولة مجدداً."
                     )
                 }
         }
+    }
+
+    /**
+     * استماع حي ومستمر لقرار المدير عبر تيليجرام
+     */
+    fun startZtnaPolling(fingerprint: String) {
+        stopZtnaPolling()
+        ztnaPollingJob = viewModelScope.launch {
+            while (isActive) {
+                delay(3000L) // Poll every 3 seconds
+                repository.getZtnaStatus(fingerprint)
+                    .onSuccess { response ->
+                        when (response.status) {
+                            "approved" -> {
+                                stopZtnaPolling()
+                                _uiState.value = AuthUiState.DeviceAuthorized
+                                return@launch
+                            }
+                            "rejected" -> {
+                                stopZtnaPolling()
+                                _uiState.value = AuthUiState.ZtnaRejected(
+                                    "تم رفض طلب الوصول لهذا الجهاز من قبل المدير."
+                                )
+                                return@launch
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    fun stopZtnaPolling() {
+        ztnaPollingJob?.cancel()
+        ztnaPollingJob = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopZtnaPolling()
     }
 
     /** Self-service "إزالة جهازي": revoke this device's trust + kill its
@@ -335,17 +443,37 @@ sealed class AuthUiState {
      */
     data class DeviceUnknown(val message: String) : AuthUiState()
 
+    // ===== ZTNA STATES =====
+    /**
+     * الجهاز أو الشبكة الحالية غير مصرح لها (ZTNA) - يتطلب إرسال طلب للمدير عبر تيليجرام
+     */
+    data class ZtnaRequired(
+        val fingerprint: String,
+        val macAddress: String,
+        val osInfo: String,
+        val deviceModel: String,
+        val localIp: String?,
+        val message: String? = null
+    ) : AuthUiState()
+
+    /** جاري إرسال الطلب إلى تيليجرام */
+    data object ZtnaSending : AuthUiState()
+
+    /** تم إرسال الطلب لتيليجرام، وبانتظار موافقة المدير (مع استماع حي) */
+    data class ZtnaPending(
+        val fingerprint: String,
+        val message: String,
+        val telegramSent: Boolean = true
+    ) : AuthUiState()
+
+    /** تم رفض الطلب من قبل المدير عبر تيليجرام */
+    data class ZtnaRejected(val message: String) : AuthUiState()
+
     /** A challenge is in hand and the biometric prompt should now be shown. */
     data class AwaitingBiometric(val challenge: BiometricChallengeResponse) : AuthUiState()
 
     /**
      * The password was accepted but a second factor is outstanding.
-     *
-     * [method] is the server's choice — "email" for a mailed OTP, "totp" for an
-     * authenticator app — and only changes the wording shown to the user; both
-     * are answered by the same endpoint. [submitting] lives inside the state
-     * instead of switching to [Loading] so the code the user typed stays on
-     * screen while it is being checked.
      */
     data class AwaitingTwoFactor(
         val mfaToken: String,

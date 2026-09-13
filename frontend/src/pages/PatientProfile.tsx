@@ -6,12 +6,14 @@ import {
   Droplet, Calendar, Phone, Hash, AlertTriangle, Loader2, CreditCard,
   Sparkles, Copy, Check, RefreshCw, Plus, Search, Filter, Activity,
   Heart, Thermometer, Wind, CheckCircle2, Stethoscope, Clock, ShieldAlert,
-  Mic, Wand2, BrainCircuit
+  Mic, Wand2, BrainCircuit, Lock
 } from 'lucide-react';
 import { patientsExtendedApi, smartAssistantApi } from '../api/extendedApis';
 import { patientsAPI } from '../api/client';
 import api from '../api/client';
 import Modal from '../components/common/Modal';
+import BreakGlassModal from '../components/security/BreakGlassModal';
+import toast from 'react-hot-toast';
 
 /** The slice of the Web Speech API this page actually uses. */
 interface SpeechRecognitionLike {
@@ -161,11 +163,30 @@ export default function PatientProfile() {
   const [analyzingFileId, setAnalyzingFileId] = useState<string | null>(null);
   const [imageAnalysisResult, setImageAnalysisResult] = useState<{ id: string, result: string } | null>(null);
 
-  const { data, isLoading, isError } = useQuery({
+  const [isBreakGlassModalOpen, setIsBreakGlassModalOpen] = useState(false);
+  const [isRevokingBreakGlass, setIsRevokingBreakGlass] = useState(false);
+
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['patient-profile', id],
     queryFn: () => patientsExtendedApi.profile(id!),
     enabled: !!id && id !== 'undefined',
   });
+
+  const handleRevokeBreakGlass = async () => {
+    if (!data?.data?.break_glass?.id) return;
+    try {
+      setIsRevokingBreakGlass(true);
+      await api.post('/security/break-glass/revoke/', {
+        break_glass_id: data.data.break_glass.id
+      });
+      toast.success('تم إنهاء جلسة وصول الطوارئ بنجاح وإعادة الحماية العادية');
+      queryClient.invalidateQueries({ queryKey: ['patient-profile', id] });
+    } catch (err: any) {
+      toast.error('فشل إنهاء جلسة وصول الطوارئ');
+    } finally {
+      setIsRevokingBreakGlass(false);
+    }
+  };
 
   const summaryMutation = useMutation({
     mutationFn: () => patientsExtendedApi.aiSummary(id!),
@@ -378,14 +399,73 @@ export default function PatientProfile() {
   }
 
   if (isError || !data?.data) {
+    const errStatus = (error as any)?.response?.status;
+    const errData = (error as any)?.response?.data;
+    const canBreakGlass = errStatus === 403;
+
     return (
-      <div className="text-center py-24">
-        <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-3" />
-        <p className="text-gray-500 mb-4">تعذر تحميل ملف المريض أو لا تملك صلاحية الوصول</p>
-        <Link to="/patients" className="btn-secondary inline-flex items-center gap-2">
-          <ArrowRight className="w-4 h-4" />
-          العودة إلى قائمة المرضى
-        </Link>
+      <div className="max-w-2xl mx-auto py-16 px-4">
+        {canBreakGlass ? (
+          <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl p-8 border border-red-100 dark:border-red-900/30 text-center space-y-6 animate-in fade-in zoom-in-95">
+            <div className="w-20 h-20 rounded-3xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
+              <ShieldAlert className="w-10 h-10 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                ملف مريض محمي (خارج قنواتك المباشرة)
+              </h2>
+              <p className="text-gray-600 dark:text-gray-300 text-sm max-w-md mx-auto leading-relaxed">
+                {errData?.detail || 'أنت لست عضواً في فريق الرعاية الطبية لهذا المريض ولا تملك صلاحية تصفح ملفه الروتيني.'}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-800 dark:text-amber-300 text-right space-y-1.5">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                هل توجد حالة إسعافية طارئة أو حرجة لإنقاذ حياة المريض؟
+              </p>
+              <p className="leading-relaxed">
+                وفق سياسات الأمن السيبراني الصحي (HIPAA)، يمكنك استخدام بروتوكول كسر الزجاج (Break-Glass) لفتح الملف الإسعافي فوراً مع توثيق التبرير الطبي وإشعار إدارة المستشفى.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => setIsBreakGlassModalOpen(true)}
+                className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold text-sm shadow-lg shadow-red-500/25 flex items-center justify-center gap-2 transition-all active:scale-95"
+              >
+                <ShieldAlert className="w-5 h-5" />
+                تفعيل بروتوكول كسر الزجاج (وصول طارئ)
+              </button>
+              <Link
+                to="/patients"
+                className="w-full sm:w-auto px-6 py-3 rounded-2xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center gap-2 transition-colors"
+              >
+                <ArrowRight className="w-4 h-4" />
+                العودة للمرضى
+              </Link>
+            </div>
+
+            <BreakGlassModal
+              isOpen={isBreakGlassModalOpen}
+              onClose={() => setIsBreakGlassModalOpen(false)}
+              patientId={id || ''}
+              patientName="المريض المطلوب"
+              onSuccess={() => {
+                queryClient.invalidateQueries({ queryKey: ['patient-profile', id] });
+              }}
+            />
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-3" />
+            <p className="text-gray-500 mb-4">تعذر تحميل ملف المريض</p>
+            <Link to="/patients" className="btn-secondary inline-flex items-center gap-2">
+              <ArrowRight className="w-4 h-4" />
+              العودة إلى قائمة المرضى
+            </Link>
+          </div>
+        )}
       </div>
     );
   }
@@ -394,6 +474,46 @@ export default function PatientProfile() {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Emergency Break-Glass Active Banner */}
+      {data?.data?.break_glass && (
+        <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white p-5 rounded-3xl shadow-xl shadow-red-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-red-400/40 animate-in fade-in slide-in-from-top-3">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 shadow-inner">
+              <ShieldAlert className="w-6 h-6 text-white animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="bg-white/25 text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
+                  🚨 وصول الطوارئ الإسعافي (Break-Glass Active)
+                </span>
+                <span className="text-xs text-red-100 font-medium">
+                  {data.data.break_glass.department}
+                </span>
+              </div>
+              <p className="text-sm font-medium text-white/95 mt-1">
+                <strong>التبرير الطبي:</strong> {data.data.break_glass.reason}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+            <div className="text-left md:text-right text-xs text-red-100 bg-black/25 px-3 py-1.5 rounded-xl border border-white/10">
+              <span>ينتهي الوصول: </span>
+              <strong className="text-white font-mono">
+                {new Date(data.data.break_glass.expires_at).toLocaleTimeString('ar-SA')}
+              </strong>
+            </div>
+            <button
+              onClick={handleRevokeBreakGlass}
+              disabled={isRevokingBreakGlass}
+              className="px-4 py-2 bg-white hover:bg-red-50 text-red-700 font-bold text-xs rounded-xl shadow-md transition-colors shrink-0 flex items-center gap-1.5 active:scale-95"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              {isRevokingBreakGlass ? 'جارِ الإنهاء...' : 'إنهاء حالة الطوارئ'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Success notification */}
       {successToast && (
         <div className="p-4 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-3 text-emerald-800 dark:text-emerald-300 animate-in fade-in slide-in-from-top-2">

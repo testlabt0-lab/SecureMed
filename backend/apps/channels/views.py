@@ -37,7 +37,7 @@ class ChannelViewSet (viewsets .ModelViewSet ):
     - Only channel owner or admin can manage (grant/revoke permissions)
     """
 
-    queryset =Channel .objects .all ().order_by ('-created_at')
+    queryset =Channel .objects .select_related ('owner','patient','basin').prefetch_related ('memberships__user').order_by ('-created_at')
 
     def get_queryset (self ):
         """
@@ -48,10 +48,11 @@ class ChannelViewSet (viewsets .ModelViewSet ):
         from django .db .models import Q 
         from apps .basins .utils import basin_scoped_queryset 
         user =self .request .user 
+        base_qs = Channel .objects .select_related ('owner','patient','basin').prefetch_related ('memberships__user')
         if user .role in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
-            qs =Channel .objects .all ().order_by ('-created_at')
+            qs =base_qs .all ().order_by ('-created_at')
             return basin_scoped_queryset (qs ,user ,lookup ='basin_id')
-        return Channel .objects .filter (
+        return base_qs .filter (
         Q (owner =user )|Q (memberships__user =user ,memberships__is_active =True )
         ).distinct ().order_by ('-created_at')
 

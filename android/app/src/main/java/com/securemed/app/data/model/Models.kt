@@ -371,6 +371,26 @@ data class DeviceCheckResponse(
     val detail: String? = null
 )
 
+@Serializable
+data class ZtnaAccessRequest(
+    val fingerprint: String,
+    @SerialName("mac_address") val macAddress: String? = null
+)
+
+@Serializable
+data class ZtnaAccessResponse(
+    val message: String? = null,
+    @SerialName("req_id") val reqId: String? = null,
+    @SerialName("telegram_sent") val telegramSent: Boolean = false,
+    @SerialName("telegram_error") val telegramError: String? = null
+)
+
+@Serializable
+data class ZtnaStatusResponse(
+    val status: String, // "approved", "pending", "rejected"
+    val error: String? = null
+)
+
 /** أحد أجهزة المستخدم المسجلة (من security/my-devices/). */
 data class MyDevice(
     val id: String,

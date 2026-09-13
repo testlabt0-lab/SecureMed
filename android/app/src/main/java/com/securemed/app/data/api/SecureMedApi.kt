@@ -161,6 +161,14 @@ interface SecureMedApi {
     @POST("security/check-device/")
     suspend fun checkDevice(@Body request: DeviceCheckRequest): DeviceCheckResponse
 
+    /** طلب تصريح وصول أمني من المدير عبر تيليجرام (ZTNA). */
+    @POST("security/ztna-request/")
+    suspend fun requestZtnaAccess(@Body request: ZtnaAccessRequest): ZtnaAccessResponse
+
+    /** فحص حالة موافقة المدير على طلب الوصول الأمني (ZTNA). */
+    @GET("security/ztna-status/")
+    suspend fun getZtnaStatus(@Query("fingerprint") fingerprint: String): ZtnaStatusResponse
+
     /** أجهزتي المسجلة (للمستخدم العادي). */
     @GET("security/my-devices/")
     suspend fun getMyDevices(): MyDevicesResponse

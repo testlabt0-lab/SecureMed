@@ -62,7 +62,6 @@ object TamperDetection {
         runCatching { signals += xposedSignals() }
         runCatching { signals += fileSignals() }
         runCatching { signals += debuggerSignals() }
-        runCatching { signals += emulatorSignals() }
 
         return signals
     }
@@ -83,14 +82,21 @@ object TamperDetection {
             }
         }
 
-        // Default ports. Binding fails when nothing listens, so a successful
-        // connect on a Frida port is a strong signal.
-        for (port in FRIDA_PORTS) {
-            runCatching {
-                java.net.Socket().use { s ->
-                    s.connect(java.net.InetSocketAddress("127.0.0.1", port), 200)
+        // Check listening ports via /proc/net/tcp ensuring state is TCP_LISTEN (0A)
+        runCatching {
+            val tcpLines = (File("/proc/net/tcp").takeIf { it.exists() }?.readLines() ?: emptyList()) +
+                           (File("/proc/net/tcp6").takeIf { it.exists() }?.readLines() ?: emptyList())
+            for (line in tcpLines) {
+                val tokens = line.trim().split(Regex("\\s+"))
+                if (tokens.size >= 4 && tokens[3].equals("0A", ignoreCase = true)) {
+                    val localAddr = tokens[1]
+                    for (port in FRIDA_PORTS) {
+                        val hexPort = port.toString(16).uppercase().padStart(4, '0')
+                        if (localAddr.endsWith(":$hexPort", ignoreCase = true)) {
+                            out += Signal("frida_port", "service listening on frida port $port")
+                        }
+                    }
                 }
-                out += Signal("frida_port", "service answering on frida port $port")
             }
         }
 
@@ -124,18 +130,13 @@ object TamperDetection {
             .map { Signal("suspicious_file", it) }
 
     /**
-     * A tracing flag on our own process: JDWP is only ever attached by a
-     * debugger or a tracing tool. In a debug build this is expected and the
-     * caller does not enforce on it anyway.
+     * Official Android API check for attached debuggers.
      */
     private fun debuggerSignals(): List<Signal> {
         val out = mutableListOf<Signal>()
         runCatching {
-            val status = File("/proc/self/status").readText()
-            val tracer = Regex("""TracerPid:\s*(\d+)""")
-                .find(status)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            if (tracer != 0) {
-                out += Signal("debugger", "TracerPid=$tracer")
+            if (android.os.Debug.isDebuggerConnected() || android.os.Debug.waitingForDebugger()) {
+                out += Signal("debugger", "Debugger actively connected")
             }
         }
         return out

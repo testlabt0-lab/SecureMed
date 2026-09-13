@@ -94,50 +94,67 @@ class WAFMiddleware :
         client_ip =self ._get_client_ip (request )
         device_fingerprint =request .META .get ('HTTP_X_DEVICE_FINGERPRINT','')
 
-        # Check if explicitly approved via ZTNA
-        from apps.security.models import ZTNAPendingApproval
+        # Check if explicitly approved via ZTNA (Fast-Path: check request attribute & cache first)
         cookie_fp = request.COOKIES.get('ztna_device_id')
         fps_to_check = [fp for fp in [cookie_fp, device_fingerprint] if fp]
-        is_ztna_whitelisted = False
-        try:
-            is_ztna_whitelisted = ZTNAPendingApproval.objects.filter(
-                device_fingerprint__in=fps_to_check,
-                ip_address=client_ip,
-                is_approved=True
-            ).exists() or any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
-        except Exception:
-            pass
+        is_ztna_whitelisted = getattr(request, '_ztna_approved', False)
+
+        if not is_ztna_whitelisted:
+            is_ztna_whitelisted = any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
+
+        if not is_ztna_whitelisted:
+            try:
+                from apps.security.models import ZTNAPendingApproval
+                if ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    ip_address=client_ip,
+                    is_approved=True
+                ).exists():
+                    is_ztna_whitelisted = True
+                    for fp in fps_to_check:
+                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=3600)
+            except Exception:
+                pass
 
         if not is_ztna_whitelisted:
             # 1. Check IP Blacklist (cache first, then DB)
             blacklist_key =f'waf_blacklist:{client_ip }'
+            cached_ip_block = None
             try:
-                if cache .get (blacklist_key ):
+                cached_ip_block = cache.get(blacklist_key)
+                if cached_ip_block is True:
                     return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
             except Exception as e:
                 logger.error(f"WAF_CACHE_READ_FAILED | error={e}")
 
             try :
                 from apps .security .models import BlockedIP ,BlockedDevice
-                # ``enforceable()`` (not ``is_active=True``) so a block with an
-                # ``expires_at`` in the past stops being enforced when it expires.
-                blocked_ip =BlockedIP .objects .enforceable ().filter (ip_address =client_ip ).first ()
-                if blocked_ip is not None :
-                    cache .set (blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_ip ))
-                    return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
+                if cached_ip_block is None:
+                    # ``enforceable()`` (not ``is_active=True``) so a block with an
+                    # ``expires_at`` in the past stops being enforced when it expires.
+                    blocked_ip =BlockedIP .objects .enforceable ().filter (ip_address =client_ip ).first ()
+                    if blocked_ip is not None :
+                        cache .set (blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_ip ))
+                        return JsonResponse ({'error':'تم حظر هذا العنوان نهائيا','code':'IP_BLOCKED'},status =403 )
+                    else:
+                        cache.set(blacklist_key, False, timeout=300)
 
                 if device_fingerprint :
                     dev_blacklist_key =f'waf_device_blacklist:{device_fingerprint }'
-                    if cache .get (dev_blacklist_key ):
+                    cached_dev_block = cache.get(dev_blacklist_key)
+                    if cached_dev_block is True:
                         return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
-                    blocked_device =(
-                    BlockedDevice .objects .enforceable ()
-                    .filter (device_fingerprint =device_fingerprint )
-                    .first ()
-                    )
-                    if blocked_device is not None :
-                        cache .set (dev_blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_device ))
-                        return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
+                    elif cached_dev_block is None:
+                        blocked_device =(
+                        BlockedDevice .objects .enforceable ()
+                        .filter (device_fingerprint =device_fingerprint )
+                        .first ()
+                        )
+                        if blocked_device is not None :
+                            cache .set (dev_blacklist_key ,True ,timeout =self ._block_cache_ttl (blocked_device ))
+                            return JsonResponse ({'error':'تم حظر هذا الجهاز','code':'DEVICE_BLOCKED'},status =403 )
+                        else:
+                            cache.set(dev_blacklist_key, False, timeout=300)
             except Exception as e :
                 logger.error(f"WAF_BLOCKLIST_CHECK_FAILED | error={e}")
 
@@ -515,52 +532,60 @@ class ZeroTrustConsentFirewallMiddleware:
 
         fps_to_check = [fp for fp in [cookie_fp, header_fp] if fp]
 
-        # 2. Check if approved in Database or Cache FOR THIS IP
+        # 2. Check if approved in Cache FIRST (Fast-Path: in-memory/Redis 0ms vs Supabase WAN 150-300ms)
         # Zero-Trust Network Access: Approval is strictly bound to (Device Fingerprint + Network IP)
         # If the network (IP address) changes, approval is automatically invalidated and a new request is required!
-        from apps.security.models import ZTNAPendingApproval
         is_approved = False
         approved_fp = None
 
-        try:
-            matching = ZTNAPendingApproval.objects.filter(
-                device_fingerprint__in=fps_to_check,
-                ip_address=client_ip,
-                is_approved=True
-            )
-            if matching.exists():
+        for fp in fps_to_check:
+            if cache.get(f'ztna_approved_{fp}_{client_ip}'):
                 is_approved = True
-                approved_fp = matching.first().device_fingerprint
-        except Exception as e:
-            logger.error(f"ZTNA DB Check Failed: {e}")
-            is_approved = False
+                approved_fp = fp
+                break
 
-        # Fallback to cache
+        # Fallback to Database on cache-miss
         if not is_approved:
-            for fp in fps_to_check:
-                if cache.get(f'ztna_approved_{fp}_{client_ip}'):
+            from apps.security.models import ZTNAPendingApproval
+            try:
+                matching = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    ip_address=client_ip,
+                    is_approved=True
+                )
+                first_match = matching.first()
+                if first_match:
                     is_approved = True
-                    approved_fp = fp
-                    break
+                    approved_fp = first_match.device_fingerprint
+                    # Cache the approval so subsequent requests hit cache
+                    for fp in fps_to_check:
+                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=3600)
+            except Exception as e:
+                logger.error(f"ZTNA DB Check Failed: {e}")
+                is_approved = False
 
         if is_approved:
+            request._ztna_approved = True
             # Associate header_fp for this client_ip if cookie was approved so Axios calls match
             if header_fp and header_fp != approved_fp:
                 cache.set(f'ztna_approved_{header_fp}_{client_ip}', True, timeout=86400 * 30)
-                try:
-                    from django.utils import timezone
-                    ZTNAPendingApproval.objects.get_or_create(
-                        device_fingerprint=header_fp,
-                        ip_address=client_ip,
-                        defaults={
-                            'is_approved': True,
-                            'approved_at': timezone.now(),
-                            'os_info': request.META.get('HTTP_X_OS_INFO', ''),
-                            'browser_info': request.META.get('HTTP_X_BROWSER_INFO', ''),
-                        }
-                    )
-                except Exception:
-                    pass
+                if not cache.get(f'ztna_synced_{header_fp}_{client_ip}'):
+                    cache.set(f'ztna_synced_{header_fp}_{client_ip}', True, timeout=86400)
+                    try:
+                        from django.utils import timezone
+                        from apps.security.models import ZTNAPendingApproval
+                        ZTNAPendingApproval.objects.get_or_create(
+                            device_fingerprint=header_fp,
+                            ip_address=client_ip,
+                            defaults={
+                                'is_approved': True,
+                                'approved_at': timezone.now(),
+                                'os_info': request.META.get('HTTP_X_OS_INFO', ''),
+                                'browser_info': request.META.get('HTTP_X_BROWSER_INFO', ''),
+                            }
+                        )
+                    except Exception:
+                        pass
 
             response = self.get_response(request)
             if is_new_cookie:

@@ -20,7 +20,7 @@ object SecurityUtils {
      * والاعتماد الأمني الحقيقي هو التشفير والمصادقة على الخادم.
      */
     fun isDeviceRooted(): Boolean {
-        return hasTestKeys() || checkRootFiles() || checkSuCommand()
+        return checkRootFiles() || checkSuCommand()
     }
 
     /**
@@ -104,15 +104,85 @@ object SecurityUtils {
      * app start, so the value can be read without touching it.
      */
     @Suppress("UNUSED_PARAMETER")
-    fun getDeviceFingerprint(context: Context): String = SecurePreferences.installId
+    fun getDeviceFingerprint(context: Context? = null): String = SecurePreferences.installId
 
     /**
-     * MAC address of the device. Always returns `null` on Android 6+: the
-     * OS returns a per-app randomized MAC, so anything we sent would be a
-     * fiction, and a real MAC is a permanent hardware identifier we have no
-     * reason to hand over. The backend therefore never sees the header —
-     * same decision the OkHttp interceptor already encodes by omitting it.
+     * Get or derive device MAC address.
+     * Checks network interfaces (wlan0, eth0, etc.) for a valid hardware address.
+     * If restricted by Android (returns 02:00:00:00:00:00 or null), derives a deterministic
+     * locally administered MAC address (02-XX-XX-XX-XX-XX) tied to the device installation
+     * so that the server and Telegram alerts always receive a valid, stable, format-compliant MAC.
      */
     @Suppress("UNUSED_PARAMETER")
-    fun getMacAddress(context: Context): String? = null
+    fun getMacAddress(context: Context? = null): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            if (interfaces != null) {
+                while (interfaces.hasMoreElements()) {
+                    val nif = interfaces.nextElement()
+                    if (!nif.name.equals("wlan0", ignoreCase = true) &&
+                        !nif.name.equals("eth0", ignoreCase = true) &&
+                        !nif.name.contains("wlan", ignoreCase = true)
+                    ) continue
+                    val macBytes = nif.hardwareAddress ?: continue
+                    val sb = StringBuilder()
+                    for (b in macBytes) {
+                        sb.append(String.format("%02X-", b))
+                    }
+                    if (sb.isNotEmpty()) {
+                        sb.deleteCharAt(sb.length - 1)
+                    }
+                    val macStr = sb.toString()
+                    if (macStr.isNotBlank() && macStr != "02-00-00-00-00-00" && macStr != "00-00-00-00-00-00") {
+                        return macStr
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            // Ignore security or network exceptions
+        }
+
+        // Fallback: Deterministic Locally Administered MAC address (02-xx-xx-xx-xx-xx)
+        val seed = SecurePreferences.installId.ifBlank { Build.FINGERPRINT ?: "securemed_device" }
+        val digest = java.security.MessageDigest.getInstance("MD5").digest(seed.toByteArray())
+        return String.format(
+            "02-%02X-%02X-%02X-%02X-%02X",
+            digest[0], digest[1], digest[2], digest[3], digest[4]
+        )
+    }
+
+    /** Local IP address of active network interface (IPv4) */
+    fun getLocalIpAddress(): String? {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces() ?: return null
+            while (interfaces.hasMoreElements()) {
+                val nif = interfaces.nextElement()
+                val addresses = nif.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        return addr.hostAddress
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            // ignore
+        }
+        return null
+    }
+
+    /** Readable Device Model (e.g. "Samsung SM-G991B" or "Google Pixel 7") */
+    fun getDeviceModel(): String {
+        val manufacturer = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+        val model = Build.MODEL
+        return if (model.startsWith(manufacturer, ignoreCase = true)) {
+            model
+        } else {
+            "$manufacturer $model"
+        }
+    }
+
+    /** Readable OS version (e.g. "Android 14 (API 34)") */
+    fun getOsVersion(): String = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
 }
+

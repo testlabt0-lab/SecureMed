@@ -17,8 +17,9 @@ print("Homepage:", r.status_code, "| consent page:", "ZTNA" in r.text, "| cookie
 # 2. Consent click — Telegram delivery is now reported honestly
 fp = f"PC-{uuid.uuid4()}"
 r2 = s.post(f"{BASE}/api/v1/security/ztna-request/", json={"fingerprint": fp}, timeout=90)
-print("ztna-request:", r2.status_code, r2.text[:300])
+print("ztna-request:", r2.status_code, r2.json().get('telegram_sent'), r2.json().get('req_id'))
 
 # 3. Status while pending
 r3 = s.get(f"{BASE}/api/v1/security/ztna-status/", timeout=90)
-print("ztna-status:", r3.status_code, r3.text[:200])
+print("ztna-status:", r3.status_code, r3.json())
+

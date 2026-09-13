@@ -116,6 +116,25 @@ class SecureMedRepository @Inject constructor(
         Result.failure(e)
     }
 
+    /** إرسال طلب تصريح ZTNA إلى الخادم وبوت تيليجرام */
+    suspend fun requestZtnaAccess(
+        fingerprint: String,
+        macAddress: String? = null
+    ): Result<ZtnaAccessResponse> = try {
+        Result.success(api.requestZtnaAccess(ZtnaAccessRequest(fingerprint, macAddress)))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** استعلام عن حالة موافقة المدير من تيليجرام */
+    suspend fun getZtnaStatus(
+        fingerprint: String
+    ): Result<ZtnaStatusResponse> = try {
+        Result.success(api.getZtnaStatus(fingerprint))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     /** "إزالة جهازي" — self-service deactivation (no blacklist entry). */
     suspend fun deactivateDevice(deviceId: String): Result<Map<String, String>> = try {
         Result.success(api.deactivateMyDevice(deviceId))

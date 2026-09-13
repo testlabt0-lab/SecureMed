@@ -325,3 +325,25 @@ def send_pending_devices_digest(devices):
     except Exception as e:
         logger.error(f"Error sending pending devices digest: {e}")
         return False
+
+
+def send_break_glass_alert(user, patient, reason, department=None, ip_address=None, expires_at=None):
+    """
+    Send an urgent Telegram alert when Break-Glass Emergency Access is activated.
+    """
+    user_name = getattr(user, 'full_name', '') or getattr(user, 'email', 'مستخدم غير معروف')
+    role_display = user.get_role_display() if hasattr(user, 'get_role_display') else getattr(user, 'role', '')
+    patient_name = getattr(patient, 'full_name', '') or str(getattr(patient, 'id', ''))
+
+    lines = [
+        f"<b>⚠️ تفعيل وصول الطوارئ الإسعافي (Break-Glass Protocol)</b>",
+        f"<b>الممارس الطبي:</b> {user_name} (الدور: {role_display})",
+        f"<b>المريض:</b> {patient_name} (ID: <code>{getattr(patient, 'id', '')}</code>)",
+        f"<b>القسم الإسعافي:</b> {department or 'قسم الطوارئ'}",
+        f"<b>التبرير الطبي:</b> <i>{reason}</i>",
+        f"<b>عنوان IP:</b> <code>{ip_address or 'غير معروف'}</code>",
+        f"<b>انتهاء الصلاحية:</b> {expires_at.strftime('%Y-%m-%d %H:%M:%S') if expires_at else '4 ساعات'}",
+        f"🚨 <i>تم تسجيل هذا الحدث في سجلات التدقيق المشفرة (Audit Log) فورياً.</i>",
+    ]
+    return send_critical_alert("وصول طوارئ إسعافي (Break-Glass)", lines)
+

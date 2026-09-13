@@ -106,6 +106,8 @@ class Channel (models .Model ):
             return True 
         if self .owner_id ==user .id :
             return True 
+        if hasattr (self ,'_prefetched_objects_cache')and 'memberships'in self ._prefetched_objects_cache :
+            return any (m .user_id ==user .id and m .is_active for m in self .memberships .all ())
         return self .memberships .filter (user =user ,is_active =True ).exists ()
 
     def can_manage (self ,user ):
@@ -121,6 +123,11 @@ class Channel (models .Model ):
         """
         if self .owner_id ==user .id :
             return ChannelMembership .Role .OWNER 
+        if hasattr (self ,'_prefetched_objects_cache')and 'memberships'in self ._prefetched_objects_cache :
+            for m in self .memberships .all ():
+                if m .user_id ==user .id and m .is_active :
+                    return m .role 
+            return None 
         membership =self .memberships .filter (user =user ,is_active =True ).first ()
         return membership .role if membership else None 
 

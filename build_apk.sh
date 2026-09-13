@@ -35,7 +35,7 @@ BUILD_TYPE="${1:-debug}"
 # Passed to Gradle as -PAPI_BASE_URL=... (see android/app/build.gradle.kts).
 API_URL="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$SCRIPT_DIR"
 ANDROID_DIR="$PROJECT_DIR/android"
 
 # Check prerequisites

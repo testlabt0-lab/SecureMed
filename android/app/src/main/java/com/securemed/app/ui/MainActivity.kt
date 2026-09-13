@@ -41,7 +41,10 @@ import com.securemed.app.ui.components.BottomNavBar
 import com.securemed.app.ui.screens.*
 import com.securemed.app.ui.theme.SecureMedTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -101,39 +104,29 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         
         // فحص الروت — في نسخ الإصدار فقط.
-        //
-        // كان الفحص يشمل كشف المحاكي أيضاً، فكان التطبيق يُغلق نفسه على كل
-        // محاكي؛ وحتى بعد فصلهما تبقى صور المحاكي موقّعة بـ test-keys، لذا
-        // يُستثنى بناء التطوير كي يظل التطبيق قابلاً للتشغيل والاختبار.
         if (!BuildConfig.DEBUG && SecurityUtils.isDeviceRooted()) {
-            android.widget.Toast.makeText(this, "عذراً، لا يمكن تشغيل هذا التطبيق على أجهزة مكسورة الحماية (Rooted) لأسباب أمنية.", android.widget.Toast.LENGTH_LONG).show()
-            finishAffinity()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("تنبيه أمني")
+                .setMessage("عذراً، لا يمكن تشغيل هذا التطبيق على أجهزة مكسورة الحماية (Rooted) لأسباب أمنية.")
+                .setCancelable(false)
+                .setPositiveButton("إغلاق") { _, _ -> finishAffinity() }
+                .show()
             return
         }
 
         // Runtime instrumentation check (Frida / Xposed / attached debugger).
-        // Release-only, same reasoning as the root check: a debug build that
-        // refused to run under a debugger would stop every developer at once.
-        // The response to tampering is to wipe every local trace of the
-        // session before closing — a hooked process must not be left holding
-        // PHI, tokens, or a device identity the attacker can reuse.
         if (!BuildConfig.DEBUG && com.securemed.app.security.TamperDetection
                 .isTamperingDetected(this)) {
-            // Detach the push channel first, while the access token is still
-            // in hand and the request can authenticate. Bounded wait: the
-            // process is closing anyway, and the local wipe must not be held
-            // hostage by a network call. The server rejecting this (no
-            // session, blocked device) is an acceptable outcome — the point
-            // is to not leave a live FCM binding behind on the happy path of
-            // a device that reports instrumentation.
-            kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeoutOrNull(1500) {
-                    runCatching { repository.unregisterCurrentFcmToken() }
-                }
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                runCatching { repository.unregisterCurrentFcmToken() }
             }
             com.securemed.app.security.SecureWipe.wipeEverything(this)
-            android.widget.Toast.makeText(this, "رُصدت أدوات تحليل على هذا الجهاز. تم مسح البيانات المحلية وإغلاق التطبيق.", android.widget.Toast.LENGTH_LONG).show()
-            finishAffinity()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("تحذير أمني")
+                .setMessage("رُصدت أدوات تحليل أو تلاعب على هذا الجهاز. تم مسح البيانات المحلية لحماية السجلات الطبية.")
+                .setCancelable(false)
+                .setPositiveButton("إغلاق") { _, _ -> finishAffinity() }
+                .show()
             return
         }
 
@@ -159,13 +152,7 @@ class MainActivity : FragmentActivity() {
                     val navController = rememberNavController()
                     val authViewModel: AuthViewModel = hiltViewModel()
 
-                    val startDestination = remember {
-                        when {
-                            SecurePreferences.isLoggedIn() && openMedications -> Route.Medications.route
-                            SecurePreferences.isLoggedIn() -> Route.Dashboard.route
-                            else -> Route.DeviceCheck.route
-                        }
-                    }
+                    val startDestination = Route.DeviceCheck.route
 
                     // The single way out of a session: the logout buttons on the
                     // dashboard and the profile, the all-devices row in settings,
@@ -215,6 +202,14 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
+                    LaunchedEffect(Unit) {
+                        com.securemed.app.util.GlobalErrorHandler.ztnaBlockedFlow.collect {
+                            navController.navigate(Route.DeviceCheck.route) {
+                                popUpTo(0) { inclusive = false }
+                            }
+                        }
+                    }
+
                     Scaffold(
                         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
                         bottomBar = { BottomNavBar(navController) }
@@ -232,7 +227,12 @@ class MainActivity : FragmentActivity() {
                                 DeviceCheckScreen(
                                     viewModel = authViewModel,
                                     onDeviceAuthorized = {
-                                        navController.navigate(Route.Login.route) {
+                                        val destination = when {
+                                            SecurePreferences.isLoggedIn() && openMedications -> Route.Medications.route
+                                            SecurePreferences.isLoggedIn() -> Route.Dashboard.route
+                                            else -> Route.Login.route
+                                        }
+                                        navController.navigate(destination) {
                                             popUpTo(Route.DeviceCheck.route) { inclusive = true }
                                         }
                                     }

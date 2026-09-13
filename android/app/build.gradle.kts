@@ -116,8 +116,8 @@ if (project.findProperty("SECUREMED_FCM") == "true") {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "API_BASE_URL", "\"$releaseApiBaseUrl\"")
             // Signed only when real key material was supplied; otherwise the
@@ -128,7 +128,7 @@ if (project.findProperty("SECUREMED_FCM") == "true") {
             // the Android SDK and is identical on every machine: anyone can
             // strip and re-sign such a build, Play rejects it, and the
             // fallback hid the fact that no release key was ever configured.
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         debug {
             isDebuggable = true

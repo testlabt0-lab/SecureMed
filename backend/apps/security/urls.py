@@ -14,6 +14,11 @@ from apps.security.blocklist_views import (
 )
 from apps.security.license_views import DeviceLicenseViewSet
 
+from apps.security.break_glass_views import (
+    BreakGlassActivateView, BreakGlassRevokeView,
+    BreakGlassStatusView, BreakGlassActiveListView,
+)
+
 router = DefaultRouter()
 router.register(r'devices', DeviceRegistryViewSet, basename='devices')
 router.register(r'licenses', DeviceLicenseViewSet, basename='licenses')
@@ -34,5 +39,9 @@ urlpatterns = [
     path('telegram-webhook/', TelegramWebhookView.as_view(), name='telegram-webhook'),
     path('ztna-request/', ZTNARequestView.as_view(), name='ztna-request'),
     path('ztna-status/', ZTNAStatusView.as_view(), name='ztna-status'),
+    path('break-glass/activate/', BreakGlassActivateView.as_view(), name='break-glass-activate'),
+    path('break-glass/revoke/', BreakGlassRevokeView.as_view(), name='break-glass-revoke'),
+    path('break-glass/status/', BreakGlassStatusView.as_view(), name='break-glass-status'),
+    path('break-glass/active/', BreakGlassActiveListView.as_view(), name='break-glass-active'),
     path('', include(router.urls)),
 ]

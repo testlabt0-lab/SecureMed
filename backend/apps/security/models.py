@@ -259,3 +259,80 @@ class ZTNAPendingApproval(models.Model):
         
     def __str__(self):
         return f"ZTNA Request: {self.device_fingerprint} - Approved: {self.is_approved}"
+
+
+class BreakGlassAccess(models.Model):
+    """
+    Emergency Break-Glass Protocol access record.
+    Allows clinical staff to override standard access boundaries during life-threatening emergencies.
+    Audited with CRITICAL security severity and strict expiration.
+    """
+    class Status(models.TextChoices):
+        ACTIVE = 'ACTIVE', _('نشط')
+        EXPIRED = 'EXPIRED', _('منتهي الصلاحية')
+        REVOKED = 'REVOKED', _('ملغى يدويًا')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='break_glass_events',
+        verbose_name=_('الممارس الطبي')
+    )
+    patient = models.ForeignKey(
+        'patients.Patient',
+        on_delete=models.CASCADE,
+        related_name='break_glass_accesses',
+        verbose_name=_('المريض')
+    )
+    reason = models.TextField(_('سبب الطوارئ الطبي (التبرير الإسعافي)'))
+    department = models.CharField(_('القسم الإسعافي'), max_length=100, blank=True)
+    status = models.CharField(
+        _('الحالة'),
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True
+    )
+    activated_at = models.DateTimeField(_('وقت التفعيل'), auto_now_add=True, db_index=True)
+    expires_at = models.DateTimeField(_('وقت انتهاء الصلاحية'), db_index=True)
+    revoked_at = models.DateTimeField(_('وقت الإلغاء'), null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='revoked_break_glass_events',
+        verbose_name=_('أُلغي بواسطة')
+    )
+    ip_address = models.GenericIPAddressField(_('عنوان IP'), null=True, blank=True)
+    user_agent = models.CharField(_('وكيل المستخدم'), max_length=500, blank=True)
+    device_fingerprint = models.CharField(_('بصمة الجهاز'), max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = _('وصول كسر الزجاج للطوارئ')
+        verbose_name_plural = _('سجلات كسر الزجاج للطوارئ')
+        ordering = ['-activated_at']
+        indexes = [
+            models.Index(fields=['user', 'patient', 'status']),
+            models.Index(fields=['patient', 'status', 'expires_at']),
+        ]
+
+    def __str__(self):
+        return f"Break-Glass: {self.user.email} -> {self.patient_id} ({self.status})"
+
+    @property
+    def is_currently_active(self):
+        if self.status != self.Status.ACTIVE:
+            return False
+        if self.expires_at <= timezone.now():
+            return False
+        return True
+
+    def revoke(self, user=None):
+        self.status = self.Status.REVOKED
+        self.revoked_at = timezone.now()
+        if user:
+            self.revoked_by = user
+        self.save(update_fields=['status', 'revoked_at', 'revoked_by'])
+

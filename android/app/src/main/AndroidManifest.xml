@@ -55,6 +55,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.CrashActivity"
+            android:exported="false"
+            android:process=":crash"
+            android:theme="@android:style/Theme.Light.NoTitleBar" />
+
         <!--
             Re-schedules medication alarms after device reboot.
 

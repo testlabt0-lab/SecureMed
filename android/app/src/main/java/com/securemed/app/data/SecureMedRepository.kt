@@ -54,29 +54,56 @@ class SecureMedRepository @Inject constructor(
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
-    /** Fetch-through cache: network first, fall back to the last cached copy. */
+    private val memoryCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Any>>()
+    private val CACHE_TTL_MS = 30_000L // 30 seconds
+
+    fun invalidateCache(vararg keys: String) {
+        for (k in keys) {
+            memoryCache.remove(k)
+            LocalCache.delete(k)
+        }
+    }
+
+    fun clearMemoryCache() {
+        memoryCache.clear()
+    }
+
+    /** Fetch-through cache: in-memory L1 (30s) -> network -> encrypted disk cache. */
     private inline fun <T> cached(
         key: String,
         serializer: KSerializer<T>,
+        forceRefresh: Boolean = false,
         fetch: () -> T
-    ): Result<T> = try {
-        val data = fetch()
-        try {
-            LocalCache.save(key, json.encodeToString(serializer, data))
-        } catch (_: Exception) {
-            // Cache write failures must never fail a successful request.
+    ): Result<T> {
+        if (!forceRefresh) {
+            val mem = memoryCache[key]
+            if (mem != null && System.currentTimeMillis() - mem.first < CACHE_TTL_MS) {
+                @Suppress("UNCHECKED_CAST")
+                return Result.success(mem.second as T)
+            }
         }
-        Result.success(data)
-    } catch (e: Exception) {
-        val cachedJson = LocalCache.load(key)
-        if (cachedJson != null) {
+        return try {
+            val data = fetch()
+            memoryCache[key] = System.currentTimeMillis() to (data as Any)
             try {
-                Result.success(json.decodeFromString(serializer, cachedJson))
+                LocalCache.save(key, json.encodeToString(serializer, data))
             } catch (_: Exception) {
+                // Cache write failures must never fail a successful request.
+            }
+            Result.success(data)
+        } catch (e: Exception) {
+            val cachedJson = LocalCache.load(key)
+            if (cachedJson != null) {
+                try {
+                    val local = json.decodeFromString(serializer, cachedJson)
+                    memoryCache[key] = System.currentTimeMillis() to (local as Any)
+                    Result.success(local)
+                } catch (_: Exception) {
+                    Result.failure(e)
+                }
+            } else {
                 Result.failure(e)
             }
-        } else {
-            Result.failure(e)
         }
     }
 
@@ -84,24 +111,37 @@ class SecureMedRepository @Inject constructor(
     private inline fun <T> cachedPagedList(
         key: String,
         serializer: KSerializer<T>,
+        forceRefresh: Boolean = false,
         fetch: () -> PagedResponse<T>
-    ): Result<List<T>> = try {
-        val page = fetch()
-        try {
-            LocalCache.save(key, json.encodeToString(PagedResponse.serializer(serializer), page))
-        } catch (_: Exception) {
+    ): Result<List<T>> {
+        if (!forceRefresh) {
+            val mem = memoryCache[key]
+            if (mem != null && System.currentTimeMillis() - mem.first < CACHE_TTL_MS) {
+                @Suppress("UNCHECKED_CAST")
+                return Result.success(mem.second as List<T>)
+            }
         }
-        Result.success(page.results)
-    } catch (e: Exception) {
-        val cachedJson = LocalCache.load(key)
-        if (cachedJson != null) {
+        return try {
+            val page = fetch()
+            memoryCache[key] = System.currentTimeMillis() to (page.results as Any)
             try {
-                Result.success(json.decodeFromString(PagedResponse.serializer(serializer), cachedJson).results)
+                LocalCache.save(key, json.encodeToString(PagedResponse.serializer(serializer), page))
             } catch (_: Exception) {
+            }
+            Result.success(page.results)
+        } catch (e: Exception) {
+            val cachedJson = LocalCache.load(key)
+            if (cachedJson != null) {
+                try {
+                    val local = json.decodeFromString(PagedResponse.serializer(serializer), cachedJson).results
+                    memoryCache[key] = System.currentTimeMillis() to (local as Any)
+                    Result.success(local)
+                } catch (_: Exception) {
+                    Result.failure(e)
+                }
+            } else {
                 Result.failure(e)
             }
-        } else {
-            Result.failure(e)
         }
     }
 

@@ -114,7 +114,7 @@ object NetworkModule {
             .take(200)
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.HEADERS
         else HttpLoggingInterceptor.Level.NONE
     }
 
@@ -174,12 +174,25 @@ object NetworkModule {
         return this
     }
 
+    private val connectionPool = okhttp3.ConnectionPool(15, 5, TimeUnit.MINUTES)
+
+    private val httpCache: okhttp3.Cache? by lazy {
+        runCatching {
+            val app = com.securemed.app.SecureMedApp.instance
+            okhttp3.Cache(java.io.File(app.cacheDir, "http_cache"), 25L * 1024 * 1024)
+        }.getOrNull()
+    }
+
     /** Plain client for the refresh call — must not recurse into the authenticator. */
-    private val refreshClient = OkHttpClient.Builder()
-        .applyCertificatePinner()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val refreshClient: OkHttpClient by lazy {
+        val builder = OkHttpClient.Builder()
+            .applyCertificatePinner()
+            .connectionPool(connectionPool)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+        httpCache?.let { builder.cache(it) }
+        builder.build()
+    }
 
     private val refreshLock = Any()
 
@@ -241,21 +254,27 @@ object NetworkModule {
         }
     }
 
-    private val okHttpClient = OkHttpClient.Builder()
-        .applyCertificatePinner()
-        .addInterceptor(authInterceptor)
-        .addInterceptor(loggingInterceptor)
-        .authenticator(tokenAuthenticator)
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val okHttpClient: OkHttpClient by lazy {
+        val builder = OkHttpClient.Builder()
+            .applyCertificatePinner()
+            .connectionPool(connectionPool)
+            .addInterceptor(authInterceptor)
+            .addInterceptor(loggingInterceptor)
+            .authenticator(tokenAuthenticator)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+        httpCache?.let { builder.cache(it) }
+        builder.build()
+    }
 
-    private val retrofit = Retrofit.Builder()
-        .baseUrl(BuildConfig.API_BASE_URL)
-        .client(okHttpClient)
-        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-        .build()
+    private val retrofit: Retrofit by lazy {
+        Retrofit.Builder()
+            .baseUrl(BuildConfig.API_BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+    }
 
-    val api: SecureMedApi = retrofit.create(SecureMedApi::class.java)
+    val api: SecureMedApi by lazy { retrofit.create(SecureMedApi::class.java) }
 }

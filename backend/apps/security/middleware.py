@@ -103,7 +103,7 @@ class WAFMiddleware :
         if not is_ztna_whitelisted:
             is_ztna_whitelisted = any(cache.get(f'ztna_approved_{fp}_{client_ip}') for fp in fps_to_check)
 
-        if not is_ztna_whitelisted:
+        if not is_ztna_whitelisted and fps_to_check:
             try:
                 from apps.security.models import ZTNAPendingApproval
                 if ZTNAPendingApproval.objects.filter(
@@ -113,7 +113,7 @@ class WAFMiddleware :
                 ).exists():
                     is_ztna_whitelisted = True
                     for fp in fps_to_check:
-                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=3600)
+                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
             except Exception:
                 pass
 
@@ -176,20 +176,30 @@ class WAFMiddleware :
         from urllib .parse import unquote_plus
         # Combine all input sources (URL-decoded for accurate pattern matching)
         # Use unquote_plus to convert + to space (Django urlencode uses +)
-        inputs_to_check =[
-        unquote_plus (request .GET .urlencode ()),
-        unquote_plus (request .POST .urlencode ()),
-        ]
+        inputs_to_check = []
+        get_str = unquote_plus(request.GET.urlencode())
+        if get_str:
+            inputs_to_check.append(get_str)
 
-        inputs_to_check .extend (self ._scannable_body (request ))
+        post_str = unquote_plus(request.POST.urlencode())
+        if post_str:
+            inputs_to_check.append(post_str)
+
+        for body_part in self._scannable_body(request):
+            if body_part:
+                inputs_to_check.append(body_part)
 
         # Also check individual GET/POST values directly (already decoded by Django)
-        for value in request .GET .dict ().values ():
-            inputs_to_check .append (value )
-        for value in request .POST .dict ().values ():
-            inputs_to_check .append (value )
+        for value in request.GET.dict().values():
+            if value:
+                inputs_to_check.append(value)
+        for value in request.POST.dict().values():
+            if value:
+                inputs_to_check.append(value)
 
-        inputs_to_check .append (unquote_plus (request .path ))
+        path_str = unquote_plus(request.path)
+        if path_str:
+            inputs_to_check.append(path_str)
 
         # Headers are checked against all attack patterns EXCEPT SSRF.
         # SSRF patterns are URLs (e.g. http://localhost) and the Referer
@@ -217,8 +227,10 @@ class WAFMiddleware :
                             'input_snippet':header_input [:200 ],
                             }
 
-                            # Check each input against patterns
+        # Check each non-empty input against patterns
         for input_str in inputs_to_check :
+            if not input_str:
+                continue
             for attack_type ,patterns in self .compiled_patterns .items ():
                 for pattern in patterns :
                     if pattern .search (input_str ):
@@ -560,7 +572,7 @@ class ZeroTrustConsentFirewallMiddleware:
                     approved_fp = first_match.device_fingerprint
                     # Cache the approval so subsequent requests hit cache
                     for fp in fps_to_check:
-                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=3600)
+                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
             except Exception as e:
                 logger.error(f"ZTNA DB Check Failed: {e}")
                 is_approved = False

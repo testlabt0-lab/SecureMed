@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
-import { getDeviceFingerprint } from '../utils/deviceFingerprint';
+import { getDeviceFingerprint, getCachedDeviceFingerprintSync } from '../utils/deviceFingerprint';
 import toast from 'react-hot-toast';
 
 const API_BASE_URL = '/api/v1';
@@ -20,9 +20,9 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${accessToken}`;
     }
 
-    // Attach device fingerprint to every request
+    // Attach device fingerprint to every request (fast-path synchronous first)
     try {
-      const deviceInfo = await getDeviceFingerprint();
+      const deviceInfo = getCachedDeviceFingerprintSync() || await getDeviceFingerprint();
       config.headers['X-Device-Fingerprint'] = deviceInfo.device_fingerprint;
       config.headers['X-Mac-Address'] = deviceInfo.mac_address || '';
       config.headers['X-OS-Info'] = deviceInfo.os_info;

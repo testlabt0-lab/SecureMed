@@ -51,7 +51,15 @@ class TestAuditLogAPI:
     """Tests for audit log API endpoints."""
 
     def setup_method(self):
+        from apps.security.models import ZTNAPendingApproval
         self.client = APIClient()
+        self.client.cookies['ztna_device_id'] = 'test-ztna-device'
+        self.client.defaults['HTTP_X_DEVICE_FINGERPRINT'] = 'test-ztna-device'
+        ZTNAPendingApproval.objects.create(
+            device_fingerprint='test-ztna-device',
+            ip_address='127.0.0.1',
+            is_approved=True
+        )
         self.admin = AdminUserFactory()
         self.client.force_authenticate(user=self.admin)
 

@@ -15,15 +15,31 @@ export interface DeviceInfo {
   device_fingerprint: string;
 }
 
-// The fingerprint is stable for the lifetime of the tab (screen, timezone,
-// language, UA do not change mid-session), but it was recomputed with a fresh
-// SHA-256 for every single API call. Cache the promise module-level so the
-// digest runs once and every request awaits the same resolved value.
+let cachedDeviceInfo: DeviceInfo | null = null;
 let fingerprintPromise: Promise<DeviceInfo> | null = null;
 
+// Try to initialize synchronously from sessionStorage for 0ms startup
+try {
+  const stored = typeof window !== 'undefined' ? sessionStorage.getItem('securemed_device_info') : null;
+  if (stored) {
+    cachedDeviceInfo = JSON.parse(stored);
+  }
+} catch (_) {}
+
+export const getCachedDeviceFingerprintSync = (): DeviceInfo | null => cachedDeviceInfo;
+
 export const getDeviceFingerprint = (): Promise<DeviceInfo> => {
+  if (cachedDeviceInfo) {
+    return Promise.resolve(cachedDeviceInfo);
+  }
   if (!fingerprintPromise) {
-    fingerprintPromise = computeDeviceFingerprint();
+    fingerprintPromise = computeDeviceFingerprint().then(info => {
+      cachedDeviceInfo = info;
+      try {
+        sessionStorage.setItem('securemed_device_info', JSON.stringify(info));
+      } catch (_) {}
+      return info;
+    });
   }
   return fingerprintPromise;
 };

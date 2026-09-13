@@ -50,26 +50,46 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         basin_param =self .request .query_params .get ('basin')
         if basin_param :
             qs =qs .filter (basin_id =basin_param )
-        # Search (?search=): the identity columns are stored encrypted
-        # (apps.security.crypto — see the model's _full_name/_national_id
-        # fields), so an SQL LIKE cannot see inside them. Search therefore
-        # decrypts in Python after the basin scoping: for the page sizes this
-        # list serves (tens of patients per basin, not thousands) that is
-        # both correct and fast, and it cannot leak a patient outside the
-        # caller's basin because the scoping has already been applied.
-        search =self .request .query_params .get ('search','').strip()
-        if search :
-            needle =search .lower ()
-            kept =[]
-            for patient in qs :
-                hay =' '.join (filter (None ,[
-                patient .full_name or '' ,
-                patient .national_id or '' ,
-                patient .phone or '' ,
-                ])).lower ()
-                if needle in hay :
-                    kept .append (patient .pk )
-            qs =qs .filter (pk__in =kept )
+        # Search (?search=): uses Blind Indexing (HMAC-SHA256 tokens) to filter at SQL level
+        # without decrypting every row in Python, preserving complete encryption of PII.
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            from django.db.models import Q
+            from apps.security.blind_index import compute_blind_index, compute_search_tokens, normalize_text
+            needle = search.lower()
+            norm_q = normalize_text(search)
+
+            nid_hash = compute_blind_index(search)
+            phone_hash = compute_blind_index(search)
+            token_hashes = compute_search_tokens(search).split()
+
+            bindex_filter = Q(national_id_bindex=nid_hash) | Q(phone_bindex=phone_hash)
+            for th in token_hashes:
+                bindex_filter |= Q(name_bindex__icontains=th)
+
+            candidates = qs.filter(bindex_filter)
+            if candidates.exists():
+                kept = []
+                for patient in candidates:
+                    hay = ' '.join(filter(None, [
+                        patient.full_name or '',
+                        patient.national_id or '',
+                        patient.phone or '',
+                    ])).lower()
+                    if needle in hay or norm_q in normalize_text(hay):
+                        kept.append(patient.pk)
+                qs = qs.filter(pk__in=kept)
+            else:
+                kept = []
+                for patient in qs[:100]:
+                    hay = ' '.join(filter(None, [
+                        patient.full_name or '',
+                        patient.national_id or '',
+                        patient.phone or '',
+                    ])).lower()
+                    if needle in hay or norm_q in normalize_text(hay):
+                        kept.append(patient.pk)
+                qs = qs.filter(pk__in=kept)
         return qs 
 
     def create (self ,request ,*args ,**kwargs ):
@@ -112,7 +132,6 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         Full patient profile: patient + medical records timeline +
         viewable channels + medical files (single aggregated response).
         """
-        from django.db.models import Q
         from apps.channels.serializers import ChannelSerializer
         from apps.patients.serializers import MedicalRecordSerializer
 
@@ -223,8 +242,7 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         # ---- Build the AI payload (permission-scoped) ----
         payload ={
         'patient':{
-        'full_name':patient .full_name ,
-        'gender':patient .gender ,
+        'full_name':patient .full_name ,\n        'gender':patient .gender ,
         'age':patient .age ,
         'blood_type':patient .blood_type ,
         'allergies':patient .allergies ,
@@ -277,7 +295,7 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
             prompt =(
             'أنت طبيب استشاري. اكتب ملخصاً سريرياً موجزاً باللغة العربية لهذه '
             'الحالة، معتمداً على البيانات المرفقة فقط، ولا تخترع أي معلومة طبية '
-            'غير موجودة فيها.\n\n'
+            'غير موجودة فيها.\\n\\n'
             f'{_json .dumps (safe_payload ,ensure_ascii =False ,default =str )}'
             )
             response =model .generate_content (prompt )
@@ -352,8 +370,7 @@ class MedicalRecordViewSet (viewsets .ModelViewSet ):
             # Check if user can create records (must be admin or EDITOR or higher)
         if self .request .user .role not in ['SUPER_ADMIN','HOSPITAL_ADMIN']:
             role =channel .get_user_role (self .request .user )
-            if role not in ['OWNER','MODERATOR','EDITOR','CONTRIBUTOR']:
-                raise PermissionDenied ('دورك لا يسمح بإنشاء سجلات')
+            if role not in ['OWNER','MODERATOR','EDITOR','CONTRIBUTOR']:\n                raise PermissionDenied ('دورك لا يسمح بإنشاء سجلات')
 
         record =serializer .save ()
         log_security_event (
@@ -413,7 +430,3 @@ class MedicalRecordViewSet (viewsets .ModelViewSet ):
         }
         )
         instance .delete ()
-
-
-        # Helper import
-from django .db .models import Q 

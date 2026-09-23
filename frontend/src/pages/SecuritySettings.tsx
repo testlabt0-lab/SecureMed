@@ -4,8 +4,9 @@ import { authAPI } from '../api/client';
 import { settingsAPI } from '../api/extendedApis';
 import { enrollBiometric } from '../utils/webauthn';
 import toast from 'react-hot-toast';
-import { X, ShieldCheck, Copy, AlertTriangle } from 'lucide-react';
+import { X, ShieldCheck, Copy, AlertTriangle, Lock, EyeOff, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSecurityPreferencesStore } from '../store/securityPreferencesStore';
 
 export const SecuritySettings = () => {
   const user = useAuthStore(state => state.user);
@@ -154,9 +155,133 @@ export const SecuritySettings = () => {
     toast.success('تم نسخ الرمز السري');
   };
 
+  const {
+    isWatermarkEnabled,
+    watermarkOpacity,
+    isTabBlurEnabled,
+    isIdleLockEnabled,
+    idleTimeoutMinutes,
+    setWatermarkEnabled,
+    setWatermarkOpacity,
+    setTabBlurEnabled,
+    setIdleLockEnabled,
+    setIdleTimeoutMinutes,
+    lock,
+  } = useSecurityPreferencesStore();
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">الإعدادات الأمنية</h1>
+      <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-6">الإعدادات الأمنية والخصوصية</h1>
+      
+      {/* Visual Privacy & Screen Protection */}
+      <div className="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden mb-6 p-6 border-r-4 border-primary-500">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+              <EyeOff className="w-5 h-5 text-primary-500" />
+              حماية الشاشة والخصوصية البصرية (Visual Privacy)
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              معايير حماية السجلات الطبية من التلصص البصري وتوثيق الجلسات السريرية (HIPAA Compliant).
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => lock('manual')}
+            className="px-3.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            قفل الشاشة الآن للمعاينة
+          </button>
+        </div>
+
+        <div className="space-y-4 divide-y divide-gray-100 dark:divide-gray-700/60">
+          {/* Inactivity Timeout */}
+          <div className="pt-3 flex items-center justify-between">
+            <div className="max-w-md">
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                قفل الشاشة التلقائي عند الخمول (Idle Lock)
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                تأمين المحطة الطبية بتعتيم الشاشة عند ترك الجهاز دون لمس أو تفاعل لحماية بيانات المريض.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <select
+                value={idleTimeoutMinutes}
+                onChange={(e) => setIdleTimeoutMinutes(Number(e.target.value))}
+                disabled={!isIdleLockEnabled}
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 disabled:opacity-50"
+              >
+                <option value={1}>دقيقة واحدة</option>
+                <option value={5}>5 دقائق (موصى به)</option>
+                <option value={15}>15 دقيقة</option>
+                <option value={30}>30 دقيقة</option>
+              </select>
+              <input
+                type="checkbox"
+                checked={isIdleLockEnabled}
+                onChange={(e) => setIdleLockEnabled(e.target.checked)}
+                className="w-4 h-4 rounded text-primary-600 focus:ring-primary-500"
+              />
+            </div>
+          </div>
+
+          {/* Tab Switch Blur */}
+          <div className="pt-3 flex items-center justify-between">
+            <div className="max-w-md">
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                تعتيم الشاشة عند مغادرة التبويب (Tab Switch Privacy Shield)
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                تفعيل طبقة الحجب فوراً عند التبديل لتبويب آخر لمنع قراءة الشاشة من المارة.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={isTabBlurEnabled}
+              onChange={(e) => setTabBlurEnabled(e.target.checked)}
+              className="w-4 h-4 rounded text-primary-600 focus:ring-primary-500"
+            />
+          </div>
+
+          {/* Dynamic Watermark */}
+          <div className="pt-3 flex items-center justify-between">
+            <div className="max-w-md">
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-teal-500" />
+                العلامة المائية الديناميكية للحد من التسريب (Anti-Leak Watermark)
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                طباعة شبكة شبه شفافة متكررة باسمك ووقت العرض الحي لردع تصوير السجلات بالهاتف.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              {isWatermarkEnabled && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-gray-400">الشفافية:</span>
+                  <input
+                    type="range"
+                    min={0.03}
+                    max={0.15}
+                    step={0.01}
+                    value={watermarkOpacity}
+                    onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
+                    className="w-20 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                  />
+                  <span className="text-[11px] font-mono text-gray-500">{Math.round(watermarkOpacity * 100)}%</span>
+                </div>
+              )}
+              <input
+                type="checkbox"
+                checked={isWatermarkEnabled}
+                onChange={(e) => setWatermarkEnabled(e.target.checked)}
+                className="w-4 h-4 rounded text-primary-600 focus:ring-primary-500"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
       
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden mb-6 p-6">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">تغيير كلمة المرور</h2>

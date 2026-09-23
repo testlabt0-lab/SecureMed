@@ -69,7 +69,6 @@ fun LoginScreen(
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
             onLoginSuccess()
-            viewModel.resetState()
         }
     }
 
@@ -257,7 +256,7 @@ fun LoginScreen(
                                 viewModel.login(email, password)
                             }
                         },
-                        enabled = !biometricMode || (isBiometricAvailable && hasBiometricKey),
+                        enabled = (!biometricMode || (isBiometricAvailable && hasBiometricKey)) && uiState !is AuthUiState.Loading,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),

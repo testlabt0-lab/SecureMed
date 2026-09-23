@@ -336,3 +336,84 @@ class BreakGlassAccess(models.Model):
             self.revoked_by = user
         self.save(update_fields=['status', 'revoked_at', 'revoked_by'])
 
+
+class DualCustodyApproval(models.Model):
+    """Persistent record of a Four-Eyes / dual-custody authorisation.
+
+    The governance module guards irreversible operations (bulk export, record
+    purge, mass deletion). Such a control cannot live in the cache alone: an
+    operator who flushes Redis — deliberately or during an incident — would
+    erase the evidence that an operation was ever approved, and the approval
+    state would survive only as long as the cache TTL. This table is the
+    authoritative record; the cache remains a fast lookup layered on top.
+
+    The one-time execution token binds the operation type and target into its
+    HMAC, so a token minted for a purge cannot be replayed against an export
+    even if the cache row is gone.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', _('بانتظار المراجعة')
+        APPROVED = 'APPROVED', _('معتمد')
+        REJECTED = 'REJECTED', _('مرفوض')
+        EXPIRED = 'EXPIRED', _('منتهي الصلاحية')
+        EXECUTED = 'EXECUTED', _('نُفِّذ')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    operation_type = models.CharField(_('نوع العملية'), max_length=50, db_index=True)
+    target_resource = models.CharField(_('المورد المستهدف'), max_length=255)
+    payload = models.JSONField(_('حمولة العملية'), default=dict, blank=True)
+    justification = models.TextField(_('التبرير'), blank=True)
+
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='dual_custody_requests',
+        verbose_name=_('مقدم الطلب'),
+    )
+    approver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='dual_custody_approvals',
+        verbose_name=_('المعتمد الثاني'),
+    )
+    status = models.CharField(
+        _('الحالة'), max_length=20, choices=Status.choices,
+        default=Status.PENDING, db_index=True,
+    )
+    review_notes = models.TextField(_('ملاحظات المراجعة'), blank=True)
+    rejection_reason = models.TextField(_('سبب الرفض'), blank=True)
+
+    requested_at = models.DateTimeField(_('وقت الطلب'), auto_now_add=True, db_index=True)
+    reviewed_at = models.DateTimeField(_('وقت المراجعة'), null=True, blank=True)
+    expires_at = models.DateTimeField(_('وقت انتهاء الصلاحية'), db_index=True)
+    executed_at = models.DateTimeField(_('وقت التنفيذ'), null=True, blank=True)
+    executed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='dual_custody_executions',
+        verbose_name=_('نفَّذها'),
+    )
+
+    class Meta:
+        verbose_name = _('موافقة ثنائية')
+        verbose_name_plural = _('طلبات الموافقة الثنائية')
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['status', '-requested_at']),
+            models.Index(fields=['operation_type', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.operation_type} -> {self.target_resource} ({self.status})'
+
+    @property
+    def is_pending(self):
+        return self.status == self.Status.PENDING
+
+    @property
+    def is_expired(self):
+        return self.expires_at <= timezone.now()
+

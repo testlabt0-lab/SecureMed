@@ -223,8 +223,8 @@ object MedicationStore {
             if (start != null && today.isBefore(start)) return@forEach
             if (end != null && today.isAfter(end)) return@forEach
 
-            plan.times.forEach { rawTime ->
-                val time = runCatching { LocalTime.parse(rawTime) }.getOrNull() ?: return@forEach
+            plan.times.forEach rawTime@{ rawTime ->
+                val time = runCatching { LocalTime.parse(rawTime) }.getOrNull() ?: return@rawTime
                 val scheduledFor = LocalDateTime.of(today, time)
                 val key = "${plan.id}|$scheduledFor"
                 val status = when {
@@ -267,8 +267,8 @@ object MedicationStore {
                 val day = today.minusDays(offset.toLong())
                 if (start != null && day.isBefore(start)) continue
                 if (end != null && day.isAfter(end)) continue
-                plan.times.forEach { rawTime ->
-                    val time = runCatching { LocalTime.parse(rawTime) }.getOrNull() ?: return@forEach
+                plan.times.forEach rawTime@{ rawTime ->
+                    val time = runCatching { LocalTime.parse(rawTime) }.getOrNull() ?: return@rawTime
                     expected++
                     if ("${plan.id}|${LocalDateTime.of(day, time)}" in takenKeys) taken++
                 }

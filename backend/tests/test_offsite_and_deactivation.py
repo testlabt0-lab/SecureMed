@@ -102,6 +102,13 @@ class TestOffsiteDelivery:
 
     def test_cloud_delivery_success(self, tmp_path, settings):
         record = _make_record(tmp_path, settings)
+        # Telegram must be off so this exercises the cloud channel alone. A
+        # developer's local .env can carry a real BACKUP_SEND_TO_TELEGRAM /
+        # TELEGRAM_BOT_TOKEN pair, which would otherwise send this fake archive
+        # to a live chat and report BOTH instead of CLOUD.
+        settings.BACKUP_SEND_TO_TELEGRAM = False
+        settings.TELEGRAM_BOT_TOKEN = ''
+        settings.TELEGRAM_ADMIN_CHAT_ID = ''
         settings.BACKUP_OFFSITE_ENABLED = True
         settings.BACKUP_OFFSITE_BUCKET = 'med-backups'
         settings.BACKUP_OFFSITE_ACCESS_KEY_ID = 'k'

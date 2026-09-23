@@ -43,7 +43,22 @@ object NetworkModule {
                 addDeviceHeaders()
             }
             .build()
-        val response = chain.proceed(request)
+        val response = try {
+            chain.proceed(request)
+        } catch (e: javax.net.ssl.SSLPeerUnverifiedException) {
+            com.securemed.app.util.GlobalErrorHandler.emitError(
+                "تحذير أمني خطير: رُصدت محاولة اعتراض وتزوير للشهادة المشفرة (MITM Interception Attack). تم حظر الاتصال فوراً لحماية بيانات المرضى."
+            )
+            runCatching {
+                com.securemed.app.security.TamperProofAuditManager.recordEvent(
+                    com.securemed.app.SecureMedApp.instance,
+                    "MITM_ATTACK_DETECTED",
+                    "SSL certificate pinning mismatch for ${request.url.host}"
+                )
+            }
+            throw e
+        }
+
         if (response.code == 403) {
             val peek = runCatching { response.peekBody(1024).string() }.getOrNull()
             if (peek?.contains("ZTNA_BLOCKED") == true) {

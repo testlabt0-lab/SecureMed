@@ -12,7 +12,7 @@
 #   ./devsecops/scripts/security-scan.sh                # strict (default)
 #   SCAN_ALLOW_MISSING=1 ./devsecops/scripts/security-scan.sh
 
-set -e
+set -euo pipefail
 
 ALLOW_MISSING="${SCAN_ALLOW_MISSING:-0}"
 
@@ -21,7 +21,7 @@ require_tool() {
     if command -v "$1" &> /dev/null; then
         return 0
     fi
-    if [ "$ALLOW_MISSING" = "1" ]; then
+    if [[ "$ALLOW_MISSING" = "1" ]]; then
         echo -e "${YELLOW}⚠️  $1 not installed, skipping (SCAN_ALLOW_MISSING=1)${NC}"
         return 1
     fi
@@ -64,7 +64,7 @@ cd ..
 # 3. NPM Audit
 echo -e "\n${YELLOW}3. Running NPM Audit...${NC}"
 cd frontend
-if [ -f package-lock.json ]; then
+if [[ -f package-lock.json ]]; then
     npm audit --audit-level=moderate || {
         echo -e "${YELLOW}⚠️  NPM Audit found vulnerabilities${NC}"
     }
@@ -96,7 +96,7 @@ fi
 # 6. Django security check
 echo -e "\n${YELLOW}6. Running Django Security Check...${NC}"
 cd backend
-if [ -f manage.py ]; then
+if [[ -f manage.py ]]; then
     python manage.py check --deploy 2>&1 | grep -v "^$" || true
 fi
 cd ..

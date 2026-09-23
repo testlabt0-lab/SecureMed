@@ -20,10 +20,18 @@ import com.securemed.app.ui.MainActivity
 object NotificationHelper {
 
     const val CHANNEL_MEDICATIONS = "medication_reminders"
+    const val CHANNEL_EMERGENCY = "emergency_alerts"
+    const val CHANNEL_APPOINTMENTS = "appointment_reminders"
+    const val CHANNEL_PUSH = "push_alerts"
+
     const val MEDICATION_NOTIFICATION_ID_BASE = 4200
+    const val EMERGENCY_NOTIFICATION_ID_BASE = 9110
+    const val APPOINTMENT_NOTIFICATION_ID_BASE = 6500
 
     /** Intent extra that makes MainActivity open the medications screen. */
     const val EXTRA_OPEN_MEDICATIONS = "open_medications"
+    const val EXTRA_OPEN_APPOINTMENTS = "open_appointments"
+    const val EXTRA_OPEN_PATIENT_ID = "open_patient_id"
 
     /**
      * Lock-screen stand-ins. A dose reminder names the drug, the dose and the
@@ -47,11 +55,33 @@ object NotificationHelper {
         ).apply {
             description = "تنبيهات مواعيد تناول الدواء"
             enableVibration(true)
-            // On O+ the channel governs what a locked screen may render;
-            // per-notification visibility alone is not enough.
             lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         }
         manager.createNotificationChannel(medications)
+
+        val emergency = NotificationChannel(
+            CHANNEL_EMERGENCY,
+            "🚨 تنبيهات الطوارئ والحالات الحرجة",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "تنبيهات طلبات Break-Glass وحالات الطوارئ الحرجة"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 800)
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            setBypassDnd(true)
+        }
+        manager.createNotificationChannel(emergency)
+
+        val appointments = NotificationChannel(
+            CHANNEL_APPOINTMENTS,
+            "مواعيد الكشف والعيادة",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "تنبيهات مواعيد الكشف القادمة بدون إنترنت"
+            enableVibration(true)
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+        }
+        manager.createNotificationChannel(appointments)
     }
 
     /** True when the device allows posting notifications. */
@@ -62,8 +92,6 @@ object NotificationHelper {
         } else {
             NotificationManagerCompat.from(context).areNotificationsEnabled()
         }
-
-    const val CHANNEL_PUSH = "push_alerts"
 
     fun showNotification(context: Context, title: String, body: String) {
         ensureChannels(context)
@@ -180,4 +208,102 @@ object NotificationHelper {
             // POST_NOTIFICATIONS revoked — silently ignore.
         }
     }
+
+    /**
+     * Urgent Heads-up Emergency Alert (Break-Glass / Critical Patient).
+     * Bypasses DND with strong vibration and priority MAX.
+     */
+    fun showEmergencyAlert(
+        context: Context,
+        title: String,
+        message: String,
+        patientId: String? = null
+    ) {
+        ensureChannels(context)
+
+        val notificationId = EMERGENCY_NOTIFICATION_ID_BASE + (title.hashCode() and 0x7FFFFFFF) % 1000
+
+        val openApp = PendingIntent.getActivity(
+            context,
+            notificationId,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("extra_action", "break_glass")
+                if (!patientId.isNullOrBlank()) {
+                    putExtra(EXTRA_OPEN_PATIENT_ID, patientId)
+                }
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_EMERGENCY)
+            .setSmallIcon(R.drawable.ic_shortcut_emergency)
+            .setColor(0xFFDC2626.toInt()) // Red alert
+            .setContentTitle("🚨 $title")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(openApp)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(
+                R.drawable.ic_shortcut_emergency,
+                "فتح الحالة فوراً",
+                openApp
+            )
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(notificationId, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /**
+     * Offline Appointment Reminder notification scheduled via AlarmManager.
+     */
+    fun showAppointmentReminder(
+        context: Context,
+        patientName: String,
+        doctorName: String,
+        timeText: String,
+        appointmentId: String
+    ) {
+        ensureChannels(context)
+
+        val notificationId = APPOINTMENT_NOTIFICATION_ID_BASE + (appointmentId.hashCode() and 0x7FFFFFFF) % 1000
+
+        val openApp = PendingIntent.getActivity(
+            context,
+            notificationId,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_APPOINTMENTS, true)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = "📅 تذكير بموعد كشف طبي — $timeText"
+        val message = "موعد للمريض: $patientName مع د. $doctorName"
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_APPOINTMENTS)
+            .setSmallIcon(R.drawable.ic_shortcut_add_patient)
+            .setColor(0xFF2563EB.toInt())
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setAutoCancel(true)
+            .setContentIntent(openApp)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(notificationId, notification)
+        } catch (_: SecurityException) {
+        }
+    }
 }
+

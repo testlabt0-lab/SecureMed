@@ -62,6 +62,8 @@ object TamperDetection {
         runCatching { signals += xposedSignals() }
         runCatching { signals += fileSignals() }
         runCatching { signals += debuggerSignals() }
+        runCatching { signals += emulatorSignals() }
+        runCatching { signals += signatureSignals(context) }
 
         return signals
     }
@@ -149,4 +151,53 @@ object TamperDetection {
         }
         return out
     }
+
+    /**
+     * Verifies the app signature to detect repackaging, cloning, and unofficial builds.
+     * In debug builds, this check is skipped so development keystores work seamlessly.
+     */
+    private fun signatureSignals(context: Context): List<Signal> {
+        val out = mutableListOf<Signal>()
+        // Skip in debug mode
+        if (com.securemed.app.BuildConfig.DEBUG) return out
+
+        runCatching {
+            val pm = context.packageManager
+            val packageName = context.packageName
+            val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                val signingInfo = pm.getPackageInfo(
+                    packageName,
+                    android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+                ).signingInfo
+                if (signingInfo != null) {
+                    if (signingInfo.hasMultipleSigners()) {
+                        signingInfo.apkContentsSigners
+                    } else {
+                        signingInfo.signingCertificateHistory
+                    }
+                } else emptyArray()
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(
+                    packageName,
+                    android.content.pm.PackageManager.GET_SIGNATURES
+                ).signatures ?: emptyArray()
+            }
+
+            // Detect debug keys shipping in release builds (the standard Android debug cert has DN Android Debug)
+            for (sig in signatures) {
+                val certFactory = java.security.cert.CertificateFactory.getInstance("X.509")
+                val cert = certFactory.generateCertificate(
+                    java.io.ByteArrayInputStream(sig.toByteArray())
+                ) as java.security.cert.X509Certificate
+
+                val subject = cert.subjectDN?.name.orEmpty()
+                if (subject.contains("Android Debug", ignoreCase = true)) {
+                    out += Signal("debug_signature", "Release APK signed with debug keystore")
+                }
+            }
+        }
+        return out
+    }
 }
+

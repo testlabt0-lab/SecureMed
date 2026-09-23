@@ -31,6 +31,11 @@
 
     <!-- Hardware requirements (optional) -->
     <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:name=".SecureMedApp"
@@ -53,6 +58,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- App Shortcuts and deep linking -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <activity
@@ -69,6 +78,15 @@
             it cannot run before the user unlocks. Claiming that action without
             android:directBootAware="true" only registers a filter the system
             never delivers to.
+
+            android:exported="true" is required here, not careless:
+            BOOT_COMPLETED is a system broadcast the platform only delivers to
+            exported receivers, so this cannot be locked down with
+            exported="false". The receiver is safe to expose because
+            BootReceiver.onReceive ignores every action except BOOT_COMPLETED
+            and QUICKBOOT_POWERON and then reads only this app's own cache — a
+            forged intent from another app can at worst re-arm our own alarms
+            from our own data, and no PHI leaves the process.
         -->
         <receiver
             android:name=".reminders.BootReceiver"
@@ -128,5 +146,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Glance AppWidget Receiver -->
+        <receiver
+            android:name=".widget.DoctorScheduleWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/doctor_schedule_widget_info" />
+        </receiver>
     </application>
 </manifest>

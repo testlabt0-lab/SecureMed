@@ -13,7 +13,7 @@
 # 8. Security verification
 # =====================================================
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -53,7 +53,7 @@ check_command node || MISSING=1
 check_command npm || MISSING=1
 check_command psql || echo -e "  ${YELLOW}⚠${NC} psql not found (PostgreSQL client)"
 
-if [ $MISSING -eq 1 ]; then
+if [[ $MISSING -eq 1 ]]; then
     echo -e "\n${RED}❌ Missing required commands. Please install them first.${NC}"
     exit 1
 fi
@@ -63,7 +63,7 @@ echo -e "\n${YELLOW}[2/8] Setting up Python virtual environment...${NC}"
 
 cd "$BACKEND_DIR"
 
-if [ ! -d "venv" ]; then
+if [[ ! -d "venv" ]]; then
     python3 -m venv venv
     echo -e "  ${GREEN}✓${NC} Virtual environment created"
 else
@@ -85,7 +85,7 @@ echo -e "  ${GREEN}✓${NC} Dependencies installed"
 # ---- Step 4: Generate certificates ----
 echo -e "\n${YELLOW}[4/8] Generating security certificates...${NC}"
 
-if [ ! -f "certs/jwt_private.pem" ]; then
+if [[ ! -f "certs/jwt_private.pem" ]]; then
     python scripts/generate_certificates.py
     echo -e "  ${GREEN}✓${NC} Certificates generated"
 else
@@ -95,10 +95,10 @@ fi
 # ---- Step 5: Setup environment file ----
 echo -e "\n${YELLOW}[5/8] Setting up environment file...${NC}"
 
-if [ ! -f ".env" ]; then
+if [[ ! -f ".env" ]]; then
     cp .env.example .env
     # Update ENCRYPTION_KEY from generated file
-    if [ -f "certs/field_encryption_key.txt" ]; then
+    if [[ -f "certs/field_encryption_key.txt" ]]; then
         KEY=$(cat certs/field_encryption_key.txt)
         sed -i.bak "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$KEY|" .env
         rm -f .env.bak
@@ -117,7 +117,11 @@ if ! grep -q "sslmode" .env 2>/dev/null; then
 fi
 
 # Try to create database (may fail if already exists or no permissions)
-DB_NAME=$(grep DB_NAME .env | cut -d'=' -f2)
+# `|| true` keeps this optional: .env.example documents DATABASE_URL as the
+# primary configuration, so a .env without a DB_NAME line is valid, and under
+# `set -o pipefail` a non-matching grep would otherwise abort the whole setup.
+DB_NAME=$(grep DB_NAME .env | cut -d'=' -f2 || true)
+DB_NAME="${DB_NAME//[$'\r\n ']/}"
 if command -v psql &> /dev/null; then
     if psql -U postgres -c "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q "1 row"; then
         echo -e "  ${YELLOW}⚠${NC} Database '$DB_NAME' already exists"
@@ -178,7 +182,7 @@ echo -e "\n${YELLOW}Creating superuser...${NC}"
 # screenshots, and eventually someone's leaked .env. Generate a random one
 # unless the operator explicitly opted in via INITIAL_ADMIN_PASSWORD.
 GENERATED_PASSWORD=""
-if [ -z "${INITIAL_ADMIN_PASSWORD:-}" ]; then
+if [[ -z "${INITIAL_ADMIN_PASSWORD:-}" ]]; then
     GENERATED_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
     export INITIAL_ADMIN_PASSWORD="$GENERATED_PASSWORD"
 fi
@@ -207,7 +211,7 @@ else:
 echo -e "\n${YELLOW}[8/8] Setting up frontend...${NC}"
 
 cd "$FRONTEND_DIR"
-if [ ! -d "node_modules" ]; then
+if [[ ! -d "node_modules" ]]; then
     npm install --silent 2>&1 | tail -5
     echo -e "  ${GREEN}✓${NC} Frontend dependencies installed"
 else
@@ -226,7 +230,7 @@ echo -e "  3. Visit:    http://localhost:3000"
 echo -e ""
 echo -e "${YELLOW}Admin login:${NC}"
 echo -e "  Email:    ${INITIAL_ADMIN_EMAIL:-admin@securemed.app}"
-if [ -n "${GENERATED_PASSWORD}" ]; then
+if [[ -n "${GENERATED_PASSWORD}" ]]; then
     echo -e "  Password: ${GENERATED_PASSWORD}  ${RED}(generated — save it now, shown once)${NC}"
 else
     echo -e "  Password: (the INITIAL_ADMIN_PASSWORD you set in the environment)"

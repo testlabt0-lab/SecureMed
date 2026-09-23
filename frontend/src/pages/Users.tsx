@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, Search, Users as UsersIcon, Shield, Pencil, Power } from 'lucide-react';
+import { UserPlus, Search, Users as UsersIcon, Pencil, Power } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { usersAPI, basinsAPI } from '../api/client';
 import { useAuthStore } from '../store/authStore';

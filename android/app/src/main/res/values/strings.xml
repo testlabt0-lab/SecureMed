@@ -14,4 +14,11 @@
     <string name="biometric_prompt_subtitle">Use your fingerprint to access SecureMed</string>
     <string name="biometric_prompt_description">SecureMed requires biometric authentication to access sensitive data</string>
     <string name="biometric_prompt_negative">Cancel</string>
+    <string name="widget_name">SecureMed Doctor Schedule</string>
+    <string name="shortcut_add_patient">Add Patient</string>
+    <string name="shortcut_add_patient_desc">Quickly register a new patient</string>
+    <string name="shortcut_scan_barcode">Scan Barcode</string>
+    <string name="shortcut_scan_barcode_desc">Scan patient card or medication barcode</string>
+    <string name="shortcut_break_glass">Emergency (Break-Glass)</string>
+    <string name="shortcut_break_glass_desc">Request emergency access to patient records</string>
 </resources>

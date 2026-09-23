@@ -216,6 +216,13 @@ elif _DATABASE_URL :
     }
     DATABASES ['default']['CONN_HEALTH_CHECKS']=True 
     DATABASES ['default']['ATOMIC_REQUESTS']=config ('DB_ATOMIC_REQUESTS',default =False ,cast =bool )
+    DATABASES ['default'].setdefault('OPTIONS', {})
+    DATABASES ['default']['OPTIONS'].update({
+        'keepalives': 1,
+        'keepalives_idle': 30,
+        'keepalives_interval': 10,
+        'keepalives_count': 5,
+    })
     if _is_pooler:
         DATABASES ['default']['DISABLE_SERVER_SIDE_CURSORS']=True 
         DATABASES ['default']['CONN_MAX_AGE']=0
@@ -802,6 +809,9 @@ CELERY_TASK_EAGER_PROPAGATES =config ('CELERY_TASK_EAGER_PROPAGATES',default =Fa
 
 # AI Settings
 GEMINI_API_KEY =config ('GEMINI_API_KEY',default ='')
+# Gemini was retired model names before (2.0-flash now 404s upstream), so the
+# model is configurable and defaults to a currently served one.
+GEMINI_MODEL =config ('GEMINI_MODEL',default ='gemini-3.6-flash')
 
 # ---------- FCM push notifications (optional) ----------
 # Both must be set for push delivery to activate. FCM_SERVICE_ACCOUNT_JSON is

@@ -7,7 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -231,14 +233,14 @@ fun DashboardScreen(
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     QuickServiceCard(modifier = Modifier.weight(1f), title = "الأسرّة", icon = Icons.Default.Hotel, onClick = onNavigateToWards)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الفواتير", icon = Icons.Default.ReceiptLong, onClick = onNavigateToInvoices)
+                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الفواتير", icon = Icons.AutoMirrored.Filled.ReceiptLong, onClick = onNavigateToInvoices)
                     QuickServiceCard(modifier = Modifier.weight(1f), title = "التقارير", icon = Icons.Default.Assessment, onClick = onNavigateToReports)
                 }
             }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (state.showAudit) {
-                        QuickServiceCard(modifier = Modifier.weight(1f), title = "التدقيق", icon = Icons.Default.FactCheck, onClick = onNavigateToAudit)
+                        QuickServiceCard(modifier = Modifier.weight(1f), title = "التدقيق", icon = Icons.AutoMirrored.Filled.FactCheck, onClick = onNavigateToAudit)
                     } else {
                         Spacer(modifier = Modifier.weight(1f))
                     }

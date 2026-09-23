@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shortcut_add_patient"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add_patient"
+        android:shortcutShortLabel="@string/shortcut_add_patient"
+        android:shortcutLongLabel="@string/shortcut_add_patient_desc">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.securemed.app"
+            android:targetClass="com.securemed.app.ui.MainActivity">
+            <extra android:name="extra_action" android:value="add_patient" />
+        </intent>
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_scan_barcode"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_scan"
+        android:shortcutShortLabel="@string/shortcut_scan_barcode"
+        android:shortcutLongLabel="@string/shortcut_scan_barcode_desc">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.securemed.app"
+            android:targetClass="com.securemed.app.ui.MainActivity">
+            <extra android:name="extra_action" android:value="scan_barcode" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_break_glass"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_emergency"
+        android:shortcutShortLabel="@string/shortcut_break_glass"
+        android:shortcutLongLabel="@string/shortcut_break_glass_desc">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.securemed.app"
+            android:targetClass="com.securemed.app.ui.MainActivity">
+            <extra android:name="extra_action" android:value="break_glass" />
+        </intent>
+    </shortcut>
+</shortcuts>

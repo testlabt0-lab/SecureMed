@@ -161,17 +161,47 @@ class MedicalFileViewSet (viewsets .ModelViewSet ):
 
         return super ().retrieve (request ,*args ,**kwargs )
 
+    @action (detail =True ,methods =['get'],url_path ='presigned-url')
+    def presigned_url (self ,request ,pk =None ):
+        """Generate an HMAC-signed, time-limited download URL (expires in 5 minutes)."""
+        instance =self .get_object ()
+        if not instance .channel .can_view (request .user ):
+            raise PermissionDenied ('غير مصرح لك بالوصول إلى هذا الملف')
+
+        from apps .security .presigned_url import generate_presigned_token 
+        token =generate_presigned_token (str (instance .pk ),str (request .user .pk ))
+        download_url =request .build_absolute_uri (
+        f"{reverse ('medical-file-download',kwargs ={'pk':instance .pk })}?token={token}"
+        )
+        return Response ({
+        'download_url':download_url ,
+        'token':token ,
+        'expires_in_seconds':300 ,
+        })
+
     @action (detail =True ,methods =['get'])
     def download (self ,request ,pk =None ):
-        """Download the medical file."""
+        """Download the medical file (supports both session/JWT and presigned signed tokens)."""
         instance =self .get_object ()
+        user =request .user 
+
+        # Check for presigned download token
+        token =request .query_params .get ('token')
+        if token :
+            from apps .security .presigned_url import verify_presigned_token 
+            is_valid ,token_user_id ,reason =verify_presigned_token (token ,str (instance .pk ),max_age_seconds =300 )
+            if not is_valid :
+                raise PermissionDenied (reason or 'رابط التحميل غير صالح أو منتهي الصلاحية')
+            if not getattr (user ,'is_authenticated',False ):
+                from apps .accounts .models import User 
+                user =User .objects .filter (pk =token_user_id ).first ()
 
         # Check access permission
-        if not instance .channel .can_view (request .user ):
+        if not user or not instance .channel .can_view (user ):
             raise PermissionDenied ('غير مصرح لك بتنزيل هذا الملف')
 
-            # Record access
-        instance .record_access (request .user )
+        # Record access
+        instance .record_access (user )
 
         from apps .core .anomaly import record_phi_access
         record_phi_access (request .user ,resource ='medical_file',path =instance .file .name )

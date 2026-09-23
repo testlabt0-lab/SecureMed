@@ -43,23 +43,10 @@ class PatientSerializer (serializers .ModelSerializer ):
     def to_representation (self ,instance ):
         ret =super ().to_representation (instance )
         request =self .context .get ('request')
+        user =request .user if request and getattr (request ,'user',None )and request .user .is_authenticated else None 
 
-        # Dynamic Data Masking (Privacy-by-Design)
-        if request and request .user .is_authenticated :
-            role =request .user .role 
-            # Only Admins and Doctors can see full PII
-            if role not in ['SUPER_ADMIN','HOSPITAL_ADMIN','DOCTOR']:
-                nid =ret .get ('national_id')
-                if nid and len (nid )>4 :
-                    ret ['national_id']='*'*(len (nid )-4 )+nid [-4 :]
-
-                phone =ret .get ('phone')
-                if phone and len (phone )>6 :
-                # e.g., +966501234567 -> +9665*****567
-                    prefix_len =5 if phone .startswith ('+')else 3 
-                    ret ['phone']=phone [:prefix_len ]+'*'*(len (phone )-prefix_len -3 )+phone [-3 :]
-
-        return ret 
+        from apps .core .masking import mask_patient_dict 
+        return mask_patient_dict (ret ,user ,instance ) 
 
 
 class MedicalRecordSerializer (serializers .ModelSerializer ):

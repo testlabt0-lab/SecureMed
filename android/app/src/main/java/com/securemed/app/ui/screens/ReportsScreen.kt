@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.securemed.app.data.model.ReportCatalogItem
+import com.securemed.app.ui.components.DynamicWatermarkOverlay
 import java.io.File
 
 /**
@@ -123,6 +124,9 @@ fun ReportsScreen(onBack: () -> Unit, viewModel: ReportsViewModel = hiltViewMode
                     }
                 ) { Text("تم تنزيل التقرير") }
             }
+
+            // Dynamic Watermark overlay for sensitive report views
+            DynamicWatermarkOverlay()
         }
     }
 

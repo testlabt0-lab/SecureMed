@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ScrollText, Filter, Search, FileSpreadsheet, Download, ShieldAlert, ChevronDown, ChevronUp } from 'lucide-react';
+import { ScrollText, Search, FileSpreadsheet, Download, ShieldAlert, ChevronDown, ChevronUp } from 'lucide-react';
 import { auditAPI } from '../api/client';
 import api from '../api/client';
 import { reportsApi, downloadBlobResponse } from '../api/extendedApis';

@@ -125,3 +125,52 @@ def validate_upload_content (value ,extensions ,max_bytes =MAX_UPLOAD_BYTES ):
         raise ValidationError (
         f'محتوى الملف لا يطابق امتداده ({ext }). قد يكون الملف تالفاً أو من نوع آخر.'
         )
+
+    # Sanitize image metadata (EXIF/GPS) to protect patient privacy
+    if ext in ('.jpg','.jpeg','.png'):
+        sanitize_image_metadata (value )
+
+
+def sanitize_image_metadata (file_obj ):
+    """Strip EXIF, GPS, and device metadata from uploaded JPEG/PNG images.
+
+    Prevents geolocation and privacy leaks embedded in smartphone camera photos.
+    Operates safely in-memory without corrupting the upload stream.
+    """
+    ext =os .path .splitext (getattr (file_obj ,'name','')or '')[1 ].lower ()
+    if ext not in ('.jpg','.jpeg','.png'):
+        return 
+
+    try :
+        from io import BytesIO 
+        from PIL import Image 
+
+        file_obj .seek (0 )
+        img =Image .open (file_obj )
+
+        # If image has EXIF or metadata tags, strip them
+        exif =img .getexif ()if hasattr (img ,'getexif')else None 
+        if not exif :
+            file_obj .seek (0 )
+            return 
+
+        fmt ='JPEG' if ext in ('.jpg','.jpeg')else 'PNG' 
+
+        clean_buf =BytesIO ()
+        # Rebuilding image without info/exif dicts
+        data =list (img .getdata ())
+        clean_img =Image .new (img .mode ,img .size )
+        clean_img .putdata (data )
+        clean_img .save (clean_buf ,format =fmt ,quality =95 )
+        clean_bytes =clean_buf .getvalue ()
+
+        if hasattr (file_obj ,'file'):
+            file_obj .file =BytesIO (clean_bytes )
+            file_obj .size =len (clean_bytes )
+        file_obj .seek (0 )
+    except Exception :
+        try :
+            file_obj .seek (0 )
+        except Exception :
+            pass
+

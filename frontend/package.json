@@ -2,6 +2,7 @@
   "name": "securemed-frontend",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "SecureMed - Secure Healthcare Records Management Platform (Frontend)",
   "scripts": {
     "dev": "vite",

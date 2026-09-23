@@ -8,6 +8,7 @@ Security requirement #3: Encrypted tokens (وسم مشفر)
 import os 
 import sys 
 import argparse 
+from pathlib import Path
 from cryptography .hazmat .primitives .asymmetric import rsa 
 from cryptography .hazmat .primitives import serialization 
 from cryptography .hazmat .primitives .asymmetric import padding 
@@ -17,9 +18,34 @@ from cryptography .x509 .oid import NameOID
 from datetime import datetime ,timedelta ,timezone 
 
 
+def _resolve_output_dir(output_dir):
+    """Resolve ``output_dir`` and prove every write stays inside it.
+
+    ``--output-dir`` comes from the command line, so a value such as
+    ``../../etc/ssl`` (or an absolute path anywhere on disk) would otherwise
+    let the generator drop a private key outside the intended directory.
+    Resolving against the CWD and requiring the resolved path to be the
+    output directory itself — not a parent — keeps the write confined.
+    """
+    base = Path(output_dir).resolve()
+    # Reject a symlinked or ``..``-laden path that escapes the resolved base.
+    if base.parent == base:
+        raise ValueError("output directory resolves to the filesystem root")
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _safe_path(base, filename):
+    """Join ``filename`` onto ``base``, refusing any traversal outside it."""
+    target = (base / filename).resolve()
+    if base not in target.parents:
+        raise ValueError(f"unsafe output path escapes {base}: {target}")
+    return target
+
+
 def generate_jwt_keypair (output_dir ='certs',key_size =2048 ):
     """Generate RSA key pair for JWT RS256 signing."""
-    os .makedirs (output_dir ,exist_ok =True )
+    base =_resolve_output_dir (output_dir )
 
     print ("🔑 Generating RSA-2048 key pair for JWT RS256...")
 
@@ -41,8 +67,8 @@ def generate_jwt_keypair (output_dir ='certs',key_size =2048 ):
     format =serialization .PublicFormat .SubjectPublicKeyInfo ,
     )
 
-    private_path =os .path .join (output_dir ,'jwt_private.pem')
-    public_path =os .path .join (output_dir ,'jwt_public.pem')
+    private_path =_safe_path (base ,'jwt_private.pem')
+    public_path =_safe_path (base ,'jwt_public.pem')
 
     with open (private_path ,'wb')as f :
         f .write (private_pem )
@@ -60,6 +86,9 @@ def generate_jwt_keypair (output_dir ='certs',key_size =2048 ):
 
 def generate_self_signed_cert (output_dir ='certs',common_name ='securemed.local'):
     """Generate self-signed TLS certificate for PostgreSQL SSL connection."""
+    if not common_name or any(c.isspace() for c in common_name):
+        raise ValueError("common_name must be a non-empty single-label hostname")
+    base =_resolve_output_dir (output_dir )
     print (f"\n🔒 Generating self-signed TLS certificate for '{common_name }'...")
 
     private_key =rsa .generate_private_key (
@@ -99,9 +128,9 @@ def generate_self_signed_cert (output_dir ='certs',common_name ='securemed.local
     .sign (private_key ,hashes .SHA256 ())
     )
 
-    cert_path =os .path .join (output_dir ,'ca.pem')
-    client_cert_path =os .path .join (output_dir ,'client.pem')
-    client_key_path =os .path .join (output_dir ,'client-key.pem')
+    cert_path =_safe_path (base ,'ca.pem')
+    client_cert_path =_safe_path (base ,'client.pem')
+    client_key_path =_safe_path (base ,'client-key.pem')
 
     with open (cert_path ,'wb')as f :
         f .write (cert .public_bytes (serialization .Encoding .PEM ))
@@ -128,10 +157,11 @@ def generate_field_encryption_key (output_dir ='certs'):
     """Generate a 32-byte AES-256 key for field-level encryption."""
     import base64 
     print ("\n🔐 Generating AES-256 field encryption key...")
+    base =_resolve_output_dir (output_dir )
 
     key =base64 .urlsafe_b64encode (os .urandom (32 )).decode ('utf-8')
 
-    key_path =os .path .join (output_dir ,'field_encryption_key.txt')
+    key_path =_safe_path (base ,'field_encryption_key.txt')
     with open (key_path ,'w')as f :
         f .write (key )
     os .chmod (key_path ,0o600 )
@@ -156,11 +186,19 @@ def main ():
     print ("="*60 )
 
     if not args .tls_only :
-        generate_jwt_keypair (args .output_dir )
-        generate_field_encryption_key (args .output_dir )
+        try :
+            generate_jwt_keypair (args .output_dir )
+            generate_field_encryption_key (args .output_dir )
+        except ValueError as exc :
+            print (f"❌ Refusing to write outside the output directory: {exc }",file =sys .stderr )
+            sys .exit (2 )
 
     if not args .jwt_only :
-        generate_self_signed_cert (args .output_dir ,args .cn )
+        try :
+            generate_self_signed_cert (args .output_dir ,args .cn )
+        except ValueError as exc :
+            print (f"❌ Invalid certificate output or Common Name: {exc }",file =sys .stderr )
+            sys .exit (2 )
 
     print ("\n"+"="*60 )
     print ("✅ All certificates generated successfully!")

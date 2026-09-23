@@ -210,6 +210,24 @@ class PatientDetailViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * AI Clinical Assistant: Structures raw notes or voice input into standard SOAP format.
+     */
+    suspend fun structureNote(rawText: String): kotlin.Result<String> {
+        return repository.structureNote(rawText)
+    }
+
+    /**
+     * AI Drug Safety: Checks drug interactions against patient profile.
+     */
+    suspend fun checkDrugInteractions(
+        medications: List<String>,
+        patientId: String?
+    ): com.securemed.app.data.model.DrugInteractionResponse {
+        val res = repository.checkDrugInteractions(medications, patientId)
+        return res.getOrThrow()
+    }
 }
 
 sealed class PatientDetailUiState {

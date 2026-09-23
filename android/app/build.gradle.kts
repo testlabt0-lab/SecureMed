@@ -116,8 +116,12 @@ if (project.findProperty("SECUREMED_FCM") == "true") {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 code obfuscation: strips comments, renames classes/methods/fields
+            // to single-letter identifiers, removes unused code paths, and applies
+            // aggressive optimization passes. This is the primary defense against
+            // reverse engineering — the decompiled output is unreadable.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "API_BASE_URL", "\"$releaseApiBaseUrl\"")
             // Signed only when real key material was supplied; otherwise the
@@ -226,6 +230,20 @@ dependencies {
 
     // Splash Screen
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // CameraX & ML Kit Barcode Scanner
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+
+    // Document Scanner (Google Play Services)
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
+
+    // Glance AppWidget
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

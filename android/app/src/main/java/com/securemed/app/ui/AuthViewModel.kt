@@ -38,6 +38,7 @@ class AuthViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage
 
     fun login(email: String, password: String) {
+        _errorMessage.value = null
         _uiState.value = AuthUiState.Loading
         viewModelScope.launch {
             repository.login(email, password)

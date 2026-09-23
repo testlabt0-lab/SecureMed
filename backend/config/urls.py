@@ -22,6 +22,7 @@ from pathlib import Path
 from apps .core .health import liveness ,readiness
 from apps .core .media import ProtectedMediaView
 from apps .core .metrics import metrics_view
+from apps .core .spa import serve_spa
 from drf_spectacular .views import (
 SpectacularAPIView ,
 SpectacularSwaggerView ,
@@ -125,5 +126,8 @@ else :
 
 
 
-# Catch-all for React SPA
-urlpatterns += [re_path(r'^.*$', TemplateView.as_view(template_name='index.html'))]
+# Catch-all for the React SPA. Mounted last so every backend route (API,
+# admin, media, health, metrics) resolves first; only unrecognised paths reach
+# it. Backend-owned prefixes are refused with a 404 rather than the app shell,
+# and a missing build fails closed instead of serving a stale template.
+urlpatterns += [re_path(r'^(?P<path>.*)$', serve_spa)]

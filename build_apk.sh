@@ -17,7 +17,7 @@
 #                                           # the production backend
 # =====================================================
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -62,7 +62,7 @@ export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
 export ANDROID_SDK_ROOT=$ANDROID_HOME
 export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin
 
-if [ ! -d "$ANDROID_HOME" ]; then
+if [[ ! -d "$ANDROID_HOME" ]]; then
     echo -e "\n${YELLOW}⚠ Android SDK not found at $ANDROID_HOME${NC}"
     echo -e "  Install Android Studio or command-line tools:"
     echo -e "  https://developer.android.com/studio#command-line-tools-only"
@@ -82,7 +82,7 @@ echo -e "  ${GREEN}✓${NC} local.properties created"
 # Ensure Gradle wrapper exists
 echo -e "\n${YELLOW}[3/5] Setting up Gradle wrapper...${NC}"
 
-if [ ! -f "$ANDROID_DIR/gradlew" ]; then
+if [[ ! -f "$ANDROID_DIR/gradlew" ]]; then
     echo -e "  ${YELLOW}⚠${NC} gradlew not found, generating..."
     if command -v gradle &> /dev/null; then
         cd "$ANDROID_DIR"
@@ -101,15 +101,15 @@ echo -e "\n${YELLOW}[4/5] Building $BUILD_TYPE APK...${NC}"
 cd "$ANDROID_DIR"
 chmod +x gradlew
 
-if [ "$BUILD_TYPE" = "release" ]; then
-    if [ -n "$API_URL" ]; then
+if [[ "$BUILD_TYPE" = "release" ]]; then
+    if [[ -n "$API_URL" ]]; then
         ./gradlew assembleRelease --no-daemon -PAPI_BASE_URL="$API_URL"
     else
         ./gradlew assembleRelease --no-daemon
     fi
     APK_PATH="app/build/outputs/apk/release/app-release.apk"
 else
-    if [ -n "$API_URL" ]; then
+    if [[ -n "$API_URL" ]]; then
         ./gradlew assembleDebug --no-daemon -PAPI_BASE_URL="$API_URL"
     else
         ./gradlew assembleDebug --no-daemon
@@ -119,10 +119,10 @@ fi
 
 # Verify APK
 echo -e "\n${YELLOW}[5/5] Verifying APK...${NC}"
-if [ -f "$APK_PATH" ]; then
+if [[ -f "$APK_PATH" ]]; then
     APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
     echo -e "  ${GREEN}✓${NC} APK built successfully!"
-    if [ -n "$API_URL" ]; then
+    if [[ -n "$API_URL" ]]; then
         echo -e "  ${GREEN}✓${NC} Backend: $API_URL"
     else
         echo -e "  ${YELLOW}ℹ${NC} Backend: http://10.0.2.2:8000/api/v1/ (emulator default)"

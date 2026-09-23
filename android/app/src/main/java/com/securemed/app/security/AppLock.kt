@@ -106,7 +106,12 @@ object AppLock {
         if (!SecurePreferences.isLoggedIn()) return false
 
         val timeoutMs = _timeoutMinutes.value * 60_000L
-        if (idleMillis() >= timeoutMs) {
+        val effectiveThresholdMs = if (SecurePreferences.autoLockOnBackground) {
+            minOf(timeoutMs, 60_000L)
+        } else {
+            timeoutMs
+        }
+        if (idleMillis() >= effectiveThresholdMs) {
             lock()
         }
         return _locked.value

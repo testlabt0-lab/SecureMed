@@ -1,0 +1,89 @@
+# Requirements for SecureMed Backend — v2.0.0
+# ─── Core Framework ────────────────────────────────────────────────────────────
+Django>=5.0.14,<5.1
+djangorestframework>=3.15.2,<4
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.4.0
+django-environ==0.11.2
+django-extensions==3.2.3
+django-ratelimit==4.1.0
+django-filter==24.3
+drf-spectacular==0.27.2
+whitenoise==6.6.0
+django-unfold==0.35.0
+gunicorn==22.0.0
+sqlparse>=0.5.1,<0.6
+humanize>=4.9.0
+
+# ─── Database ──────────────────────────────────────────────────────────────────
+psycopg2-binary==2.9.9
+dj-database-url==2.2.0
+
+# ─── Cache & Celery ────────────────────────────────────────────────────────────
+django-redis==5.4.0
+redis==5.0.8
+async-timeout>=4.0.3,<5
+celery==5.4.0
+django-celery-beat==2.6.0
+django-celery-results==2.5.1
+
+# ─── Security ──────────────────────────────────────────────────────────────────
+cryptography==43.0.1
+PyJWT==2.9.0
+pyOpenSSL==24.2.1
+bleach==6.1.0
+python-decouple==3.8
+django-waffle==4.1.0
+python-nmap==0.7.1
+user-agents==2.2.0
+geoip2==4.7.0
+
+# ─── HTTP ──────────────────────────────────────────────────────────────────────
+requests==2.32.3
+urllib3>=2.2.2,<3
+# certifi is left uncapped on purpose: it is a CA-root bundle, and a build should
+# always be free to pick up the newest trusted roots.
+certifi>=2024.7.4
+stripe>=10.12.0
+
+# ─── 2FA + Reports ─────────────────────────────────────────────────────────────
+pyotp==2.9.0
+qrcode==7.4.2
+reportlab==4.2.5
+arabic-reshaper==3.0.0
+python-bidi==0.6.6
+openpyxl==3.1.5
+matplotlib==3.9.2
+
+# ─── Real-Time WebSockets & ASGI (Daphne / Channels) ───────────────────────────
+# Upper caps added. `>=` with no ceiling made these three the least reproducible
+# lines in the file: a clean install could pull a future major (channels 5,
+# daphne 5) with breaking changes onto the exact commit that last worked. The cap
+# pins the major the code is written against while still allowing minor/patch
+# security fixes inside the 4.x line.
+daphne>=4.1.2,<5
+channels>=4.1.0,<5
+channels-redis>=4.2.0,<5
+
+# ─── AI Integration ────────────────────────────────────────────────────────────
+# The installed and tested SDK is 2.22.0. The previous cap (<0.4, with a comment
+# that said "0.8.x") was stale: the code uses only the stable
+# genai.Client / google.genai.types surface, but the cap had drifted so far from
+# what every build and test actually ran against that a fresh install would have
+# silently downgraded the AI integration to an unvalidated SDK. Pinned exactly
+# to reproduce the known-good build; bump deliberately after testing the newer
+# client.
+google-genai==2.22.0
+# pydantic is a transitive dependency of google-genai (>=2.12.5,<3). Left
+# unpinned, the resolver selects the newest 2.x — which is currently a
+# pre-release (2.14.0b2). Pin it to the stable release the build was validated
+# against.
+pydantic==2.12.5
+
+# ─── AWS S3 / Cloud Storage ────────────────────────────────────────────────────
+django-storages==1.14.4
+boto3==1.34.110
+
+# ─── APM & Monitoring ──────────────────────────────────────────────────────────
+sentry-sdk==2.13.0
+django-prometheus==2.3.1

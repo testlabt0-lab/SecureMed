@@ -243,7 +243,13 @@ class ChannelReportPDFView (BaseReportView ):
         footer =ParagraphStyle ('f',parent =sub_style ,alignment =1 ,spaceBefore =10 )
         story .append (Paragraph (ar (f'تم التوليد بواسطة {request .user .full_name } — وثيقة سريرية محمية (HIPAA)'),footer ))
 
-        doc .build (story )
+        from apps .reports .watermark import draw_pdf_security_watermark 
+        from apps .core .net import get_client_ip 
+        client_ip =get_client_ip (request )or "" 
+        def _watermark_page (canvas ,document ):
+            draw_pdf_security_watermark (canvas ,document ,user =request .user ,ip =client_ip )
+
+        doc .build (story ,onFirstPage =_watermark_page ,onLaterPages =_watermark_page )
         log_security_event (
         user =request .user ,
         event_type ='PATIENT_DATA_ACCESSED',

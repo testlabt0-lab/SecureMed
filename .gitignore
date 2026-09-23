@@ -5,6 +5,8 @@ __pycache__/
 backend/htmlcov/
 backend/.pytest_tmp/
 backend/.coverage
+.coverage
+htmlcov/
 backend/.pytest_cache/
 backend/staticfiles/
 backend/logs/
@@ -63,8 +65,8 @@ android/local.properties
 .idea/
 .DS_Store
 *.swp
-backups/
-backend/backups/
+/backups/
+/backend/backups/
 SecureMed-main/
 crypto.jar
 response.txt

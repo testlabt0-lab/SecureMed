@@ -10,7 +10,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocalPharmacy
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Search
+import com.securemed.app.ui.components.DrugInteractionBottomSheet
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -45,6 +47,7 @@ fun PharmacyScreen(
     val uiState by viewModel.uiState.collectAsState()
     val prescriptions = viewModel.prescriptionsPagingFlow.collectAsLazyPagingItems()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showDrugInteractionSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.refreshRequests.collect { prescriptions.refresh() }
@@ -57,6 +60,14 @@ fun PharmacyScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDrugInteractionSheet = true }) {
+                        Icon(
+                            Icons.Default.Medication,
+                            contentDescription = "فحص التفاعلات الدوائية"
+                        )
                     }
                 }
             )
@@ -174,6 +185,17 @@ fun PharmacyScreen(
             }
         )
     }
+
+    if (showDrugInteractionSheet) {
+        DrugInteractionBottomSheet(
+            patientId = null,
+            initialMedications = emptyList(),
+            onDismiss = { showDrugInteractionSheet = false },
+            onCheckInteractions = { meds, pid ->
+                viewModel.checkDrugInteractions(meds, pid)
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -226,7 +248,7 @@ private fun CreatePrescriptionDialog(
                             readOnly = true,
                             label = { Text("المريض") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(patientExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(expanded = patientExpanded, onDismissRequest = { patientExpanded = false }) {
                             patients.forEach { patient ->
@@ -286,7 +308,7 @@ private fun CreatePrescriptionDialog(
                                         readOnly = true,
                                         label = { Text("الدواء (من الفهرس)") },
                                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(medExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                                     )
                                     ExposedDropdownMenu(expanded = medExpanded, onDismissRequest = { medExpanded = false }) {
                                         catalog.forEach { medication ->

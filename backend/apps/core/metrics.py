@@ -16,7 +16,7 @@ import logging
 from secrets import compare_digest
 
 from django.conf import settings
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
 from django_prometheus.exports import ExportToDjangoView
 
@@ -67,7 +67,18 @@ def internal_access_allowed(request):
 
 @csrf_exempt
 def metrics_view(request):
-    """Serve /metrics to an authorised scraper only."""
+    """Serve /metrics to an authorised scraper only.
+
+    ``csrf_exempt`` is required because a Prometheus scraper is a machine
+    that will never carry a CSRF token. It is safe because the endpoint
+    answers GET/HEAD only and mutates no state, so a forged cross-site
+    request has nothing to trigger — the method allowlist below keeps that
+    assumption true instead of relying on every future caller to remember
+    it.
+    """
+    if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        return HttpResponseNotAllowed(['GET', 'HEAD'])
+
     if internal_access_allowed(request):
         return ExportToDjangoView(request)
 

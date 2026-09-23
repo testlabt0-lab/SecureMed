@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Fingerprint, Lock, Shield, Mail, Phone, MapPin, CheckCircle, AlertCircle, Smartphone, KeyRound, Trash2, MonitorSmartphone, AlertTriangle } from 'lucide-react';
+import { User, Fingerprint, Lock, Shield, Mail, Phone, MapPin, CheckCircle, Smartphone, KeyRound, Trash2, MonitorSmartphone, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { authAPI, securityAPI } from '../api/client';
 import { mfaApi, biometricDevicesApi } from '../api/extendedApis';

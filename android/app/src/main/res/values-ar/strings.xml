@@ -14,4 +14,11 @@
     <string name="biometric_prompt_subtitle">استخدم بصمتك للدخول إلى SecureMed</string>
     <string name="biometric_prompt_description">SecureMed يتطلب المصادقة البيومترية للوصول للبيانات الحساسة</string>
     <string name="biometric_prompt_negative">إلغاء</string>
+    <string name="widget_name">جدول الطبيب - SecureMed</string>
+    <string name="shortcut_add_patient">إضافة مريض جديد</string>
+    <string name="shortcut_add_patient_desc">تسجيل مريض جديد بسرعة</string>
+    <string name="shortcut_scan_barcode">مسح باركود سريع</string>
+    <string name="shortcut_scan_barcode_desc">مسح بطاقة المريض أو باركود الدواء</string>
+    <string name="shortcut_break_glass">طوارئ (Break-Glass)</string>
+    <string name="shortcut_break_glass_desc">طلب وصول طارئ لملف مريض</string>
 </resources>

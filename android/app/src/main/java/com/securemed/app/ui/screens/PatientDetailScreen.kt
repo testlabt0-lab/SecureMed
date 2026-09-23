@@ -1,5 +1,7 @@
 package com.securemed.app.ui.screens
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,9 +24,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.ui.platform.LocalContext
+import com.securemed.app.hardware.scanner.DocumentScannerHelper
+import com.securemed.app.hardware.voice.VoiceInputButton
+import kotlinx.coroutines.launch
 import com.securemed.app.data.model.MedicalRecord
 import com.securemed.app.data.model.Patient
 import com.securemed.app.data.model.PatientFileInfo
+import com.securemed.app.ui.components.DynamicWatermarkOverlay
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Medication
+import com.securemed.app.ui.components.DrugInteractionBottomSheet
+import com.securemed.app.ui.components.EmergencyMedicalCardDialog
 
 /** Record types accepted by `MedicalRecord.RecordType` on the server. */
 private val RECORD_TYPES = listOf(
@@ -37,6 +53,67 @@ private val RECORD_TYPES = listOf(
     "VITALS" to "علامات حيوية",
     "PROCEDURE" to "إجراء طبي",
 )
+
+/**
+ * Saves a scanned document and returns the status line to show the user, or
+ * null when the scan produced nothing usable.
+ */
+private fun saveScannedDocument(
+    context: Context,
+    patientId: String,
+    resultCode: Int,
+    data: Intent?
+): String? {
+    val scannedDoc = DocumentScannerHelper.parseResult(resultCode, data) ?: return null
+    val pdf = scannedDoc.pdfUri
+    return when {
+        pdf != null -> {
+            DocumentScannerHelper.saveScannedFileSecurely(
+                context,
+                pdf,
+                "patient_${patientId}_report_${System.currentTimeMillis()}.pdf"
+            )
+            "✓ تم مسح التقرير وحفظه كـ PDF بنجاح (${scannedDoc.pageCount} صفحات)"
+        }
+        scannedDoc.pageUris.isNotEmpty() ->
+            "✓ تم تصوير وحفظ ${scannedDoc.pageUris.size} صور عالية الجودة"
+        else -> null
+    }
+}
+
+@Composable
+private fun PatientDetailSnackbars(
+    actionMessage: String?,
+    scannerStatusMessage: String?,
+    onClearActionMessage: () -> Unit,
+    onClearScannerStatus: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        actionMessage?.let { message ->
+            Snackbar(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                action = {
+                    TextButton(onClick = onClearActionMessage) { Text("حسناً") }
+                }
+            ) {
+                Text(
+                    message,
+                    color = MaterialTheme.colorScheme.error.takeIf { message.startsWith("تعذر") }
+                        ?: MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        scannerStatusMessage?.let { message ->
+            Snackbar(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                action = {
+                    TextButton(onClick = onClearScannerStatus) { Text("حسناً") }
+                }
+            ) { Text(message) }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +128,19 @@ fun PatientDetailScreen(
     var bookingDoctors by remember { mutableStateOf<List<com.securemed.app.data.model.User>>(emptyList()) }
     var editingRecord by remember { mutableStateOf<MedicalRecord?>(null) }
     var deletingRecord by remember { mutableStateOf<MedicalRecord?>(null) }
+    var showDrugInteractionSheet by remember { mutableStateOf(false) }
+    var showEmergencyCardDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val activity = context as? Activity
+    var scannerStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    val docScannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        scannerStatusMessage = saveScannedDocument(context, patientId, result.resultCode, result.data)
+    }
 
     Scaffold(
         topBar = {
@@ -63,6 +153,25 @@ fun PatientDetailScreen(
                 },
                 actions = {
                     if (uiState is PatientDetailUiState.Success) {
+                        // Document Scanner button
+                        IconButton(onClick = {
+                            coroutineScope.launch {
+                                if (activity != null) {
+                                    try {
+                                        val req = DocumentScannerHelper.getStartScanIntentSender(activity)
+                                        docScannerLauncher.launch(req)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("PatientDetail", "Doc scanner launch failed", e)
+                                    }
+                                }
+                            }
+                        }) {
+                            Icon(
+                                Icons.Default.DocumentScanner,
+                                contentDescription = "مسح تقرير أو تحليل ورقي"
+                            )
+                        }
+
                         IconButton(onClick = {
                             viewModel.clearActionMessage()
                             viewModel.prepareBookingData { doctors ->
@@ -73,6 +182,22 @@ fun PatientDetailScreen(
                             Icon(
                                 Icons.Default.CalendarMonth,
                                 contentDescription = "حجز موعد لهذا المريض"
+                            )
+                        }
+
+                        // Emergency Medical Card / Wristband
+                        IconButton(onClick = { showEmergencyCardDialog = true }) {
+                            Icon(
+                                Icons.Default.Badge,
+                                contentDescription = "بطاقة الطوارئ وسوار المعصم QR"
+                            )
+                        }
+
+                        // AI Drug Interaction Checker
+                        IconButton(onClick = { showDrugInteractionSheet = true }) {
+                            Icon(
+                                Icons.Default.Medication,
+                                contentDescription = "فحص التفاعلات الدوائية"
                             )
                         }
                     }
@@ -174,14 +299,13 @@ fun PatientDetailScreen(
                         }
                     }
 
-                    state.actionMessage?.let { message ->
-                        Snackbar(
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-                            action = {
-                                TextButton(onClick = { viewModel.clearActionMessage() }) { Text("حسناً") }
-                            }
-                        ) { Text(message, color = MaterialTheme.colorScheme.error.takeIf { message.startsWith("تعذر") } ?: MaterialTheme.colorScheme.onSurface) }
-                    }
+                    PatientDetailSnackbars(
+                        actionMessage = state.actionMessage,
+                        scannerStatusMessage = scannerStatusMessage,
+                        onClearActionMessage = { viewModel.clearActionMessage() },
+                        onClearScannerStatus = { scannerStatusMessage = null }
+                    )
+
 
                     if (showCreateDialog) {
                         CreateRecordDialog(
@@ -196,7 +320,8 @@ fun PatientDetailScreen(
                             onSubmit = { channelId, title, type, content, critical ->
                                 viewModel.createRecord(patientId, channelId, title, content, type, critical)
                                 showCreateDialog = false
-                            }
+                            },
+                            onStructureSoap = { raw -> viewModel.structureNote(raw) }
                         )
                     }
 
@@ -213,7 +338,8 @@ fun PatientDetailScreen(
                             onSubmit = { title, type, content, critical ->
                                 viewModel.updateRecord(patientId, record.id, title, content, type, critical)
                                 editingRecord = null
-                            }
+                            },
+                            onStructureSoap = { raw -> viewModel.structureNote(raw) }
                         )
                     }
 
@@ -254,8 +380,31 @@ fun PatientDetailScreen(
                             lockedPatient = state.patient
                         )
                     }
+
+                    if (showEmergencyCardDialog) {
+                        EmergencyMedicalCardDialog(
+                            patient = state.patient,
+                            onDismiss = { showEmergencyCardDialog = false }
+                        )
+                    }
+
+                    if (showDrugInteractionSheet) {
+                        DrugInteractionBottomSheet(
+                            patientName = state.patient.fullName,
+                            patientId = patientId,
+                            patientAllergies = state.patient.chronicConditions,
+                            initialMedications = emptyList(),
+                            onDismiss = { showDrugInteractionSheet = false },
+                            onCheckInteractions = { meds, pid ->
+                                viewModel.checkDrugInteractions(meds, pid)
+                            }
+                        )
+                    }
                 }
             }
+
+            // Dynamic PHI Watermark overlay
+            DynamicWatermarkOverlay()
         }
     }
 }
@@ -266,7 +415,8 @@ private fun CreateRecordDialog(
     channels: List<com.securemed.app.data.model.Channel>,
     inProgress: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (channelId: String, title: String, recordType: String, content: String, isCritical: Boolean) -> Unit
+    onSubmit: (channelId: String, title: String, recordType: String, content: String, isCritical: Boolean) -> Unit,
+    onStructureSoap: (suspend (String) -> kotlin.Result<String>)? = null
 ) {
     var channelId by remember { mutableStateOf(channels.firstOrNull()?.id ?: "") }
     var channelExpanded by remember { mutableStateOf(false) }
@@ -313,7 +463,7 @@ private fun CreateRecordDialog(
                             readOnly = true,
                             label = { Text("القناة") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(channelExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(
                             expanded = channelExpanded,
@@ -342,7 +492,7 @@ private fun CreateRecordDialog(
                             readOnly = true,
                             label = { Text("نوع السجل") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(
                             expanded = typeExpanded,
@@ -375,8 +525,52 @@ private fun CreateRecordDialog(
                         onValueChange = { content = it },
                         label = { Text("المحتوى السريري") },
                         minLines = 3,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            VoiceInputButton(
+                                onTextSpoken = { spoken ->
+                                    content = if (content.isBlank()) spoken else "$content $spoken"
+                                }
+                            )
+                        }
                     )
+
+                    if (onStructureSoap != null) {
+                        var isStructuringSoap by remember { mutableStateOf(false) }
+                        val scope = rememberCoroutineScope()
+                        Spacer(modifier = Modifier.height(4.dp))
+                        AssistChip(
+                            onClick = {
+                                if (content.isNotBlank() && !isStructuringSoap) {
+                                    isStructuringSoap = true
+                                    scope.launch {
+                                        val res = onStructureSoap(content)
+                                        res.onSuccess { structured ->
+                                            content = structured
+                                        }
+                                        isStructuringSoap = false
+                                    }
+                                }
+                            },
+                            enabled = content.isNotBlank() && !isStructuringSoap,
+                            label = {
+                                if (isStructuringSoap) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("جارِ التنسيق بالذكاء الاصطناعي...")
+                                    }
+                                } else {
+                                    Text("تنسيق SOAP بالذكاء الاصطناعي ✨")
+                                }
+                            },
+                            leadingIcon = {
+                                if (!isStructuringSoap) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -628,7 +822,8 @@ private fun EditRecordDialog(
     record: MedicalRecord,
     inProgress: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (title: String, recordType: String, content: String, isCritical: Boolean) -> Unit
+    onSubmit: (title: String, recordType: String, content: String, isCritical: Boolean) -> Unit,
+    onStructureSoap: (suspend (String) -> kotlin.Result<String>)? = null
 ) {
     var title by remember(record.id) { mutableStateOf(record.title) }
     var content by remember(record.id) { mutableStateOf(record.content) }
@@ -664,7 +859,7 @@ private fun EditRecordDialog(
                         readOnly = true,
                         label = { Text("نوع السجل") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                     )
                     ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
                         RECORD_TYPES.forEach { (value, label) ->
@@ -694,8 +889,52 @@ private fun EditRecordDialog(
                     onValueChange = { content = it },
                     label = { Text("المحتوى السريري") },
                     minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        VoiceInputButton(
+                            onTextSpoken = { spoken ->
+                                content = if (content.isBlank()) spoken else "$content $spoken"
+                            }
+                        )
+                    }
                 )
+
+                if (onStructureSoap != null) {
+                    var isStructuringSoap by remember { mutableStateOf(false) }
+                    val scope = rememberCoroutineScope()
+                    Spacer(modifier = Modifier.height(4.dp))
+                    AssistChip(
+                        onClick = {
+                            if (content.isNotBlank() && !isStructuringSoap) {
+                                isStructuringSoap = true
+                                scope.launch {
+                                    val res = onStructureSoap(content)
+                                    res.onSuccess { structured ->
+                                        content = structured
+                                    }
+                                    isStructuringSoap = false
+                                }
+                            }
+                        },
+                        enabled = content.isNotBlank() && !isStructuringSoap,
+                        label = {
+                            if (isStructuringSoap) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("جارِ التنسيق بالذكاء الاصطناعي...")
+                                }
+                            } else {
+                                Text("تنسيق SOAP بالذكاء الاصطناعي ✨")
+                            }
+                        },
+                        leadingIcon = {
+                            if (!isStructuringSoap) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    )
+                }
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {

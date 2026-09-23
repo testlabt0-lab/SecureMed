@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldAlert, AlertTriangle, Clock, Lock, CheckCircle2, Loader2, Hospital } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Clock, Lock, Loader2, Hospital } from 'lucide-react';
 import Modal from '../common/Modal';
 import api from '../../api/client';
 import toast from 'react-hot-toast';

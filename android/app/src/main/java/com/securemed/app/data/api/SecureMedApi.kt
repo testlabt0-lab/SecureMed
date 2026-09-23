@@ -325,4 +325,12 @@ interface SecureMedApi {
         @Query("start_date") startDate: String? = null,
         @Query("end_date") endDate: String? = null
     ): Response<ResponseBody>
+
+    // ===== AI ASSISTANT & CLINICAL DECISION SUPPORT =====
+    @POST("ai/interactions-check/")
+    suspend fun checkDrugInteractions(@Body request: DrugInteractionRequest): DrugInteractionResponse
+
+    @POST("ai/structure-note/")
+    suspend fun structureNote(@Body request: StructureNoteRequest): StructureNoteResponse
 }
+

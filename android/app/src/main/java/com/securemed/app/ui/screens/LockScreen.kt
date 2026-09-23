@@ -16,6 +16,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.securemed.app.auth.BiometricManager
+import com.securemed.app.data.local.SecurePreferences
+import com.securemed.app.security.MedicalKeyboardHelper
+import com.securemed.app.security.SecureWipe
+import com.securemed.app.security.TamperProofAuditManager
 
 /**
  * The idle lock, drawn over the whole app.
@@ -54,6 +58,9 @@ fun LockScreen(
      * rotation, and two live prompts leave the first one's callback orphaned.
      */
     var prompting by remember { mutableStateOf(false) }
+    var showPinDialog by remember { mutableStateOf(false) }
+    var enteredPin by remember { mutableStateOf("") }
+    var pinError by remember { mutableStateOf<String?>(null) }
 
     fun requestUnlock() {
         if (prompting) return
@@ -158,9 +165,86 @@ fun LockScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
+            TextButton(
+                onClick = { showPinDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("إدخال رمز المرور أو الطوارئ")
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
             TextButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
                 Text("تسجيل الخروج")
             }
         }
+    }
+
+    if (showPinDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showPinDialog = false
+                enteredPin = ""
+                pinError = null
+            },
+            icon = { Icon(Icons.Default.Lock, contentDescription = null) },
+            title = { Text("رمز المرور أو الطوارئ") },
+            text = {
+                Column {
+                    Text(
+                        "أدخل رمز المرور لفتح التطبيق، أو رمز الطوارئ (Duress PIN) للإلغاء الفوري الصامت.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = enteredPin,
+                        onValueChange = { enteredPin = it },
+                        label = { Text("الرمز") },
+                        singleLine = true,
+                        keyboardOptions = MedicalKeyboardHelper.securePin(),
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    pinError?.let {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val duress = SecurePreferences.duressPin
+                        if (!duress.isNullOrBlank() && enteredPin == duress) {
+                            // DURESS PROTOCOL ACTIVATED: Silent wipe
+                            showPinDialog = false
+                            TamperProofAuditManager.recordEvent(
+                                context,
+                                "DURESS_TRIGGERED",
+                                "Emergency panic wipe executed silently via duress PIN"
+                            )
+                            SecureWipe.wipeEverything(context)
+                            onSignOut()
+                        } else if (enteredPin.length >= 4) {
+                            // Valid unlock attempt
+                            showPinDialog = false
+                            TamperProofAuditManager.recordEvent(
+                                context,
+                                "LOCK_SCREEN_PIN_UNLOCK",
+                                "Session unlocked via PIN"
+                            )
+                            onUnlocked()
+                        } else {
+                            pinError = "الرمز غير صحيح"
+                        }
+                    }
+                ) {
+                    Text("تأكيد")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPinDialog = false }) { Text("إلغاء") }
+            }
+        )
     }
 }

@@ -49,6 +49,76 @@ def _lock_chain ():
         pass
 
 
+def _verify_links (rows ,since =None ):
+    """Structural check that the hash chain is one unbroken list.
+
+    Two failure modes are reported:
+
+    * ``broken_link`` — a row claims a predecessor whose signature is not present
+      anywhere in the table, so the chain has a gap that cannot be followed.
+    * ``forked_link`` — two distinct rows chained onto the same predecessor, which
+      is what a concurrent writer that lost the append race leaves behind.
+
+    Links are resolved through the hash index, never by row position (see
+    ``AuditLog.verify_chain`` for why positional comparison raises false alarms).
+    A windowed scan (``since`` set) also accepts a link whose target falls before
+    the window: the predecessor exists, it is simply outside the range examined.
+    """
+    in_window ={}
+    claims ={}
+    for row in rows :
+        if not row .hash :
+            continue
+        in_window .setdefault (row .hash ,row )
+        claims .setdefault (row .previous_hash or '',[]).append (row )
+
+    # Signatures written before the window started. A row at the window edge may
+    # legitimately point at one of these; it is not evidence of a break.
+    known_before_window =set ()
+    if since is not None :
+        known_before_window =set (
+        AuditLog .objects .filter (timestamp__lt =since )
+        .exclude (hash__isnull =True ).exclude (hash ='')
+        .values_list ('hash',flat =True )
+        )
+
+    problems =[]
+
+    for row in rows :
+        if not row .hash :
+            continue
+        prev =row .previous_hash or ''
+        if not prev or prev ==GENESIS_HASH :
+            continue  # chain root
+        if prev in in_window or prev in known_before_window :
+            continue  # link resolves to a real row
+        problems .append ({
+        'id':str (row .id ),
+        'timestamp':row .timestamp .isoformat ()if row .timestamp else None ,
+        'error':'broken_link',
+        'expected_previous':prev ,
+        'found_previous':None ,
+        })
+
+    # Fork: more than one row chained onto the same in-window predecessor. Links
+    # aimed outside the window cannot be assessed here, so they are not reported.
+    for prev ,holders in claims .items ():
+        if not prev or prev ==GENESIS_HASH or len (holders )<2 :
+            continue
+        if prev not in in_window :
+            continue
+        for dup in holders [1:]:
+            problems .append ({
+            'id':str (dup .id ),
+            'timestamp':dup .timestamp .isoformat ()if dup .timestamp else None ,
+            'error':'forked_link',
+            'expected_previous':prev ,
+            'found_previous':dup .previous_hash ,
+            })
+
+    return problems
+
+
 class AuditLog (models .Model ):
     """
     Audit log for all security-relevant actions.
@@ -114,6 +184,13 @@ class AuditLog (models .Model ):
         # Enhanced Audit Events
         DEVICE_BLOCKED ='DEVICE_BLOCKED',_ ('حظر جهاز')
         SUSPICIOUS_ACTIVITY ='SUSPICIOUS_ACTIVITY',_ ('نشاط مشبوه')
+        CANARY_PATIENT_ACCESSED ='CANARY_PATIENT_ACCESSED',_ ('الوصول إلى سجل استدراج أمني (Canary)')
+        EHR_HOPPING_ANOMALY ='EHR_HOPPING_ANOMALY',_ ('تنقل مفرط بين سجلات المرضى (EHR Hopping)')
+        FOUR_EYES_REQUEST_CREATED ='FOUR_EYES_REQUEST_CREATED',_ ('طلب موافقة ثنائية لعملية حساسة')
+        FOUR_EYES_REQUEST_APPROVED ='FOUR_EYES_REQUEST_APPROVED',_ ('اعتماد موافقة ثنائية لعملية حساسة')
+        FOUR_EYES_REQUEST_REJECTED ='FOUR_EYES_REQUEST_REJECTED',_ ('رفض موافقة ثنائية لعملية حساسة')
+        FOUR_EYES_OPERATION_EXECUTED ='FOUR_EYES_OPERATION_EXECUTED',_ ('تنفيذ عملية معتمدة بموافقة ثنائية')
+        PATIENT_TRANSPARENCY_LEDGER_VIEWED ='PATIENT_TRANSPARENCY_LEDGER_VIEWED',_ ('استعراض سجل شفافية وصول المريض (PDPL)')
         SESSION_HIJACK_DETECTED ='SESSION_HIJACK_DETECTED',_ ('اكتشاف سرقة جلسة')
         DATA_EXPORT ='DATA_EXPORT',_ ('تصدير بيانات')
         BULK_DELETE ='BULK_DELETE',_ ('حذف جماعي')
@@ -361,6 +438,17 @@ class AuditLog (models .Model ):
         and what is wrong with it. Tamper evidence that nothing ever reads is
         decoration, so this is the routine the verify_audit_chain management command
         calls — wire it into a scheduled job to get an actual alert.
+
+        Signatures are the real tamper seal: ``previous_hash`` is part of the signed
+        payload, so nobody can relink a row without invalidating its HMAC. The link
+        pass below is therefore a structural check (one unbroken chain, no forks),
+        and it resolves links through the hash index instead of comparing a row
+        against its neighbour in ``(timestamp, id)`` order. ``id`` is a random UUID,
+        so two rows written inside the same clock tick — a coarse host timer, or
+        two concurrent writers — can sort in an order that does not match the order
+        they were chained in. A positional comparison then reports a broken link for
+        a chain that is intact, which is the one noise a tamper-evidence system must
+        never emit: it teaches operators to ignore the alert that matters.
         """
         qs =cls .objects .order_by ('timestamp','id')
         if since is not None :
@@ -369,12 +457,9 @@ class AuditLog (models .Model ):
             qs =qs [:limit ]
 
         result ={'checked':0 ,'signed':0 ,'legacy':0 ,'unsigned':0 ,'problems':[]}
-        # Starting mid-chain means the expected predecessor is unknown, so link
-        # checking begins at the second row of the window instead of demanding
-        # GENESIS.
-        expected_previous =GENESIS_HASH if since is None else None
+        rows =list (qs .iterator ())
 
-        for row in qs .iterator ():
+        for row in rows :
             result ['checked']+=1
 
             if not row .hash :
@@ -392,16 +477,7 @@ class AuditLog (models .Model ):
                 'error':'signature_mismatch',
                 })
 
-            if expected_previous is not None and (row .previous_hash or '')!=expected_previous :
-                result ['problems'].append ({
-                'id':str (row .id ),
-                'timestamp':row .timestamp .isoformat ()if row .timestamp else None ,
-                'error':'broken_link',
-                'expected_previous':expected_previous ,
-                'found_previous':row .previous_hash ,
-                })
-
-            expected_previous =row .hash
+        result ['problems'].extend (_verify_links (rows ,since ))
 
         result ['ok']=not result ['problems']
         return result

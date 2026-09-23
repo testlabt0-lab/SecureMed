@@ -24,7 +24,10 @@ try {
   if (stored) {
     cachedDeviceInfo = JSON.parse(stored);
   }
-} catch (_) {}
+} catch (_) {
+  // sessionStorage is unavailable (private mode, disabled storage) — fall back
+  // to computing the fingerprint on first use.
+}
 
 export const getCachedDeviceFingerprintSync = (): DeviceInfo | null => cachedDeviceInfo;
 
@@ -37,7 +40,9 @@ export const getDeviceFingerprint = (): Promise<DeviceInfo> => {
       cachedDeviceInfo = info;
       try {
         sessionStorage.setItem('securemed_device_info', JSON.stringify(info));
-      } catch (_) {}
+      } catch (_) {
+        // Storage full or blocked — the fingerprint stays in memory only.
+      }
       return info;
     });
   }

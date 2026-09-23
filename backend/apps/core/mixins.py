@@ -65,6 +65,23 @@ class PatientAccessMixin:
     """
 
     def check_patient_access(self, user, patient, action_name='access'):
+        # 1. Canary / Honeypot patient trap: any access immediately triggers tripwire
+        from apps.security.honeypot import is_canary_patient, handle_canary_access
+        if is_canary_patient(patient):
+            req = getattr(self, 'request', None)
+            handle_canary_access(user, patient, request=req, action=action_name)
+            from django.http import Http404
+            raise Http404('المريض غير موجود')
+
+        # 2. Track EHR hopping velocity across distinct patient charts
+        try:
+            from apps.core.anomaly import record_patient_hopping
+            patient_pk = getattr(patient, 'id', getattr(patient, 'pk', None))
+            if patient_pk:
+                record_patient_hopping(user, patient_pk)
+        except Exception:
+            pass
+
         from apps.security.models import BreakGlassAccess
 
         if getattr(user, 'role', None) in PATIENT_INDEX_ADMIN_ROLES:

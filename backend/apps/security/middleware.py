@@ -524,8 +524,13 @@ class ZeroTrustConsentFirewallMiddleware:
         if request.path.startswith('/admin/') or request.path == '/health/' or request.path.startswith('/health/'):
             return self.get_response(request)
 
-        # Exclude the ZTNA consent and status API paths
-        if request.path in ['/api/v1/security/ztna-request/', '/api/v1/security/ztna-status/', '/api/v1/security/telegram-webhook/']:
+        # Exclude the ZTNA consent, device check, status API, and admin license paths
+        if request.path in [
+            '/api/v1/security/check-device/',
+            '/api/v1/security/ztna-request/',
+            '/api/v1/security/ztna-status/',
+            '/api/v1/security/telegram-webhook/'
+        ] or request.path.startswith('/api/v1/security/licenses/'):
             return self.get_response(request)
 
         # Exclude static/media files
@@ -552,14 +557,14 @@ class ZeroTrustConsentFirewallMiddleware:
         approved_fp = None
 
         for fp in fps_to_check:
-            if cache.get(f'ztna_approved_{fp}_{client_ip}'):
+            if cache.get(f'ztna_approved_{fp}_{client_ip}') or cache.get(f'ztna_approved_{fp}'):
                 is_approved = True
                 approved_fp = fp
                 break
 
         # Fallback to Database on cache-miss
         if not is_approved:
-            from apps.security.models import ZTNAPendingApproval
+            from apps.security.models import ZTNAPendingApproval, DeviceRegistry
             try:
                 matching = ZTNAPendingApproval.objects.filter(
                     device_fingerprint__in=fps_to_check,
@@ -567,10 +572,21 @@ class ZeroTrustConsentFirewallMiddleware:
                     is_approved=True
                 )
                 first_match = matching.first()
+                if not first_match:
+                    first_match = ZTNAPendingApproval.objects.filter(
+                        device_fingerprint__in=fps_to_check,
+                        is_approved=True
+                    ).first()
                 if first_match:
                     is_approved = True
                     approved_fp = first_match.device_fingerprint
                     # Cache the approval so subsequent requests hit cache
+                    for fp in fps_to_check:
+                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
+                        cache.set(f'ztna_approved_{fp}', True, timeout=86400 * 30)
+                elif DeviceRegistry.objects.filter(device_fingerprint__in=fps_to_check, is_trusted=True).exists():
+                    is_approved = True
+                    approved_fp = header_fp or cookie_fp
                     for fp in fps_to_check:
                         cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
             except Exception as e:

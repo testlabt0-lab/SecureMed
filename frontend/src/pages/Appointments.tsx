@@ -1,21 +1,17 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Calendar, Clock, User, MapPin, Video, ChevronLeft, ChevronRight,
-  Plus, Check, X, AlertCircle, Phone, Stethoscope, RefreshCw,
-  CheckCircle2, XCircle, Eye, Search, Filter,
-} from 'lucide-react';
+import { Calendar, Clock, User, MapPin, Video, ChevronLeft, ChevronRight, Plus, Check, X, AlertCircle, Phone, Stethoscope, RefreshCw, CheckCircle2, XCircle, Eye, Search } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval,
          isSameDay, isToday, addMonths, subMonths, parseISO,
          isBefore, startOfDay } from 'date-fns';
 import { arSA } from 'date-fns/locale';
-import toast from 'react-hot-toast';
 import { appointmentsAPI } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
 import { CARE_TEAM_ROLES } from '../constants/roles';
 import CreateAppointmentModal from '../components/appointments/CreateAppointmentModal';
 import { ListSkeleton, EmptyState } from '../components/common/States';
+import toast from 'react-hot-toast';
 
 // ─── Type definitions ────────────────────────────────────────────────────────
 

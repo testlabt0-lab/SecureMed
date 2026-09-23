@@ -96,8 +96,12 @@ object ThemeController {
     }
 
     fun setDarkMode(enabled: Boolean) {
-        _darkMode.value = enabled
-        com.securemed.app.data.local.SecurePreferences.darkMode = enabled
+        setThemeMode(enabled)
+    }
+
+    fun setThemeMode(mode: Boolean?) {
+        _darkMode.value = mode
+        com.securemed.app.data.local.SecurePreferences.darkMode = mode
     }
 }
 

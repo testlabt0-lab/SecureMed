@@ -1,17 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  ArrowRight, Users, Shield, Plus, MoreVertical,
-  UserPlus, Edit2, Trash2, Ban, X, Clock, Activity, Upload, FileText, Download, Paperclip,
-  MessagesSquare, SendHorizonal, FileDown
-} from 'lucide-react';
+import { ArrowRight, Users, Shield, Plus, MoreVertical, UserPlus, Edit2, Trash2, Ban, X, Clock, Activity, Upload, FileText, Download, Paperclip, MessagesSquare, FileDown } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { channelsAPI, patientsAPI, usersAPI } from '../api/client';
 import { chatApi, reportsApi, downloadBlobResponse } from '../api/extendedApis';
 import { useAuthStore } from '../store/authStore';
-import toast from 'react-hot-toast';
 import ChannelChat from '../components/ChannelChat';
-
+import LivePresenceBar from '../components/clinical/LivePresenceBar';
 const roleLabels: Record<string, string> = {
   OWNER: 'مالك القناة',
   MODERATOR: 'مشرف',
@@ -213,6 +209,12 @@ export default function ChannelDetail() {
         </div>
       </div>
 
+      {/* Care Team Live Presence */}
+      <LivePresenceBar
+        members={members}
+        currentUserId={user?.id}
+      />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="card">
@@ -286,10 +288,13 @@ export default function ChannelDetail() {
                   className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center">
-                      <span className="text-primary-700 text-sm font-medium">
-                        {member.user.full_name.charAt(0)}
-                      </span>
+                    <div className="relative flex-shrink-0">
+                      <div className="w-9 h-9 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center">
+                        <span className="text-primary-700 dark:text-primary-300 text-sm font-medium">
+                          {member.user.full_name.charAt(0)}
+                        </span>
+                      </div>
+                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-gray-900" />
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-900">

@@ -1,10 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  CreditCard, DollarSign, FileText, Plus, Search, TrendingUp,
-  CheckCircle, XCircle, Clock, Building2, Shield, Printer,
-  Receipt, AlertCircle, X, ChevronDown, Banknote, Wallet,
-} from 'lucide-react';
+import { CreditCard, DollarSign, FileText, Plus, Search, TrendingUp, CheckCircle, XCircle, Clock, Building2, Shield, Printer, Receipt, AlertCircle, X, Banknote, Wallet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
@@ -12,7 +8,6 @@ import { billingAPI } from '../api/extendedApis';
 import CreateInvoiceModal from '../components/billing/CreateInvoiceModal';
 import { useAuthStore } from '../store/authStore';
 import { BILLING_WRITE_ROLES } from '../constants/roles';
-
 // ─── Types ───────────────────────────────────────────────────────────────
 interface Invoice {
   id: string;

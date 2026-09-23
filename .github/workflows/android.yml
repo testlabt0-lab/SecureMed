@@ -17,10 +17,10 @@ jobs:
 
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
     - name: Set up JDK 17
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12  # v4.7.0
       with:
         java-version: '17'
         distribution: 'temurin'
@@ -43,7 +43,7 @@ jobs:
     # build result. `path` stays repository-relative: `defaults.run.working-directory`
     # applies to `run` steps only, never to an action's inputs.
     - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb99ba841c  # v4.6.1
       with:
         name: securemed-app-debug
         if-no-files-found: error

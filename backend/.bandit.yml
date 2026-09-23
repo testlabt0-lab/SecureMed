@@ -87,6 +87,19 @@ exclude_dirs:
   - __pycache__
   - .git
   - node_modules
+  # Virtualenvs hold tens of thousands of third-party files; scanning them is
+  # both pointless (they are not our code) and slow enough to make a local
+  # `bandit -r .` appear to hang.
+  - venv
+  - test_venv
+  - .venv
+  - env
+  # Generated/static outputs, not source.
+  - staticfiles
+  - htmlcov
+  - .pytest_cache
+  - build
+  - dist
 
 # Output settings
 recursive: true

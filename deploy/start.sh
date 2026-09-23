@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../backend"
 
 # Password-reset and invitation links are built from FRONTEND_URL.
-if [ -z "${FRONTEND_URL:-}" ] && [ -n "${RENDER_EXTERNAL_URL:-}" ]; then
+if [[ -z "${FRONTEND_URL:-}" && -n "${RENDER_EXTERNAL_URL:-}" ]]; then
   export FRONTEND_URL="${RENDER_EXTERNAL_URL}"
 fi
 echo "==> Frontend URL: ${FRONTEND_URL:-<not set — reset links will use localhost>}"
@@ -25,7 +25,7 @@ echo "==> Frontend URL: ${FRONTEND_URL:-<not set — reset links will use localh
 # AI: there is no sidecar to point at any more. The endpoints under /api/v1/ai/
 # call Gemini in-process, so GEMINI_API_KEY is the whole configuration; without it
 # the assistant reports itself unavailable and the rest of the app is unaffected.
-if [ -n "${GEMINI_API_KEY:-}" ]; then
+if [[ -n "${GEMINI_API_KEY:-}" ]]; then
   echo "==> AI assistant: configured"
 else
   echo "==> AI assistant: disabled (GEMINI_API_KEY not set)"
@@ -36,7 +36,7 @@ fi
 # (PRE_MIGRATE=1) and its exit status is no longer discarded with `|| true`: it
 # used to run on every boot and swallow every error, which is how a broken
 # history survived unnoticed.
-if [ "${PRE_MIGRATE:-0}" != "0" ]; then
+if [[ "${PRE_MIGRATE:-0}" != "0" ]]; then
   echo "==> Repairing legacy migration history (PRE_MIGRATE is set)"
   python scripts/pre_migrate.py
 fi
@@ -52,7 +52,7 @@ python manage.py migrate --noinput
 echo "==> Collecting static files"
 python manage.py collectstatic --noinput
 
-if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
+if [[ "${SEED_DEMO_DATA:-0}" = "1" ]]; then
   echo "==> Seeding demo data (idempotent — unset SEED_DEMO_DATA to disable)"
   python scripts/seed_data.py || echo "!! seed failed (continuing)"
 fi

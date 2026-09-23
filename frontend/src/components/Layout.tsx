@@ -8,7 +8,7 @@ import {
   User as UserIcon, LogOut, Stethoscope, Menu, X,
   Sun, Moon, Bell, BarChart3, Bot, Building2, DatabaseBackup,
   Calendar, FileText, Settings, MonitorSmartphone, History, KeyRound,
-  Pill, CreditCard,
+  Pill, CreditCard, Search, Lock,
 } from 'lucide-react';
 import { useState, useEffect, useRef, Suspense } from 'react';
 import toast from 'react-hot-toast';
@@ -18,9 +18,14 @@ import {
   REPORT_EXPORT_ROLES, PHARMACY_ROLES, BILLING_ROLES, LAB_ROLES, WARD_ROLES,
   TELEMEDICINE_ROLES, PLATFORM_OWNER_ROLES, PERMISSIONS_MANAGER_ROLES,
 } from '../constants/roles';
-import GlobalSearch from './GlobalSearch';
+import CommandPalette from './CommandPalette';
+import DynamicWatermark from './security/DynamicWatermark';
+import PrivacyShield from './security/PrivacyShield';
+import { useSecurityPreferencesStore } from '../store/securityPreferencesStore';
 import AIAssistant from './AIAssistant';
 import { useRealtimeNotifications } from '../hooks/useRealtimeNotifications';
+import PatientQrScannerModal from './emergency/PatientQrScannerModal';
+import DrugInteractionModal from './clinical/DrugInteractionModal';
 
 /**
  * Which stored preference silences a pop-up for a given notification type.
@@ -50,6 +55,9 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [drugCheckerOpen, setDrugCheckerOpen] = useState(false);
+  const { lock } = useSecurityPreferencesStore();
   const lastUnread = useRef<number | null>(null);
 
   // Ctrl+K opens global search
@@ -134,12 +142,15 @@ export default function Layout() {
     lastUnread.current = unreadCount;
   }, [unreadCount, navigate]);
 
-  // Apply dark mode class to document
+  // Apply dark / clinical mode class to document
   useEffect(() => {
-    if (theme === 'dark') {
+    if (theme === 'clinical') {
+      document.documentElement.classList.add('dark', 'clinical-dark');
+    } else if (theme === 'dark') {
       document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('clinical-dark');
     } else {
-      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.remove('dark', 'clinical-dark');
     }
   }, [theme]);
 
@@ -222,6 +233,22 @@ export default function Layout() {
         </button>
       </motion.div>
 
+      {/* Quick Search / Command Palette shortcut trigger */}
+      <div className="px-3.5 pt-3 pb-1">
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-gray-200/70 dark:border-gray-700/60 bg-gray-50/70 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-700/80 text-xs text-gray-500 dark:text-gray-400 transition-all cursor-pointer group"
+        >
+          <span className="flex items-center gap-2">
+            <Search className="w-3.5 h-3.5 text-gray-400 group-hover:text-primary-500 transition-colors" />
+            <span>لوحة الأوامر...</span>
+          </span>
+          <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-[10px] font-mono shadow-xs">
+            Ctrl+K
+          </kbd>
+        </button>
+      </div>
+
       {/* Nav — scrollable, with animated active pill */}
       <nav className="flex-1 overflow-y-auto p-3.5 space-y-1">
         {navItems.map((item, i) => (
@@ -282,10 +309,21 @@ export default function Layout() {
 
       {/* Bottom section */}
       <div className="border-t border-gray-100 dark:border-gray-700/60 p-4 space-y-2">
-        {/* Dark mode toggle */}
+        {/* Quick Lock Button */}
+        <motion.button
+          onClick={() => lock('manual')}
+          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800/50 rounded-xl transition-all cursor-pointer"
+          whileTap={{ scale: 0.97 }}
+          title="تعتيم الشاشة وتأمين الجلسة فوراً (Privacy Shield)"
+        >
+          <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+          <span>قفل الشاشة فوراً</span>
+        </motion.button>
+
+        {/* Theme mode toggle */}
         <motion.button
           onClick={toggleTheme}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors cursor-pointer"
           whileTap={{ scale: 0.97 }}
         >
           <AnimatePresence mode="wait" initial={false}>
@@ -296,10 +334,22 @@ export default function Layout() {
                 initial={{ rotate: -90, opacity: 0 }}
                 animate={{ rotate: 0, opacity: 1 }}
                 exit={{ rotate: 90, opacity: 0 }}
-                transition={{ duration: 0.25 }}
+                transition={{ duration: 0.2 }}
               >
-                <Moon className="w-4 h-4" />
+                <Moon className="w-3.5 h-3.5 text-indigo-500" />
                 الوضع الليلي
+              </motion.span>
+            ) : theme === 'dark' ? (
+              <motion.span
+                key="stethoscope"
+                className="flex items-center gap-2"
+                initial={{ rotate: -90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: 90, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Stethoscope className="w-3.5 h-3.5 text-teal-400" />
+                الوضع السريري (OLED)
               </motion.span>
             ) : (
               <motion.span
@@ -308,9 +358,9 @@ export default function Layout() {
                 initial={{ rotate: 90, opacity: 0 }}
                 animate={{ rotate: 0, opacity: 1 }}
                 exit={{ rotate: -90, opacity: 0 }}
-                transition={{ duration: 0.25 }}
+                transition={{ duration: 0.2 }}
               >
-                <Sun className="w-4 h-4" />
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
                 الوضع النهاري
               </motion.span>
             )}
@@ -433,8 +483,31 @@ export default function Layout() {
         </main>
       </div>
 
-      {/* Global search modal (Ctrl+K) */}
-      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {/* Dynamic Anti-Leak Watermark */}
+      <DynamicWatermark />
+
+      {/* Smart Privacy Shield (Blur & Lock) */}
+      <PrivacyShield />
+
+      {/* Command Palette (Ctrl+K) */}
+      <CommandPalette
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpenQrScanner={() => setQrScannerOpen(true)}
+        onOpenDrugChecker={() => setDrugCheckerOpen(true)}
+      />
+
+      {/* Patient Wristband QR Scanner Modal */}
+      <PatientQrScannerModal
+        isOpen={qrScannerOpen}
+        onClose={() => setQrScannerOpen(false)}
+      />
+
+      {/* Global Drug Interaction Modal */}
+      <DrugInteractionModal
+        isOpen={drugCheckerOpen}
+        onClose={() => setDrugCheckerOpen(false)}
+      />
 
       {/* AI Smart Assistant panel */}
       <AIAssistant open={aiOpen} onClose={() => setAiOpen(false)} />

@@ -447,7 +447,7 @@ private fun UploadFileDialog(
                         readOnly = true,
                         label = { Text("نوع الملف") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                     )
                     ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
                         MEDICAL_FILE_TYPES.forEach { (value, display) ->

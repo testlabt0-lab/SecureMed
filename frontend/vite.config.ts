@@ -30,5 +30,20 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // The default chunking shipped one 510 kB entry plus a 411 kB chart bundle,
+    // so every user downloaded recharts whether or not they opened an
+    // analytics page. Splitting the heavy vendors onto their own chunks lets
+    // the router load them on demand and keeps the entry small.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'charts': ['recharts'],
+          'icons': ['lucide-react'],
+          'query': ['@tanstack/react-query'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600,
   },
 }));

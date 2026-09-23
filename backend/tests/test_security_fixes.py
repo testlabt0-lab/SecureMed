@@ -240,3 +240,65 @@ class TestAuditChainIntegrity:
         result = AuditLog.verify_chain(since=window_start)
         assert result['ok'], result['problems']
         assert result['signed'] >= 2
+
+    def test_chain_survives_a_shared_timestamp(self, settings):
+        # auto_now_add has microsecond resolution and a host timer can be coarse
+        # enough that two rapid inserts land in the same tick. The chain used to be
+        # verified positionally with a random UUID id as the tie-breaker, so when
+        # that happened the read order could disagree with the write order and an
+        # intact chain was reported as broken. Pin both rows to one timestamp to
+        # force the collision and confirm the links still verify.
+        settings.AUDIT_LOG_HMAC_KEY = 'test-audit-key-not-secret-key'
+        from django.utils import timezone as tz
+        window_start = tz.now()
+        AuditLog.objects.filter(timestamp__gte=window_start).delete()
+
+        first = AuditLog.objects.create(event_type='LOGIN_SUCCESS', user=None)
+        second = AuditLog.objects.create(event_type='LOGOUT', user=None)
+
+        # Re-stamp both rows to one tick and re-sign, keeping the link between
+        # them consistent: timestamp is part of the signed payload, so changing
+        # it without re-signing would fail as a signature_mismatch instead of
+        # exercising the collision.
+        shared = window_start
+        first.timestamp = shared
+        first.hash = first.generate_hash()
+        AuditLog.objects.filter(pk=first.pk).update(timestamp=shared, hash=first.hash)
+        second.previous_hash = first.hash
+        second.timestamp = shared
+        second.hash = second.generate_hash()
+        AuditLog.objects.filter(pk=second.pk).update(
+            timestamp=shared, previous_hash=second.previous_hash, hash=second.hash,
+        )
+
+        result = AuditLog.verify_chain(since=window_start)
+        assert result['signed'] >= 2
+        assert [p['error'] for p in result['problems']] == [], result['problems']
+        assert result['ok'] is True
+
+    def test_forked_chain_is_detected(self, settings):
+        # Two rows chained onto the same predecessor is what a lost append race
+        # leaves behind; the chain must not call that intact.
+        settings.AUDIT_LOG_HMAC_KEY = 'test-audit-key-not-secret-key'
+        from django.utils import timezone as tz
+        window_start = tz.now()
+        AuditLog.objects.filter(timestamp__gte=window_start).delete()
+
+        anchor = AuditLog.objects.create(event_type='LOGIN_SUCCESS', user=None)
+        AuditLog.objects.create(event_type='LOGOUT', user=None)
+
+        # A second row chained back onto the anchor. save() always relinks to the
+        # tail, so the fork is written after the insert and re-signed over the
+        # row's real timestamp — otherwise the payload changes and the row would
+        # fail as a signature_mismatch instead of a fork.
+        fork = AuditLog.objects.create(event_type='PASSWORD_CHANGED', user=None)
+        fork.previous_hash = anchor.hash
+        fork.hash = fork.generate_hash()
+        AuditLog.objects.filter(pk=fork.pk).update(
+            previous_hash=fork.previous_hash, hash=fork.hash,
+        )
+
+        result = AuditLog.verify_chain(since=window_start)
+        assert not result['ok']
+        assert any(p['error'] == 'forked_link' for p in result['problems']), \
+            result['problems']

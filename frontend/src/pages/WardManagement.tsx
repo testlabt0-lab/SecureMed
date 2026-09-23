@@ -1,15 +1,11 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  Bed, Building2, UserPlus, LogOut, Search, Clock, AlertTriangle,
-  CheckCircle, X, ChevronDown, Activity, Settings2, Trash2, Filter
-} from 'lucide-react';
+import { Bed, Building2, UserPlus, LogOut, Search, Clock, AlertTriangle, CheckCircle, X, ChevronDown, Activity, Settings2, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
 import { wardsAPI } from '../api/extendedApis';
 
-// ─── Types ───────────────────────────────────────────────────────────────
 interface Ward {
   id: string;
   name: string;

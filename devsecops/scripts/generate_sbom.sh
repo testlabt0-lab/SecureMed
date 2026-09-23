@@ -19,7 +19,7 @@ echo ""
 echo "📦 Python dependencies (CycloneDX)..."
 if command -v cyclonedx-py &>/dev/null; then
     cd backend
-    if [ -d venv ]; then
+    if [[ -d venv ]]; then
         . venv/bin/activate
     fi
     cyclonedx-py environment \
@@ -40,7 +40,7 @@ else
     echo "   ⚠️  cyclonedx-py not installed — install with: pip install cyclonedx-bom"
     # Minimal fallback: freeze requirements
     cd backend
-    if [ -d venv ]; then
+    if [[ -d venv ]]; then
         . venv/bin/activate
         pip freeze > "../${OUTPUT_DIR}/python-requirements-locked-${TIMESTAMP}.txt"
         echo "   ✅ Saved locked requirements to sbom/"
@@ -80,7 +80,7 @@ fi
 # directory would abort the script before the summary below, and the `cd ..` that
 # followed would have walked out of the repository root.
 echo ""
-if [ -d ai-service ]; then
+if [[ -d ai-service ]]; then
     echo "📦 Retired AI sidecar (ai-service/, not deployed)..."
     cd ai-service
     npm list --json > "../${OUTPUT_DIR}/sbom-ai-service-retired-${TIMESTAMP}.json" 2>/dev/null || true

@@ -480,6 +480,11 @@ class CheckDeviceView(APIView):
         device = DeviceRegistry.objects.filter(device_fingerprint=fingerprint).first()
 
         if device is not None:
+            if not device.is_trusted and ztna_approved:
+                device.is_trusted = True
+                device.save(update_fields=['is_trusted'])
+                from apps.security import licensing
+                licensing.ensure_device_license(device)
             if device.is_trusted:
                 # Zero-Trust network validation: If the device connects from a new network (IP changed),
                 # it MUST be approved via ZTNA for this new network first!
@@ -1183,5 +1188,88 @@ class ZTNAStatusView(APIView):
             return Response({'status': 'rejected'})
 
         return Response({'status': 'pending'})
+
+
+class DualCustodyRequestView(APIView):
+    """Manage Dual-Custody / Four-Eyes authorization requests."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from apps.security.governance import create_approval_request, DualCustodyException
+        op_type = request.data.get('operation_type')
+        target = request.data.get('target_resource')
+        payload = request.data.get('payload', {})
+        reason = request.data.get('justification', '')
+
+        if not op_type or not target:
+            return Response(
+                {'detail': 'نوع العملية والمورد المستهدف مطلوبان لطلب الموافقة الثنائية'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            req_data = create_approval_request(
+                requester=request.user,
+                operation_type=op_type,
+                target_resource=target,
+                payload=payload,
+                justification=reason,
+            )
+            return Response(req_data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+    def get(self, request):
+        from apps.security.governance import (
+            FOUR_EYES_PENDING_KEY, FOUR_EYES_CACHE_PREFIX, AUTHORIZED_ADMIN_ROLES
+        )
+        if request.user.role not in AUTHORIZED_ADMIN_ROLES:
+            return Response({'detail': 'الصلاحية غير كافية'}, status=status.HTTP_403_FORBIDDEN)
+
+        pending_ids = cache.get(FOUR_EYES_PENDING_KEY) or []
+        items = []
+        for rid in pending_ids:
+            item = cache.get(f"{FOUR_EYES_CACHE_PREFIX}:{rid}")
+            if item:
+                items.append(item)
+        return Response({'count': len(items), 'results': items})
+
+
+class DualCustodyApproveView(APIView):
+    """Approve a Dual-Custody request by a SECOND independent administrator."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, request_id):
+        from apps.security.governance import approve_request, DualCustodySelfApprovalForbidden, DualCustodyException
+        notes = request.data.get('notes', '')
+        try:
+            approved_data = approve_request(request.user, request_id, notes=notes)
+            return Response({
+                'detail': 'تمت الموافقة الثنائية بنجاح وتوليد رمز التفويض',
+                'data': approved_data
+            })
+        except DualCustodySelfApprovalForbidden as e:
+            return Response({'detail': str(e), 'code': 'SELF_APPROVAL_FORBIDDEN'}, status=status.HTTP_403_FORBIDDEN)
+        except DualCustodyException as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
+
+class DualCustodyRejectView(APIView):
+    """Reject a Dual-Custody request."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, request_id):
+        from apps.security.governance import reject_request, DualCustodyException
+        reason = request.data.get('reason', '')
+        try:
+            rejected_data = reject_request(request.user, request_id, rejection_reason=reason)
+            return Response({'detail': 'تم رفض الطلب', 'data': rejected_data})
+        except DualCustodyException as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+
 
 

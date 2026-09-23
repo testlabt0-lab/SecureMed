@@ -65,3 +65,22 @@ CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_TASK_STORE_EAGER_RESULT = False
 CELERY_BROKER_URL = 'memory://'
 CELERY_RESULT_BACKEND = 'cache+memory://'
+
+# Neutralise live credentials picked up from a developer's local .env. python-decouple
+# reads that file at import time, so a .env carrying a real TELEGRAM_BOT_TOKEN /
+# BACKUP_SEND_TO_TELEGRAM pair would otherwise leak into the suite: backup tests would
+# POST fake archives to a live Telegram chat, and any test asserting a single delivery
+# channel would see BOTH. Tests that exercise a channel opt into it explicitly.
+BACKUP_SEND_TO_TELEGRAM = False
+TELEGRAM_BOT_TOKEN = ''
+TELEGRAM_ADMIN_CHAT_ID = ''
+BACKUP_OFFSITE_ENABLED = False
+BACKUP_OFFSITE_ACCESS_KEY_ID = ''
+BACKUP_OFFSITE_SECRET_ACCESS_KEY = ''
+
+# Never reach a real Gemini endpoint from a test run.
+GEMINI_API_KEY = ''
+
+# A fixed HMAC key makes the audit chain deterministic and independent of any
+# value a local .env happens to define.
+AUDIT_LOG_HMAC_KEY = 'securemed-test-audit-hmac-key'

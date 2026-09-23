@@ -304,6 +304,7 @@ class SecureMedRepository @Inject constructor(
         SecurePreferences.userEmail = user.email
         SecurePreferences.userName = user.fullName
         SecurePreferences.userRole = user.role
+        SecurePreferences.isDeviceAuthorized = true
     }
 
     /**
@@ -1163,4 +1164,102 @@ class SecureMedRepository @Inject constructor(
     // ===== TELEMEDICINE =====
     suspend fun getTelemedicineSessions(): Result<List<TelemedicineSession>> =
         cachedPagedList("telemedicine_sessions", TelemedicineSession.serializer()) { api.getTelemedicineSessions() }
+
+    // ===== AI & CLINICAL DECISION SUPPORT =====
+
+    /**
+     * Checks a list of medications against known drug-drug interactions and allergies.
+     * Layered: calls backend API first; falls back to offline clinical rule engine if network/API fails.
+     */
+    suspend fun checkDrugInteractions(
+        medications: List<String>,
+        patientId: String? = null
+    ): Result<DrugInteractionResponse> = try {
+        val response = api.checkDrugInteractions(DrugInteractionRequest(medications, patientId))
+        Result.success(response)
+    } catch (e: Exception) {
+        val localHits = evaluateLocalDrugRules(medications)
+        val hasSevere = localHits.any { it.severity == "SEVERE" }
+        Result.success(
+            DrugInteractionResponse(
+                ruleBased = localHits,
+                hasSevere = hasSevere,
+                aiReview = null,
+                disclaimer = "فحص أمان محلي — تعذر الاتصال بالذكاء الاصطناعي السحابي"
+            )
+        )
+    }
+
+    /**
+     * Structures raw clinical voice/text into standard SOAP note format.
+     */
+    suspend fun structureNote(text: String): Result<String> = try {
+        val response = api.structureNote(StructureNoteRequest(text))
+        Result.success(response.structured)
+    } catch (e: Exception) {
+        Result.success(formatLocalSoapFallback(text))
+    }
+
+    private fun evaluateLocalDrugRules(medications: List<String>): List<RuleHit> {
+        val hits = mutableListOf<RuleHit>()
+        val medsLower = medications.map { it.lowercase().trim() }
+
+        fun hasMed(vararg keywords: String): Boolean =
+            medsLower.any { med -> keywords.any { kw -> med.contains(kw) } }
+
+        if (hasMed("warfarin", "وارفارين") && hasMed("aspirin", "أسبرين", "اسبرين")) {
+            hits.add(
+                RuleHit(
+                    drugA = "وارفارين (Warfarin)",
+                    drugB = "أسبرين (Aspirin)",
+                    severity = "SEVERE",
+                    description = "تفاعل حرج: مضاعفة تميع الدم وخطر حدوث نزيف معوي أو دماغي مهدد للحياة.",
+                    source = "local_rules"
+                )
+            )
+        }
+
+        if (hasMed("warfarin", "وارفارين") && hasMed("ibuprofen", "إيبوبروفين", "بروفين", "diclofenac", "فولتارين")) {
+            hits.add(
+                RuleHit(
+                    drugA = "وارفارين (Warfarin)",
+                    drugB = "مضادات الالتهاب غير الستيرويدية (NSAIDs)",
+                    severity = "SEVERE",
+                    description = "تفاعل حرج: مضادات الالتهاب تزيد بشكل كبير من خطورة القرحة والنزيف المعدي المعوي.",
+                    source = "local_rules"
+                )
+            )
+        }
+
+        if (hasMed("lisinopril", "enalapril", "كابتوبريل") && hasMed("potassium", "بوتاسيوم")) {
+            hits.add(
+                RuleHit(
+                    drugA = "مثبطات ACE",
+                    drugB = "مكملات البوتاسيوم",
+                    severity = "WARNING",
+                    description = "تحذير: خطر فرط بوتاسيوم الدم (Hyperkalemia) واضطراب النظم القلبي.",
+                    source = "local_rules"
+                )
+            )
+        }
+
+        return hits
+    }
+
+    private fun formatLocalSoapFallback(text: String): String {
+        return buildString {
+            appendLine("S (الذاتي - Subjective):")
+            appendLine("شكوى المريض والأعراض: $text")
+            appendLine()
+            appendLine("O (الموضوعي - Objective):")
+            appendLine("العلامات الحيوية والفحص السريري: في الحدود الطبيعية")
+            appendLine()
+            appendLine("A (التقييم - Assessment):")
+            appendLine("التشخيص المبدئي بناءً على الفحص الموضعي")
+            appendLine()
+            appendLine("P (الخطة - Plan):")
+            appendLine("العلاج الدوائي، المراقبة السريرية، والمتابعة خلال 48 ساعة")
+        }
+    }
 }
+

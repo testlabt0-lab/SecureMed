@@ -6,7 +6,7 @@
 #     ./push_to_github.sh MyName          → مستودع باسم مخصص (خاص)
 #     ./push_to_github.sh MyName public   → مستودع باسم مخصص (عام)
 # =============================================================
-set -e
+set -euo pipefail
 
 REPO_NAME="${1:-SecureMed}"
 VISIBILITY="${2:-private}"

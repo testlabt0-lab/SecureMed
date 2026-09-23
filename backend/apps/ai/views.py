@@ -44,11 +44,13 @@ ALLOWED_IMAGE_MIME = {'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'im
 UPSTREAM_ERROR = 'تعذر الوصول إلى خدمة الذكاء الاصطناعي حالياً. يرجى المحاولة لاحقاً.'
 
 
-def get_gemini_model(model_name='gemini-2.0-flash'):
+def get_gemini_model(model_name=None):
     """Initialize and return a Gemini model wrapper if the API key is configured."""
     api_key = getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
         return None
+    if not model_name:
+        model_name = getattr(settings, 'GEMINI_MODEL', 'gemini-3.6-flash')
     
     client = genai.Client(api_key=api_key)
     
@@ -132,12 +134,22 @@ class AIAssistantAskView(APIView):
         if len(question) > MAX_QUESTION_LEN:
             return Response({'detail': f'السؤال طويل جداً — الحد الأقصى {MAX_QUESTION_LEN} حرف'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Prompt Injection & Jailbreak Defense
+        from .sanitizer import check_prompt_injection, ZeroPhiSanitizer, build_secure_clinical_prompt
+        is_safe, warning = check_prompt_injection(question)
+        if not is_safe:
+            log_security_event(
+                user=request.user,
+                event_type='AI_PROMPT_INJECTION_BLOCKED',
+                request=request,
+                severity='CRITICAL',
+                details={'warning': warning, 'question_snippet': question[:100]}
+            )
+            return Response({'detail': warning}, status=status.HTTP_400_BAD_REQUEST)
+
         history = _sanitize_history(request.data.get('history'))
         context = request.data.get('context')
         if context is not None and _context_size(context) > MAX_CONTEXT_CHARS:
-            # Reject rather than silently truncate: a caller who sends more
-            # context than we forward should know their prompt was not the one
-            # the model answered.
             return Response(
                 {'detail': f'سياق المريض كبير جداً — الحد الأقصى {MAX_CONTEXT_CHARS} حرف'},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -158,24 +170,40 @@ class AIAssistantAskView(APIView):
             }, status=status.HTTP_200_OK)
 
         try:
-            prompt = "أنت مساعد طبي ذكي (CDSS) في نظام SecureMed. أجب باللغة العربية.\n"
+            # Two-Way Zero-PHI Sanitization (Surrogate Tokenizer)
+            sanitizer = ZeroPhiSanitizer()
+            safe_context_str = ""
             if context:
-                safe_context = anonymize_patient_data(context)
-                prompt += f"\nسياق المريض:\n{_json.dumps(safe_context, ensure_ascii=False)}\n"
+                safe_context = sanitizer.sanitize_data(context)
+                safe_context_str = f"سياق المريض السريري:\n{_json.dumps(safe_context, ensure_ascii=False)}"
 
+            safe_question = sanitizer.sanitize_text(question)
+
+            history_str = ""
             if history:
-                prompt += "\nتاريخ المحادثة:\n"
+                history_str = "تاريخ المحادثة السابقة:\n"
                 for h in history:
-                    prompt += f"{h['role']}: {h['content']}\n"
+                    history_str += f"{h['role']}: {sanitizer.sanitize_text(h['content'])}\n"
 
-            prompt += f"\nالسؤال الحالي:\n{question}\n"
-            prompt += "\nفي النهاية، قدم بالضبط 3 اقتراحات لأسئلة متابعة في صيغة JSON array فقط وافصل هذا الـ JSON بخط فاصل `---SUGGESTIONS---`."
+            combined_context = f"{safe_context_str}\n\n{history_str}".strip()
+
+            system_instructions = (
+                "أنت مساعد طبي ذكي (CDSS) في نظام SecureMed. أجب باللغة العربية بأسلوب سريري دقيق وموثوق.\n"
+                "في النهاية، قدم بالضبط 3 اقتراحات لأسئلة متابعة في صيغة JSON array فقط وافصل هذا الـ JSON بخط فاصل `---SUGGESTIONS---`."
+            )
+
+            prompt = build_secure_clinical_prompt(
+                system_instructions=system_instructions,
+                clinical_context=combined_context,
+                query=safe_question
+            )
 
             response = model.generate_content(prompt)
             text = response.text
 
             parts = text.split('---SUGGESTIONS---')
-            answer = parts[0].strip()
+            # Rehydrate response text with patient's real identifiers
+            answer = sanitizer.rehydrate(parts[0].strip())
 
             suggestions = ["استشارة طبيب مختص", "طلب تحاليل عامة", "مراجعة العلامات الحيوية"]
             if len(parts) > 1:
@@ -288,17 +316,31 @@ class AIStructureNoteView(APIView):
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 
+        # Prompt Injection & Jailbreak Defense
+        from .sanitizer import check_prompt_injection, ZeroPhiSanitizer
+        is_safe, warning = check_prompt_injection(text)
+        if not is_safe:
+            log_security_event(
+                user=request.user,
+                event_type='AI_PROMPT_INJECTION_BLOCKED',
+                request=request,
+                severity='CRITICAL',
+                details={'warning': warning}
+            )
+            return Response({'detail': warning}, status=status.HTTP_400_BAD_REQUEST)
+
         model = get_gemini_model()
         if not model:
             return Response({"structured": text + "\n\n(تعذر التنظيم لعدم وجود مفتاح API)"}, status=status.HTTP_200_OK)
 
         try:
-            # Clinical free text is the most identifying payload in this module,
-            # and it was the only one sent to the model unmasked.
-            safe_text = anonymize_patient_data(text)
+            # Two-Way Zero-PHI Sanitization
+            sanitizer = ZeroPhiSanitizer()
+            safe_text = sanitizer.sanitize_text(text)
             prompt = f"قم بتنظيم الملاحظات الطبية التالية إلى تنسيق SOAP (Subjective, Objective, Assessment, Plan) باللغة العربية وبشكل احترافي:\n\n{safe_text}"
             response = model.generate_content(prompt)
-            return Response({"structured": response.text}, status=status.HTTP_200_OK)
+            structured = sanitizer.rehydrate(response.text)
+            return Response({"structured": structured}, status=status.HTTP_200_OK)
         except Exception as e:
             return _upstream_failure(request, e, event_type='AI_STRUCTURE_NOTE_FAILED')
 

@@ -32,6 +32,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.FolderShared
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.ui.platform.LocalContext
+import com.securemed.app.hardware.barcode.BarcodeScannerModal
+import com.securemed.app.hardware.voice.VoiceInputButton
+import com.securemed.app.ui.components.HighlightedText
+import com.securemed.app.ui.components.SwipeableActionCard
 import javax.inject.Inject
 
 @HiltViewModel
@@ -77,14 +87,16 @@ fun PatientsScreen(
     onPatientClick: (String) -> Unit = {},
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val viewModel: PatientsViewModel = hiltViewModel()
     val patients = viewModel.patientsPagingFlow.collectAsLazyPagingItems()
     var search by remember { mutableStateOf("") }
+    var showBarcodeScanner by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("المرضى") },
+                title = { Text("قائمة المرضى") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "رجوع")
@@ -103,12 +115,25 @@ fun PatientsScreen(
                 value = search,
                 onValueChange = {
                     search = it
-                    // Server-side search (decrypted post-scope on the backend)
-                    // with a local filter over the loaded page as instant UX.
                     viewModel.onSearchChanged(it)
                 },
-                placeholder = { Text("بحث بالاسم أو الهاتف أو الهوية...") },
+                placeholder = { Text("بحث فوري بالاسم، الهوية، أو مسح الباركود...") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        VoiceInputButton { spokenText ->
+                            search = spokenText
+                            viewModel.onSearchChanged(spokenText)
+                        }
+                        IconButton(onClick = { showBarcodeScanner = true }) {
+                            Icon(
+                                Icons.Default.QrCodeScanner,
+                                contentDescription = "مسح بطاقة المريض",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -118,7 +143,9 @@ fun PatientsScreen(
             val isError = patients.loadState.refresh is androidx.paging.LoadState.Error
             val error = (patients.loadState.refresh as? androidx.paging.LoadState.Error)?.error?.message
             val filteredPatients = patients.itemSnapshotList.items.filter { patient ->
-                search.isBlank() || patient.fullName.contains(search.trim(), ignoreCase = true)
+                search.isBlank() || patient.fullName.contains(search.trim(), ignoreCase = true) ||
+                    patient.id.contains(search.trim(), ignoreCase = true) ||
+                    (patient.phone?.contains(search.trim(), ignoreCase = true) == true)
             }
 
             StateLayout(
@@ -142,10 +169,24 @@ fun PatientsScreen(
                             items = filteredPatients,
                             key = { patient -> patient.id }
                         ) { patient ->
-                            PatientCard(
-                                patient = patient,
-                                onClick = { onPatientClick(patient.id) }
-                            )
+                            SwipeableActionCard(
+                                startActionText = "اتصال",
+                                startActionIcon = Icons.Default.Call,
+                                onStartAction = {
+                                    val phone = patient.phone ?: "997"
+                                    val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+                                    context.startActivity(dialIntent)
+                                },
+                                endActionText = "فتح الملف",
+                                endActionIcon = Icons.Default.FolderShared,
+                                onEndAction = { onPatientClick(patient.id) }
+                            ) {
+                                PatientCard(
+                                    patient = patient,
+                                    searchQuery = search,
+                                    onClick = { onPatientClick(patient.id) }
+                                )
+                            }
                         }
                         if (patients.loadState.append is androidx.paging.LoadState.Loading) {
                             item {
@@ -161,11 +202,33 @@ fun PatientsScreen(
                 }
             }
         }
+
+        if (showBarcodeScanner) {
+            BarcodeScannerModal(
+                onDismiss = { showBarcodeScanner = false },
+                onBarcodeScanned = { scannedCode ->
+                    showBarcodeScanner = false
+                    search = scannedCode
+                    viewModel.onSearchChanged(scannedCode)
+                    // If exact match found, open directly in <0.5s!
+                    val exactMatch = patients.itemSnapshotList.items.firstOrNull {
+                        it.id == scannedCode || it.phone == scannedCode
+                    }
+                    if (exactMatch != null) {
+                        onPatientClick(exactMatch.id)
+                    }
+                }
+            )
+        }
     }
 }
 
 @Composable
-private fun PatientCard(patient: Patient, onClick: () -> Unit = {}) {
+private fun PatientCard(
+    patient: Patient,
+    searchQuery: String = "",
+    onClick: () -> Unit = {}
+) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -193,10 +256,11 @@ private fun PatientCard(patient: Patient, onClick: () -> Unit = {}) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
+                HighlightedText(
                     text = patient.fullName,
+                    query = searchQuery,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "${patient.age ?: "?"} سنة • ${

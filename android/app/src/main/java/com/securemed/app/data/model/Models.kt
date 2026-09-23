@@ -522,3 +522,54 @@ data class AppointmentCreateRequest(
     val location: String? = null,
     @SerialName("is_virtual") val isVirtual: Boolean = false
 )
+
+// ===== AI & CLINICAL DECISION SUPPORT =====
+
+@Serializable
+data class DrugInteractionRequest(
+    val medications: List<String>,
+    @SerialName("patient_id") val patientId: String? = null
+)
+
+@Serializable
+data class DrugInteractionResponse(
+    @SerialName("rule_based") val ruleBased: List<RuleHit> = emptyList(),
+    @SerialName("has_severe") val hasSevere: Boolean = false,
+    @SerialName("ai_review") val aiReview: AiReview? = null,
+    val disclaimer: String = "الفحص آلي ولا يُغني عن مراجعة الصيدلي أو الطبيب"
+)
+
+@Serializable
+data class RuleHit(
+    @SerialName("drug_a") val drugA: String = "",
+    @SerialName("drug_b") val drugB: String = "",
+    val severity: String = "WARNING",
+    val description: String = "",
+    val source: String = "rule_engine"
+)
+
+@Serializable
+data class AiReview(
+    @SerialName("overall_risk") val overallRisk: String = "LOW",
+    val findings: List<AiFinding> = emptyList(),
+    val summary: String = "",
+    val source: String = "ai_review"
+)
+
+@Serializable
+data class AiFinding(
+    val medications: List<String> = emptyList(),
+    val severity: String = "MODERATE",
+    val note: String = ""
+)
+
+@Serializable
+data class StructureNoteRequest(
+    val text: String
+)
+
+@Serializable
+data class StructureNoteResponse(
+    val structured: String
+)
+

@@ -19,23 +19,26 @@ jobs:
 
     steps:
       - name: 📥 Checkout (full history for version derivation)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
 
       - name: ☕ Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12  # v4.7.0
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: 🐘 Setup Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        # Pinned to the full commit SHA the v4 moving tag resolves to today
+        # (v4.4.3). A moving tag can be re-pointed by the maintainer at any
+        # time, which silently changes what this pipeline executes.
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a  # v4.4.3
 
       - name: 🏷️ Derive version from the tag
         id: version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [[ "${{ github.event_name }}" = "workflow_dispatch" ]]; then
             VERSION_NAME="${{ github.event.inputs.version_name }}"
           else
             VERSION_NAME="${GITHUB_REF_NAME#v}"
@@ -51,18 +54,25 @@ jobs:
 
       - name: 🔑 Restore keystore from repository secret
         working-directory: ./android
+        # Secrets are bound to the step's environment rather than expanded
+        # inline in the run script: a `${{ secrets.* }}` substitution inside
+        # a run block lands verbatim in the runner's command line and in any
+        # output the step echoes, while an env mapping is masked in logs.
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
             echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot sign the release."
             exit 1
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > securemed-release.jks
           echo "SECUREMED_KEYSTORE_FILE=securemed-release.jks" >> "$GITHUB_ENV"
-          echo "SECUREMED_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-          echo "SECUREMED_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
-          echo "SECUREMED_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "SECUREMED_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "SECUREMED_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "SECUREMED_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
 
       - name: 🔍 Static analysis (detekt)
         working-directory: ./android
@@ -89,7 +99,7 @@ jobs:
         working-directory: ./android
         run: |
           AAB=$(ls app/build/outputs/bundle/release/app-release.aab)
-          if [ ! -s "$AAB" ]; then
+          if [[ ! -s "$AAB" ]]; then
             echo "::error::AAB was not produced."
             exit 1
           fi
@@ -98,14 +108,14 @@ jobs:
           echo "AAB verified: $AAB"
 
       - name: 📤 Upload the AAB as an artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb99ba841c  # v4.6.1
         with:
           name: securemed-${{ steps.version.outputs.version_name }}-release.aab
           path: android/app/build/outputs/bundle/release/app-release.aab
 
       - name: 🚀 Attach the AAB to the tag's GitHub release
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           files: android/app/build/outputs/bundle/release/app-release.aab
           generate_release_notes: true

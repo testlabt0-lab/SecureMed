@@ -33,13 +33,16 @@ class ReminderScheduler(private val context: Context) {
          * and cancelling must both go through this constant.
          */
         const val ACTION_MEDICATION_REMINDER = "com.securemed.app.MEDICATION_REMINDER"
+        const val ACTION_APPOINTMENT_REMINDER = "com.securemed.app.APPOINTMENT_REMINDER"
 
         const val EXTRA_MEDICATION_NAME = "med_name"
         const val EXTRA_MEDICATION_DOSAGE = "med_dosage"
         const val EXTRA_PATIENT_NAME = "patient_name"
+        const val EXTRA_DOCTOR_NAME = "doctor_name"
         const val EXTRA_INSTRUCTIONS = "med_instructions"
         const val EXTRA_TIME_TEXT = "time_text"
         const val EXTRA_MEDICATION_ID = "med_id"
+        const val EXTRA_APPOINTMENT_ID = "appointment_id"
     }
 
     private val alarmManager =
@@ -104,6 +107,50 @@ class ReminderScheduler(private val context: Context) {
                 AlarmManager.RTC_WAKEUP, triggerAtMillis,
                 10 * 60 * 1000L, pending
             )
+        }
+    }
+
+    /**
+     * Schedules an offline alarm for an upcoming clinic appointment (15 minutes prior).
+     */
+    fun scheduleAppointment(appointment: com.securemed.app.data.model.Appointment) {
+        if (appointment.scheduledAt.isBlank()) return
+        try {
+            val instant = java.time.Instant.parse(appointment.scheduledAt)
+            // 15 minutes before the appointment
+            val triggerAtMillis = instant.toEpochMilli() - 15 * 60 * 1000L
+            if (triggerAtMillis <= System.currentTimeMillis()) return
+
+            val intent = Intent(context, ReminderReceiver::class.java).apply {
+                action = ACTION_APPOINTMENT_REMINDER
+                putExtra(EXTRA_APPOINTMENT_ID, appointment.id)
+                putExtra(EXTRA_PATIENT_NAME, appointment.patientName ?: "مريض")
+                putExtra(EXTRA_DOCTOR_NAME, appointment.doctorName ?: "طبيب")
+                putExtra(EXTRA_TIME_TEXT, appointment.scheduledAt.take(16).replace('T', ' '))
+            }
+
+            val pending = PendingIntent.getBroadcast(
+                context,
+                appointment.id.hashCode(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val exactAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                alarmManager.canScheduleExactAlarms()
+
+            if (exactAllowed) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP, triggerAtMillis, pending
+                )
+            } else {
+                alarmManager.setWindow(
+                    AlarmManager.RTC_WAKEUP, triggerAtMillis,
+                    10 * 60 * 1000L, pending
+                )
+            }
+        } catch (_: Exception) {
+            // Non-ISO or invalid date format fallback
         }
     }
 
@@ -177,33 +224,48 @@ class ReminderScheduler(private val context: Context) {
 class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ReminderScheduler.ACTION_MEDICATION_REMINDER) return
-
         NotificationHelper.ensureChannels(context)
 
-        val medicationId = intent.getStringExtra(ReminderScheduler.EXTRA_MEDICATION_ID) ?: return
-        val notificationId = NotificationHelper.MEDICATION_NOTIFICATION_ID_BASE +
-            (medicationId.hashCode() and 0x7FFFFFFF) % 10000
+        when (intent.action) {
+            ReminderScheduler.ACTION_APPOINTMENT_REMINDER -> {
+                val appointmentId = intent.getStringExtra(ReminderScheduler.EXTRA_APPOINTMENT_ID) ?: return
+                val patientName = intent.getStringExtra(ReminderScheduler.EXTRA_PATIENT_NAME) ?: "مريض"
+                val doctorName = intent.getStringExtra(ReminderScheduler.EXTRA_DOCTOR_NAME) ?: "طبيب"
+                val timeText = intent.getStringExtra(ReminderScheduler.EXTRA_TIME_TEXT) ?: ""
 
-        NotificationHelper.showMedicationReminder(
-            context = context,
-            medicationName = intent.getStringExtra(ReminderScheduler.EXTRA_MEDICATION_NAME) ?: "دواء",
-            dosage = intent.getStringExtra(ReminderScheduler.EXTRA_MEDICATION_DOSAGE) ?: "",
-            patientName = intent.getStringExtra(ReminderScheduler.EXTRA_PATIENT_NAME) ?: "",
-            instructions = intent.getStringExtra(ReminderScheduler.EXTRA_INSTRUCTIONS) ?: "",
-            timeText = intent.getStringExtra(ReminderScheduler.EXTRA_TIME_TEXT) ?: "",
-            notificationId = notificationId
-        )
+                NotificationHelper.showAppointmentReminder(
+                    context = context,
+                    patientName = patientName,
+                    doctorName = doctorName,
+                    timeText = timeText,
+                    appointmentId = appointmentId
+                )
+            }
+            ReminderScheduler.ACTION_MEDICATION_REMINDER -> {
+                val medicationId = intent.getStringExtra(ReminderScheduler.EXTRA_MEDICATION_ID) ?: return
+                val notificationId = NotificationHelper.MEDICATION_NOTIFICATION_ID_BASE +
+                    (medicationId.hashCode() and 0x7FFFFFFF) % 10000
 
-        // Queue the following dose from the cached plan. goAsync keeps the
-        // process alive while the suspending read of the encrypted store runs.
-        val pendingResult = goAsync()
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            try {
-                ReminderScheduler(context).refreshFromCache()
-            } catch (_: Exception) {
-            } finally {
-                pendingResult.finish()
+                NotificationHelper.showMedicationReminder(
+                    context = context,
+                    medicationName = intent.getStringExtra(ReminderScheduler.EXTRA_MEDICATION_NAME) ?: "دواء",
+                    dosage = intent.getStringExtra(ReminderScheduler.EXTRA_MEDICATION_DOSAGE) ?: "",
+                    patientName = intent.getStringExtra(ReminderScheduler.EXTRA_PATIENT_NAME) ?: "",
+                    instructions = intent.getStringExtra(ReminderScheduler.EXTRA_INSTRUCTIONS) ?: "",
+                    timeText = intent.getStringExtra(ReminderScheduler.EXTRA_TIME_TEXT) ?: "",
+                    notificationId = notificationId
+                )
+
+                // Queue the following dose from the cached plan.
+                val pendingResult = goAsync()
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        ReminderScheduler(context).refreshFromCache()
+                    } catch (_: Exception) {
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
             }
         }
     }

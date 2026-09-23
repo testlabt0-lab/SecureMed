@@ -123,4 +123,11 @@ class PharmacyViewModel @Inject constructor(
     fun clearMessage() {
         _uiState.value = _uiState.value.copy(message = null)
     }
+
+    suspend fun checkDrugInteractions(
+        medications: List<String>,
+        patientId: String? = null
+    ): com.securemed.app.data.model.DrugInteractionResponse {
+        return repository.checkDrugInteractions(medications, patientId).getOrThrow()
+    }
 }

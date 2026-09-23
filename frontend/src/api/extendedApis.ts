@@ -1,5 +1,4 @@
 import api from './client';
-import axios from 'axios';
 
 // ============== Notifications API ==============
 export const notificationsApi = {
@@ -132,6 +131,8 @@ export const smartAssistantApi = {
     api.post('/ai/structure-note/', { text }),
   triage: (data: { patient?: any; symptoms?: string; vitals?: any; lab_results?: any }) =>
     api.post('/ai/triage/', data),
+  checkDrugInteractions: (medications: string[], patientId?: string) =>
+    api.post('/ai/interactions-check/', { medications, patient_id: patientId }),
 };
 
 // ============== Appointments API ==============

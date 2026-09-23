@@ -189,6 +189,43 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
         'break_glass': bg_info,
         })
 
+    @action(detail=True, methods=['get'], url_path='access-ledger')
+    def access_ledger(self, request, pk=None):
+        """
+        Patient Access Transparency Ledger (سجل شفافية الوصول).
+        Complies with Saudi PDPL and HIPAA Accounting of Disclosures.
+        """
+        patient = self.get_object()
+        self.check_patient_access(request.user, patient, 'view access ledger')
+        from apps.patients.transparency import get_patient_access_ledger
+        ledger = get_patient_access_ledger(patient, request.user)
+        return Response({
+            'patient_id': str(patient.id),
+            'total_entries': len(ledger),
+            'ledger': ledger,
+        })
+
+    @action(detail=False, methods=['get'], url_path='my-access-ledger')
+    def my_access_ledger(self, request):
+        """
+        Allows an authenticated PATIENT user to directly fetch their own transparency ledger.
+        """
+        patient = getattr(request.user, 'patient_record', None)
+        if not patient:
+            return Response(
+                {'detail': 'لا يوجد ملف طبي مرتبط بهذا الحساب أو الحساب ليس مريضاً'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        from apps.patients.transparency import get_patient_access_ledger
+        ledger = get_patient_access_ledger(patient, request.user)
+        return Response({
+            'patient_id': str(patient.id),
+            'patient_name': patient.full_name,
+            'total_entries': len(ledger),
+            'ledger': ledger,
+        })
+
     @action (detail =True ,methods =['post'],url_path ='ai-summary')
     def ai_summary(self, request, pk=None):
         """

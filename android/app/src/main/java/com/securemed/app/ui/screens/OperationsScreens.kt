@@ -509,7 +509,7 @@ private fun AdmitPatientDialog(
                             readOnly = true,
                             label = { Text("المريض") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(patientExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(expanded = patientExpanded, onDismissRequest = { patientExpanded = false }) {
                             patients.forEach { patient ->
@@ -716,7 +716,7 @@ private fun CreateInvoiceDialog(
                             readOnly = true,
                             label = { Text("المريض") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(patientExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(expanded = patientExpanded, onDismissRequest = { patientExpanded = false }) {
                             patients.forEach { patient ->

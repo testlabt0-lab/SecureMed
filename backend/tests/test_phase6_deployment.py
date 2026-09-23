@@ -224,8 +224,13 @@ class TestAIEndpoints:
         assert resp.status_code == 200
         assert resp.data['analysis'] == 'لا توجد كسور'
         _prompt, image_part = sent[0]
-        assert image_part['mime_type'] == 'image/png'
-        assert image_part['data'] == base64.b64decode(PNG_B64)
+        # google-genai wraps the attachment in a Part; depending on the SDK
+        # generation the mime type lives on the part itself or on its nested
+        # inline_data Blob. Read whichever exists so the assertion follows the
+        # declared type into the actual call.
+        blob = getattr(image_part, 'inline_data', None) or image_part
+        assert blob.mime_type == 'image/png'
+        assert blob.data == base64.b64decode(PNG_B64)
         assert AuditLog.objects.filter(
             event_type='AI_IMAGE_ANALYSIS', user=self.admin
         ).exists()

@@ -2,19 +2,14 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import {
-  Settings, User, Shield, Bell, Monitor, Key, Smartphone,
-  Eye, EyeOff, Save, AlertCircle, CheckCircle2, Trash2,
-  LogOut, QrCode, Copy, ToggleLeft, ToggleRight, Clock,
-  Moon, Sun, Globe, Lock, ChevronRight,
-} from 'lucide-react';
+import { Settings, User, Shield, Bell, Monitor, Key, Smartphone, Eye, EyeOff, Save, AlertCircle, CheckCircle2, LogOut, QrCode, Copy, ToggleLeft, ToggleRight, Clock, Moon, Sun, Globe, Lock, ChevronRight } from 'lucide-react';
+import { useThemeStore } from '../store/themeStore';
+import { roleLabel } from '../constants/roles';
 import toast from 'react-hot-toast';
 import { authAPI, usersAPI } from '../api/client';
 import { settingsAPI } from '../api/extendedApis';
 import { enrollBiometric, isBiometricAvailable } from '../utils/webauthn';
 import { useAuthStore } from '../store/authStore';
-import { useThemeStore } from '../store/themeStore';
-import { roleLabel } from '../constants/roles';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 

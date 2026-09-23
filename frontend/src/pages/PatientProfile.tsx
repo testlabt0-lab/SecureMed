@@ -1,18 +1,18 @@
 import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  ArrowRight, HeartPulse, FolderKanban, FileText, ImageIcon,
-  Droplet, Calendar, Phone, Hash, AlertTriangle, Loader2, CreditCard,
-  Sparkles, Copy, Check, RefreshCw, Plus, Search, Filter, Activity,
-  Heart, Thermometer, Wind, CheckCircle2, Stethoscope, Clock, ShieldAlert,
-  Mic, Wand2, BrainCircuit, Lock
-} from 'lucide-react';
+import { ArrowRight, HeartPulse, FolderKanban, FileText, ImageIcon, Droplet, Calendar, Phone, Hash, AlertTriangle, Loader2, CreditCard, Sparkles, Copy, Check, RefreshCw, Plus, Search, Activity, Heart, Thermometer, Wind, CheckCircle2, Stethoscope, Clock, ShieldAlert, Mic, Wand2, BrainCircuit, Lock, Pill } from 'lucide-react';
 import { patientsExtendedApi, smartAssistantApi } from '../api/extendedApis';
 import { patientsAPI } from '../api/client';
 import api from '../api/client';
 import Modal from '../components/common/Modal';
 import BreakGlassModal from '../components/security/BreakGlassModal';
+import MedicalScribeModal from '../components/clinical/MedicalScribeModal';
+import DrugInteractionModal from '../components/clinical/DrugInteractionModal';
+import MedicalImageViewerModal from '../components/clinical/MedicalImageViewerModal';
+import PatientTimeline from '../components/clinical/PatientTimeline';
+import EmergencyMedicalCardModal from '../components/emergency/EmergencyMedicalCardModal';
+import EncryptedExportModal from '../components/clinical/EncryptedExportModal';
 import toast from 'react-hot-toast';
 
 /** The slice of the Web Speech API this page actually uses. */
@@ -165,6 +165,19 @@ export default function PatientProfile() {
 
   const [isBreakGlassModalOpen, setIsBreakGlassModalOpen] = useState(false);
   const [isRevokingBreakGlass, setIsRevokingBreakGlass] = useState(false);
+
+  // New Clinical & Emergency Tools State
+  const [isScribeOpen, setIsScribeOpen] = useState(false);
+  const [isDrugCheckerOpen, setIsDrugCheckerOpen] = useState(false);
+  const [imageViewerData, setImageViewerData] = useState<{ open: boolean; url: string; title: string; date: string }>({
+    open: false,
+    url: '',
+    title: '',
+    date: '',
+  });
+  const [isEmergencyCardOpen, setIsEmergencyCardOpen] = useState(false);
+  const [isEncryptedExportOpen, setIsEncryptedExportOpen] = useState(false);
+  const [timelineViewActive, setTimelineViewActive] = useState(true);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['patient-profile', id],
@@ -543,13 +556,59 @@ export default function PatientProfile() {
           </div>
         </div>
 
-        <button
-          onClick={openAddRecordModal}
-          className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl shadow-md shadow-primary-500/10 font-semibold text-sm"
-        >
-          <Plus className="w-4 h-4" />
-          إضافة سجل طبي
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* AI Scribe Button */}
+          <button
+            type="button"
+            onClick={() => setIsScribeOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-teal-600 to-primary-600 hover:from-teal-500 hover:to-primary-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title="إملاء صوتي وتحويل لملاحظة SOAP بالذكاء الاصطناعي"
+          >
+            <Mic className="w-3.5 h-3.5" />
+            الكاتب الصوتي AI
+          </button>
+
+          {/* Drug Checker Button */}
+          <button
+            type="button"
+            onClick={() => setIsDrugCheckerOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            title="التحقق من تعارض الأدوية وحساسية المريض"
+          >
+            <Pill className="w-3.5 h-3.5 text-rose-500" />
+            فاحص الأدوية
+          </button>
+
+          {/* Emergency Card Button */}
+          <button
+            type="button"
+            onClick={() => setIsEmergencyCardOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            title="طباعة بطاقة الطوارئ الطبية الذكية مع رمز QR"
+          >
+            <FileText className="w-3.5 h-3.5 text-amber-500" />
+            بطاقة الطوارئ
+          </button>
+
+          {/* Encrypted Export Button */}
+          <button
+            type="button"
+            onClick={() => setIsEncryptedExportOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            title="تصدير مشفر بكلمة مرور/PIN"
+          >
+            <Lock className="w-3.5 h-3.5 text-gray-500" />
+            تصدير مشفر
+          </button>
+
+          <button
+            onClick={openAddRecordModal}
+            className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl shadow-md shadow-primary-500/10 font-semibold text-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            إضافة سجل طبي
+          </button>
+        </div>
       </div>
 
       {/* Patient info card */}
@@ -878,21 +937,57 @@ export default function PatientProfile() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
               <h3 className="font-bold flex items-center gap-2 text-gray-900 dark:text-white">
                 <FileText className="w-5 h-5 text-primary-600" />
-                الخط الزمني للسجلات الطبية ({filteredRecords.length} من {records.length})
+                السجلات الطبية وتاريخ المريض ({records.length})
               </h3>
-              <button
-                onClick={openAddRecordModal}
-                className="btn-secondary text-xs inline-flex items-center gap-1.5 self-start sm:self-auto py-1.5 px-3"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                إضافة سجل
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setTimelineViewActive(true)}
+                    className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      timelineViewActive
+                        ? 'bg-white dark:bg-gray-700 text-primary-600 dark:text-primary-300 shadow-xs'
+                        : 'text-gray-500 hover:text-gray-800 dark:hover:text-white'
+                    }`}
+                  >
+                    الخط الزمني
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTimelineViewActive(false)}
+                    className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      !timelineViewActive
+                        ? 'bg-white dark:bg-gray-700 text-primary-600 dark:text-primary-300 shadow-xs'
+                        : 'text-gray-500 hover:text-gray-800 dark:hover:text-white'
+                    }`}
+                  >
+                    العرض المبوب
+                  </button>
+                </div>
+                <button
+                  onClick={openAddRecordModal}
+                  className="btn-secondary text-xs inline-flex items-center gap-1.5 py-1.5 px-3"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  إضافة سجل
+                </button>
+              </div>
             </div>
 
-            {/* Filter and Search Bar */}
-            <div className="space-y-3 mb-5">
-              <div className="relative">
-                <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
+            {timelineViewActive ? (
+              <PatientTimeline
+                records={records}
+                onOpenImage={(url, title, date) =>
+                  setImageViewerData({ open: true, url, title: title || '', date: date || '' })
+                }
+                patientName={patient.full_name}
+              />
+            ) : (
+              <>
+                {/* Filter and Search Bar */}
+                <div className="space-y-3 mb-5">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="ابحث في عناوين ومحتوى السجلات..."
@@ -1069,8 +1164,10 @@ export default function PatientProfile() {
                 </div>
               </div>
             )}
-          </div>
-        </div>
+          </>
+        )}
+      </div>
+    </div>
 
         {/* Side column: channels + files */}
         <div className="space-y-6">
@@ -1412,6 +1509,52 @@ export default function PatientProfile() {
           </div>
         </form>
       </Modal>
+
+      {/* AI Clinical Scribe Modal */}
+      <MedicalScribeModal
+        isOpen={isScribeOpen}
+        onClose={() => setIsScribeOpen(false)}
+        onInsertNote={(note) => {
+          setFormData((prev) => ({ ...prev, content: note }));
+          setIsModalOpen(true);
+        }}
+        patientName={patient?.full_name}
+      />
+
+      {/* Drug-Drug & Drug-Allergy Safety Checker Modal */}
+      <DrugInteractionModal
+        isOpen={isDrugCheckerOpen}
+        onClose={() => setIsDrugCheckerOpen(false)}
+        patientName={patient?.full_name}
+        patientId={patient?.id}
+        patientAllergies={patient?.allergies || []}
+        patientCurrentMeds={patient?.current_medications || []}
+      />
+
+      {/* Interactive Medical / Radiology Image Viewer */}
+      <MedicalImageViewerModal
+        isOpen={imageViewerData.open}
+        onClose={() => setImageViewerData((prev) => ({ ...prev, open: false }))}
+        imageUrl={imageViewerData.url}
+        title={imageViewerData.title}
+        patientName={patient?.full_name}
+        date={imageViewerData.date}
+      />
+
+      {/* Emergency Medical ID Card Modal */}
+      <EmergencyMedicalCardModal
+        isOpen={isEmergencyCardOpen}
+        onClose={() => setIsEmergencyCardOpen(false)}
+        patient={patient}
+      />
+
+      {/* Password/PIN Encrypted Medical Records Exporter Modal */}
+      <EncryptedExportModal
+        isOpen={isEncryptedExportOpen}
+        onClose={() => setIsEncryptedExportOpen(false)}
+        patient={patient}
+        records={records}
+      />
     </div>
   );
 }

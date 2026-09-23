@@ -7,6 +7,7 @@ from apps.security.views import (
     PortScannerView, VulnerabilityScannerView, SecurityDashboardView,
     CheckDeviceView, TelegramWebhookView, ActiveSessionsView, MyDevicesView,
     ZTNARequestView, ZTNAStatusView,
+    DualCustodyRequestView, DualCustodyApproveView, DualCustodyRejectView,
 )
 from apps.security.stats_views import DashboardStatsView, ActivityFeedView
 from apps.security.blocklist_views import (
@@ -43,5 +44,8 @@ urlpatterns = [
     path('break-glass/revoke/', BreakGlassRevokeView.as_view(), name='break-glass-revoke'),
     path('break-glass/status/', BreakGlassStatusView.as_view(), name='break-glass-status'),
     path('break-glass/active/', BreakGlassActiveListView.as_view(), name='break-glass-active'),
+    path('dual-custody/requests/', DualCustodyRequestView.as_view(), name='dual-custody-requests'),
+    path('dual-custody/<str:request_id>/approve/', DualCustodyApproveView.as_view(), name='dual-custody-approve'),
+    path('dual-custody/<str:request_id>/reject/', DualCustodyRejectView.as_view(), name='dual-custody-reject'),
     path('', include(router.urls)),
 ]

@@ -28,6 +28,20 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.platform.LocalContext
+import com.securemed.app.hardware.barcode.BarcodeScannerModal
+import com.securemed.app.hardware.voice.VoiceInputButton
+import com.securemed.app.reminders.ReminderScheduler
+import com.securemed.app.ui.components.HighlightedText
+import com.securemed.app.ui.components.SwipeableActionCard
+import com.securemed.app.widget.WidgetDataUpdater
+
 /** Appointment types and priorities (`Appointment.AppointmentType`/`Priority`). */
 private val APPOINTMENT_TYPES = listOf(
     "INITIAL" to "كشف أول",
@@ -50,16 +64,38 @@ private val APPOINTMENT_PRIORITIES = listOf(
 /** Statuses the server still allows cancelling. */
 private val CANCELLABLE_STATUSES = setOf("SCHEDULED", "CONFIRMED", "RESCHEDULED")
 
+private val APPOINTMENT_FILTER_OPTIONS = listOf(
+    "ALL" to "الكل",
+    "URGENT" to "عاجلة 🚨",
+    "INITIAL" to "كشف أول",
+    "FOLLOW_UP" to "متابعة",
+    "LAB" to "تحاليل"
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppointmentsScreen(
     onBack: () -> Unit,
     viewModel: AppointmentsViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val appointments = viewModel.appointmentsPagingFlow.collectAsLazyPagingItems()
     var showBookingDialog by remember { mutableStateOf(false) }
     var cancellingAppointment by remember { mutableStateOf<Appointment?>(null) }
+    var showBarcodeScanner by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("ALL") }
+
+    // Both cancel affordances (the swipe action and the card button) funnel
+    // through one guard so the status rule cannot drift between them.
+    val requestCancel: (Appointment) -> Unit = { appointment ->
+        if (appointment.status in CANCELLABLE_STATUSES) {
+            viewModel.clearMessage()
+            cancellingAppointment = appointment
+        }
+    }
 
     // A booking/cancel that succeeded must be visible in the list; the Pager
     // caches its flow, so an explicit refresh invalidates the source.
@@ -67,10 +103,29 @@ fun AppointmentsScreen(
         viewModel.refreshRequests.collect { appointments.refresh() }
     }
 
+    // Background automation: schedule offline exact alarms and sync Glance Widget
+    LaunchedEffect(appointments.itemCount) {
+        if (appointments.itemCount > 0) {
+            val scheduler = ReminderScheduler(context)
+            val items = (0 until appointments.itemCount).mapNotNull { appointments[it] }
+            items.forEach { appointment ->
+                scheduler.scheduleAppointment(appointment)
+            }
+            val activeAppointments = items.filter { it.status != "CANCELLED" && it.status != "COMPLETED" }
+            val nextApp = activeAppointments.firstOrNull()
+            WidgetDataUpdater.updateWidget(
+                context = context,
+                remainingCount = activeAppointments.size,
+                nextPatient = nextApp?.patientName,
+                nextTime = nextApp?.scheduledAt?.take(16)?.replace('T', ' ')
+            )
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("المواعيد") },
+                title = { Text("المواعيد والكشوفات") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
@@ -110,56 +165,34 @@ fun AppointmentsScreen(
                     }
                 }
                 else -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                        if (appointments.itemCount == 0) {
-                            Text(
-                                "لا توجد مواعيد حالياً.",
-                                modifier = Modifier.padding(16.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                items(appointments.itemCount) { index ->
-                                    appointments[index]?.let { appointment ->
-                                        AppointmentCard(
-                                            appointment = appointment,
-                                            onCancel = {
-                                                if (appointment.status in CANCELLABLE_STATUSES) {
-                                                    viewModel.clearMessage()
-                                                    cancellingAppointment = appointment
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                                if (appointments.loadState.append is LoadState.Loading) {
-                                    item {
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) { CircularProgressIndicator() }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    AppointmentsContent(
+                        itemCount = appointments.itemCount,
+                        itemAt = { appointments[it] },
+                        appendLoading = appointments.loadState.append is LoadState.Loading,
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { searchQuery = it },
+                        selectedFilter = selectedFilter,
+                        onFilterSelected = { selectedFilter = it },
+                        onCancelAppointment = requestCancel,
+                        onShowScanner = { showBarcodeScanner = true }
+                    )
+                }
+            }
 
-                    uiState.message?.let { message ->
-                        Snackbar(
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-                            containerColor = if (uiState.isError) MaterialTheme.colorScheme.errorContainer
-                            else MaterialTheme.colorScheme.primaryContainer,
-                            action = {
-                                TextButton(onClick = { viewModel.clearMessage() }) { Text("حسناً") }
-                            }
-                        ) {
-                            Text(
-                                message,
-                                color = if (uiState.isError) MaterialTheme.colorScheme.onErrorContainer
-                                else MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
+            uiState.message?.let { msg ->
+                Snackbar(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    containerColor = if (uiState.isError) MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.primaryContainer,
+                    action = {
+                        TextButton(onClick = { viewModel.clearMessage() }) { Text("حسناً") }
                     }
+                ) {
+                    Text(
+                        text = msg,
+                        color = if (uiState.isError) MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 }
             }
 
@@ -196,8 +229,169 @@ fun AppointmentsScreen(
                     }
                 )
             }
+
+            if (showBarcodeScanner) {
+                BarcodeScannerModal(
+                    onDismiss = { showBarcodeScanner = false },
+                    onBarcodeScanned = { scannedCode ->
+                        searchQuery = scannedCode
+                        showBarcodeScanner = false
+                    }
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun AppointmentsContent(
+    itemCount: Int,
+    itemAt: (Int) -> Appointment?,
+    appendLoading: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    selectedFilter: String,
+    onFilterSelected: (String) -> Unit,
+    onCancelAppointment: (Appointment) -> Unit,
+    onShowScanner: () -> Unit
+) {
+    val context = LocalContext.current
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // Instant In-Memory Search Bar with Voice & Barcode Scanner
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            placeholder = { Text("بحث فوري بالاسم، الطبيب، أو رقم الموعد...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    VoiceInputButton { spokenText ->
+                        onSearchQueryChange(spokenText)
+                    }
+                    IconButton(onClick = onShowScanner) {
+                        Icon(
+                            Icons.Default.QrCodeScanner,
+                            contentDescription = "مسح باركود المريض/الموعد",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Filter Chips
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            APPOINTMENT_FILTER_OPTIONS.forEach { (key, label) ->
+                val isSelected = selectedFilter == key
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onFilterSelected(key) },
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // In-memory filtered list
+        val allList = (0 until itemCount).mapNotNull { itemAt(it) }
+        val filteredList = allList.filter { matchAppointment(it, searchQuery, selectedFilter) }
+
+        if (filteredList.isEmpty() && itemCount > 0) {
+            Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "لا توجد نتائج مطابقة لبحثك أو للفلتر المختار.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else if (itemCount == 0) {
+            Text(
+                "لا توجد مواعيد حالياً.",
+                modifier = Modifier.padding(16.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            AppointmentsList(
+                filteredList = filteredList,
+                searchQuery = searchQuery,
+                appendLoading = appendLoading,
+                onCancelAppointment = onCancelAppointment,
+                onCall = {
+                    val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:997"))
+                    context.startActivity(dialIntent)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppointmentsList(
+    filteredList: List<Appointment>,
+    searchQuery: String,
+    appendLoading: Boolean,
+    onCancelAppointment: (Appointment) -> Unit,
+    onCall: () -> Unit
+) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(filteredList.size, key = { filteredList[it].id }) { idx ->
+            val appointment = filteredList[idx]
+            SwipeableActionCard(
+                startActionText = "اتصال",
+                startActionIcon = Icons.Default.Call,
+                onStartAction = onCall,
+                endActionText = "إلغاء الموعد",
+                endActionIcon = Icons.Default.Delete,
+                endActionColor = MaterialTheme.colorScheme.error,
+                onEndAction = { onCancelAppointment(appointment) }
+            ) {
+                AppointmentCard(
+                    appointment = appointment,
+                    searchQuery = searchQuery,
+                    onCancel = { onCancelAppointment(appointment) }
+                )
+            }
+        }
+        if (appendLoading) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+            }
+        }
+    }
+}
+
+/**
+ * Search + filter predicate for the in-memory appointment list. Kept as a pure
+ * function so the matching rules read in one place and stay testable.
+ */
+private fun matchAppointment(appointment: Appointment, query: String, filter: String): Boolean {
+    val matchesSearch = query.isBlank() ||
+        (appointment.patientName?.contains(query.trim(), ignoreCase = true) == true) ||
+        (appointment.doctorName?.contains(query.trim(), ignoreCase = true) == true) ||
+        appointment.appointmentType.contains(query.trim(), ignoreCase = true) ||
+        (appointment.typeDisplay?.contains(query.trim(), ignoreCase = true) == true)
+
+    val matchesFilter = when (filter) {
+        "ALL" -> true
+        "URGENT" -> appointment.priority.equals("URGENT", ignoreCase = true) ||
+            appointment.appointmentType == "EMERGENCY"
+        "INITIAL" -> appointment.appointmentType == "INITIAL"
+        "FOLLOW_UP" -> appointment.appointmentType == "FOLLOW_UP"
+        "LAB" -> appointment.appointmentType == "LAB"
+        else -> true
+    }
+
+    return matchesSearch && matchesFilter
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -217,7 +411,7 @@ private fun AppointmentOptionDropdown(
             readOnly = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
             options.forEach { (value, display) ->
@@ -495,6 +689,7 @@ private fun CancelAppointmentDialog(
 @Composable
 fun AppointmentCard(
     appointment: Appointment,
+    searchQuery: String = "",
     onCancel: () -> Unit = {}
 ) {
     Card(
@@ -515,22 +710,23 @@ fun AppointmentCard(
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
+                HighlightedText(
                     text = appointment.patientName ?: "مريض غير معروف",
+                    query = searchQuery,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                Text(
-                    // The server already localises the type; fall back to the
-                    // raw enum only if an older build omits the display field.
+                HighlightedText(
                     text = "${appointment.scheduledAt.take(16).replace('T', ' ')} — " +
                         (appointment.typeDisplay ?: appointment.appointmentType),
+                    query = searchQuery,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
+                HighlightedText(
                     text = "الطبيب: ${appointment.doctorName ?: "طبيب غير معروف"} | " +
                         "الحالة: ${appointment.statusDisplay ?: appointment.status}",
+                    query = searchQuery,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

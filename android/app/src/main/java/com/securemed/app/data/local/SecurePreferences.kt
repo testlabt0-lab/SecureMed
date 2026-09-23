@@ -21,7 +21,17 @@ object SecurePreferences {
     private const val KEY_INSTALL_ID = "install_id"
     private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
     private const val KEY_DARK_MODE = "dark_mode"
+    private const val KEY_SCREENSHOT_PROTECTION = "screenshot_protection"
+    private const val KEY_AUTO_LOCK_BACKGROUND = "auto_lock_background"
+    private const val KEY_REMAINING_APPOINTMENTS = "remaining_appointments"
+    private const val KEY_NEXT_PATIENT_NAME = "next_patient_name"
+    private const val KEY_NEXT_PATIENT_TIME = "next_patient_time"
     private const val KEY_DB_PASSPHRASE = "db_passphrase"
+    private const val KEY_DURESS_PIN = "duress_pin"
+    private const val KEY_GEO_RESTRICTION = "geo_restriction_enabled"
+    private const val KEY_WATERMARK_ENABLED = "watermark_enabled"
+    private const val KEY_SCREEN_MIRRORING_PROTECTION = "screen_mirroring_protection"
+    private const val KEY_CLIPBOARD_AUTO_CLEAR = "clipboard_auto_clear"
 
     /** The two clocks read at the last user interaction — see [recordLastSeen]. */
     private const val KEY_LAST_SEEN_ELAPSED = "last_seen_elapsed"
@@ -172,6 +182,44 @@ object SecurePreferences {
             }
         }
 
+    /** Controls FLAG_SECURE and Recent Apps privacy shield. Enabled by default. */
+    var isScreenshotProtectionEnabled: Boolean
+        get() = safeRead(true) { it.getBoolean(KEY_SCREENSHOT_PROTECTION, true) }
+        set(value) = safeWrite { it.putBoolean(KEY_SCREENSHOT_PROTECTION, value) }
+
+    /** Controls Dynamic PHI Watermark on sensitive clinical screens. Enabled by default. */
+    var isWatermarkEnabled: Boolean
+        get() = safeRead(true) { it.getBoolean(KEY_WATERMARK_ENABLED, true) }
+        set(value) = safeWrite { it.putBoolean(KEY_WATERMARK_ENABLED, value) }
+
+    /** Blocks or warns when screen is cast or mirrored to an external display. Enabled by default. */
+    var isScreenMirroringProtectionEnabled: Boolean
+        get() = safeRead(true) { it.getBoolean(KEY_SCREEN_MIRRORING_PROTECTION, true) }
+        set(value) = safeWrite { it.putBoolean(KEY_SCREEN_MIRRORING_PROTECTION, value) }
+
+    /** Automatically clears the clipboard after copying sensitive medical data. Enabled by default. */
+    var isClipboardAutoClearEnabled: Boolean
+        get() = safeRead(true) { it.getBoolean(KEY_CLIPBOARD_AUTO_CLEAR, true) }
+        set(value) = safeWrite { it.putBoolean(KEY_CLIPBOARD_AUTO_CLEAR, value) }
+
+    /** Locks the app immediately when backgrounded for 1 minute or more. */
+    var autoLockOnBackground: Boolean
+        get() = safeRead(true) { it.getBoolean(KEY_AUTO_LOCK_BACKGROUND, true) }
+        set(value) = safeWrite { it.putBoolean(KEY_AUTO_LOCK_BACKGROUND, value) }
+
+    /** Cached for Glance Widget home screen display. */
+    var remainingAppointmentsToday: Int
+        get() = safeRead(0) { it.getInt(KEY_REMAINING_APPOINTMENTS, 0) }
+        set(value) = safeWrite { it.putInt(KEY_REMAINING_APPOINTMENTS, value) }
+
+    var nextPatientName: String?
+        get() = safeRead(null) { it.getString(KEY_NEXT_PATIENT_NAME, null) }
+        set(value) = safeWrite { it.putString(KEY_NEXT_PATIENT_NAME, value) }
+
+    var nextPatientTime: String?
+        get() = safeRead(null) { it.getString(KEY_NEXT_PATIENT_TIME, null) }
+        set(value) = safeWrite { it.putString(KEY_NEXT_PATIENT_TIME, value) }
+
     /**
      * Minutes of inactivity before the app locks itself. A user preference, so
      * it outlives a logout; validated on read because a value of 0 read back
@@ -290,4 +338,12 @@ object SecurePreferences {
         }
         return passphrase.toByteArray()
     }
+
+    var duressPin: String?
+        get() = safeRead<String?>(null) { it.getString(KEY_DURESS_PIN, null) }
+        set(value) = safeWrite { it.putString(KEY_DURESS_PIN, value) }
+
+    var isGeoRestrictionEnabled: Boolean
+        get() = safeRead(false) { it.getBoolean(KEY_GEO_RESTRICTION, false) }
+        set(value) = safeWrite { it.putBoolean(KEY_GEO_RESTRICTION, value) }
 }

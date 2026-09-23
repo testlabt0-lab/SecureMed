@@ -4,11 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/authStore';
 import { authAPI, securityAPI } from '../api/client';
 import { mfaApi } from '../api/extendedApis';
-import {
-  Stethoscope, Fingerprint, Mail, Lock, ShieldCheck, AlertCircle,
-  Smartphone, HeartPulse, Activity, Eye, EyeOff, ArrowLeft, ScanFace,
-  Cpu, Monitor, ShieldAlert, CheckCircle2,
-} from 'lucide-react';
+import { Stethoscope, Fingerprint, Mail, Lock, ShieldCheck, AlertCircle, Smartphone, HeartPulse, Activity, Eye, EyeOff, ArrowLeft, ScanFace, Monitor, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AnimatedBackground from '../components/fx/AnimatedBackground';
 import ECGLine from '../components/fx/ECGLine';

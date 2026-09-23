@@ -39,6 +39,15 @@ _WINDOWS = (
 _ALERT_COOLDOWN_SECONDS = 600
 _CACHE_PREFIX = 'phi-velocity'
 
+# EHR Hopping detection windows:
+# An insider browsing > 15 distinct patients in 5 minutes, or > 40 in 1 hour,
+# represents abnormal chart snooping / exfiltration behavior.
+_HOPPING_WINDOWS = (
+    ('5m', 300, 15),
+    ('1h', 3600, 40),
+)
+_HOPPING_CACHE_PREFIX = 'ehr-hopping'
+
 
 def _threshold_scale():
     """Operator override for the built-in thresholds.
@@ -161,3 +170,120 @@ def _raise_anomaly(user, resource, path, crossed, per_user):
             )
     except Exception:
         logger.exception('Failed to notify admins of PHI anomaly')
+
+
+def record_patient_hopping(user, patient_id):
+    """Track distinct patient charts viewed by a user to detect EHR hopping.
+
+    EHR Hopping occurs when an insider, curious clinician, or compromised account
+    browses through dozens of unrelated patient records (e.g. snooping on VIPs or
+    harvesting hospital registries).
+
+    Returns True if an anomaly threshold was crossed, False otherwise.
+    """
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return False
+    if not patient_id:
+        return False
+
+    patient_str = str(patient_id).strip().lower()
+    scale = _threshold_scale()
+    crossed = None
+    per_window_counts = {}
+
+    for suffix, window, threshold in _HOPPING_WINDOWS:
+        key = f'{_HOPPING_CACHE_PREFIX}:{user.id}:{suffix}'
+        current_set = cache.get(key)
+        if current_set is None:
+            current_set = set()
+        elif isinstance(current_set, (list, tuple)):
+            current_set = set(current_set)
+
+        if patient_str not in current_set:
+            current_set.add(patient_str)
+            cache.set(key, current_set, timeout=window)
+
+        count = len(current_set)
+        per_window_counts[suffix] = count
+
+        effective_threshold = int(threshold * scale)
+        if count > effective_threshold and crossed is None:
+            crossed = {
+                'window': suffix,
+                'count': count,
+                'threshold': effective_threshold,
+            }
+
+    if crossed:
+        _raise_hopping_anomaly(user, patient_str, crossed, per_window_counts)
+        return True
+    return False
+
+
+def _raise_hopping_anomaly(user, last_patient_id, crossed, per_window_counts):
+    """Flag EHR hopping breach once per cooldown window, then stay quiet."""
+    from apps.audit.utils import log_security_event
+
+    cool_key = f'{_HOPPING_CACHE_PREFIX}:alerted:{user.id}'
+    is_first_alert = not cache.get(cool_key)
+    cache.set(cool_key, 1, timeout=_ALERT_COOLDOWN_SECONDS)
+
+    details = {
+        'last_patient_id': last_patient_id,
+        'hopping_counts': per_window_counts,
+        'crossed': crossed,
+        'threshold_scale': _threshold_scale(),
+        'detection_type': 'EHR_HOPPING_ANOMALY',
+    }
+    log_security_event(
+        user=user,
+        event_type='EHR_HOPPING_ANOMALY',
+        severity='WARNING',
+        details=details,
+    )
+
+    if not is_first_alert:
+        return
+
+    logger.warning(
+        'EHR hopping anomaly detected: user=%s counts=%s',
+        getattr(user, 'email', user.pk),
+        per_window_counts,
+    )
+    try:
+        from apps.security.telegram_service import send_critical_alert
+        send_critical_alert(
+            'سلوك سريري مشبوه: تنقل مفرط بين سجلات المرضى (EHR Hopping)',
+            [
+                f"<b>المستخدم:</b> {getattr(user, 'email', user.pk)}",
+                f"<b>العدد:</b> {crossed['count']} مريض مختلف خلال {crossed['window']}",
+                f"<b>الحد المسموح:</b> {crossed['threshold']} مريض",
+                f"<b>آخر مريض تم الوصول له:</b> {last_patient_id}",
+            ],
+        )
+    except Exception:
+        logger.exception('Failed to deliver EHR hopping alert')
+
+    try:
+        from apps.notifications.utils import send_notification
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        admins = User.objects.filter(
+            role__in=['SUPER_ADMIN', 'AUDITOR'], is_active=True
+        )
+        for admin in admins:
+            send_notification(
+                recipient=admin,
+                notification_type='SECURITY_ALERT',
+                priority='HIGH',
+                title='تنبيه أمني: تنقل مفرط بين ملفات المرضى',
+                message=(
+                    f"المستخدم {getattr(user, 'email', user.pk)} قام بفتح "
+                    f"{crossed['count']} ملف مريض مختلف خلال {crossed['window']}. "
+                    f"يرجى مراجعة سجل التدقيق."
+                ),
+                data=details,
+            )
+    except Exception:
+        logger.exception('Failed to notify admins of EHR hopping')
+

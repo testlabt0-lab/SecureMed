@@ -18,12 +18,46 @@
     @apply bg-gray-950 text-gray-100;
   }
 
+  /* Clinical High-Contrast Dark Mode */
+  .clinical-dark body {
+    background-color: #000000 !important;
+    color: #f8fafc !important;
+  }
+  .clinical-dark .card,
+  .clinical-dark .glass {
+    background-color: #050505 !important;
+    border-color: #1e293b !important;
+  }
+  .clinical-dark aside,
+  .clinical-dark header {
+    background-color: #020617 !important;
+    border-color: #1e293b !important;
+  }
+
   h1, h2, h3 {
     @apply font-heading;
   }
 
   ::selection {
     @apply bg-primary-600/20 text-primary-900 dark:text-primary-100;
+  }
+
+  @media print {
+    body * {
+      visibility: hidden;
+    }
+    .printable-area, .printable-area * {
+      visibility: visible;
+    }
+    .printable-area {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+    }
+    .no-print {
+      display: none !important;
+    }
   }
 }
 

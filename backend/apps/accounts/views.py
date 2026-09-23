@@ -185,6 +185,16 @@ class LoginView (APIView ):
             pass
         if not ztna_approved:
             ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
+        if not ztna_approved:
+            try:
+                ztna_approved = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    is_approved=True
+                ).exists()
+            except Exception:
+                pass
+        if not ztna_approved:
+            ztna_approved = any(cache.get(f'ztna_approved_{fp}') for fp in fps_to_check)
 
         # Check if currently blocked
         if ztna_approved:
@@ -324,6 +334,16 @@ class LoginView (APIView ):
                 pass
             if not ztna_approved:
                 ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
+            if not ztna_approved:
+                try:
+                    ztna_approved = ZTNAPendingApproval.objects.filter(
+                        device_fingerprint__in=fps_to_check,
+                        is_approved=True
+                    ).exists()
+                except Exception:
+                    pass
+            if not ztna_approved:
+                ztna_approved = any(cache.get(f'ztna_approved_{fp}') for fp in fps_to_check)
 
             if ztna_approved or user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
                 device.is_trusted = True
@@ -725,6 +745,37 @@ class BiometricLoginView (APIView ):
         tracked = DeviceTracker.track_device(user, request, device_info)
         device, _ = tracked if tracked else (None, False)
 
+        if device and not device.is_trusted:
+            from apps.security.models import ZTNAPendingApproval
+            fps_to_check = [fp for fp in [fingerprint] if fp]
+            ztna_approved = False
+            try:
+                ztna_approved = ZTNAPendingApproval.objects.filter(
+                    device_fingerprint__in=fps_to_check,
+                    ip_address=ip_address,
+                    is_approved=True
+                ).exists()
+            except Exception:
+                pass
+            if not ztna_approved:
+                ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
+            if not ztna_approved:
+                try:
+                    ztna_approved = ZTNAPendingApproval.objects.filter(
+                        device_fingerprint__in=fps_to_check,
+                        is_approved=True
+                    ).exists()
+                except Exception:
+                    pass
+            if not ztna_approved:
+                ztna_approved = any(cache.get(f'ztna_approved_{fp}') for fp in fps_to_check)
+
+            if ztna_approved or user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
+                device.is_trusted = True
+                device.save(update_fields=['is_trusted'])
+                from apps.security import licensing
+                licensing.ensure_device_license(device)
+
         # Enforce Dr. Majed's requirement: No login from unauthorized devices
         if getattr(settings, 'ENFORCE_DEVICE_AUTHORIZATION', True) and device and not device.is_trusted:
             log_security_event(
@@ -1087,6 +1138,24 @@ class MFALoginView (APIView ):
                 device =DeviceRegistry .objects .filter (
                 user =user ,device_fingerprint =fingerprint 
                 ).first ()
+                if device is not None and not device.is_trusted:
+                    from apps.security.models import ZTNAPendingApproval
+                    fps_to_check = [fp for fp in [fingerprint] if fp]
+                    ztna_approved = False
+                    try:
+                        ztna_approved = ZTNAPendingApproval.objects.filter(
+                            device_fingerprint__in=fps_to_check,
+                            is_approved=True
+                        ).exists()
+                    except Exception:
+                        pass
+                    if not ztna_approved:
+                        ztna_approved = any(cache.get(f'ztna_approved_{fp}') for fp in fps_to_check)
+                    if ztna_approved or user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
+                        device.is_trusted = True
+                        device.save(update_fields=['is_trusted'])
+                        from apps.security import licensing
+                        licensing.ensure_device_license(device)
                 if device is None or not device .is_trusted :
                     log_security_event (
                     user =user ,event_type ='LOGIN_FAILED',request =request ,

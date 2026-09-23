@@ -557,15 +557,30 @@ def _process_callback(callback_query, request):
         return True
 
     if action == 'ztna_approve':
-        from apps.security.models import ZTNAPendingApproval
+        from apps.security.models import ZTNAPendingApproval, DeviceRegistry, BlockedDevice
         from django.utils import timezone
-        
+        from django.core.cache import cache
+        from apps.security import licensing
+
         try:
             req = ZTNAPendingApproval.objects.get(id=ztna_req_id)
             req.is_approved = True
             req.approved_at = timezone.now()
             req.save(update_fields=['is_approved', 'approved_at'])
-            
+
+            cache.set(f'ztna_approved_{req.device_fingerprint}', True, timeout=86400 * 30)
+            if req.ip_address:
+                cache.set(f'ztna_approved_{req.device_fingerprint}_{req.ip_address}', True, timeout=86400 * 30)
+
+            BlockedDevice.objects.filter(device_fingerprint=req.device_fingerprint).delete()
+            cache.delete(f'blocked_device_{req.device_fingerprint}')
+            cache.delete(f'waf_device_blacklist:{req.device_fingerprint}')
+
+            for dev in DeviceRegistry.objects.filter(device_fingerprint=req.device_fingerprint):
+                dev.is_trusted = True
+                dev.save(update_fields=['is_trusted'])
+                licensing.ensure_device_license(dev)
+
             if callback_id:
                 answer_callback_query(callback_id, 'تمت الموافقة وتفعيل الوصول')
             if message_id is not None:
@@ -574,7 +589,7 @@ def _process_callback(callback_query, request):
         except ZTNAPendingApproval.DoesNotExist:
             if callback_id:
                 answer_callback_query(callback_id, 'الطلب غير موجود أو محذوف', show_alert=True)
-                
+
         return True
     if action == 'ztna_reject':
         from apps.security.models import ZTNAPendingApproval, BlockedDevice

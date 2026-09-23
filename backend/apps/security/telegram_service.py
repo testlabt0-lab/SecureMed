@@ -101,6 +101,83 @@ def send_device_approval_request(device):
         logger.error(f"Error sending Telegram message: {e}")
         return False
 
+
+def send_device_switch_request(user, new_device, old_device):
+    """
+    Send a detailed notification to the Telegram Admin Chat when an account
+    already bound/trusted on an old device tries to log in from a new device.
+    """
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    chat_id = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', None)
+
+    if not bot_token or not chat_id:
+        logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_ADMIN_CHAT_ID not configured.")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    from django.utils import timezone
+    role_display = user.get_role_display() if hasattr(user, 'get_role_display') else getattr(user, 'role', '')
+    user_name = getattr(user, 'full_name', '') or user.email
+
+    old_login_str = "غير معروف"
+    if old_device and old_device.last_login:
+        try:
+            old_login_str = timezone.localtime(old_device.last_login).strftime('%Y-%m-%d %I:%M %p')
+        except Exception:
+            old_login_str = str(old_device.last_login)
+
+    now_str = timezone.localtime(timezone.now()).strftime('%Y-%m-%d %I:%M %p')
+
+    message = (
+        f"🚨 <b>طلب نقل وتفعيل حساب إلى جهاز جديد</b>\n\n"
+        f"👤 <b>المستخدم:</b> {user_name} (<code>{user.email}</code>)\n"
+        f"🎖 <b>الدور:</b> {role_display}\n"
+        f"⚠️ <b>الحالة:</b> هذا الحساب مفعّل مسبقاً على جهاز آخر.\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📱 <b>بيانات الجهاز القديم (المسجل حالياً):</b>\n"
+        f"• <b>النظام / المتصفح:</b> {old_device.os_info or 'غير معروف'} | {old_device.browser_info or 'غير معروف'}\n"
+        f"• <b>عنوان IP السابق:</b> <code>{old_device.last_ip_address or 'غير متوفر'}</code>\n"
+        f"• <b>الماك أدرس:</b> <code>{old_device.mac_address or 'غير متوفر'}</code>\n"
+        f"• <b>بصمة الجهاز:</b> <code>{old_device.device_fingerprint[:24]}…</code>\n"
+        f"• <b>🕒 آخر تسجيل دخول منه:</b> <b>{old_login_str}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🆕 <b>بيانات الجهاز الجديد (الذي يحاول الدخول):</b>\n"
+        f"• <b>النظام / المتصفح:</b> {new_device.os_info or 'غير معروف'} | {new_device.browser_info or 'غير معروف'}\n"
+        f"• <b>عنوان IP الحالي:</b> <code>{new_device.last_ip_address or 'غير متوفر'}</code>\n"
+        f"• <b>الماك أدرس:</b> <code>{new_device.mac_address or 'غير متوفر'}</code>\n"
+        f"• <b>بصمة الجهاز الجديد:</b> <code>{new_device.device_fingerprint[:24]}…</code>\n"
+        f"• <b>🕒 وقت المحاولة:</b> {now_str}\n\n"
+        f"<i>عند الضغط على السماح، سيتم سحب الثقة من الجهاز القديم واعتماد هذا الجهاز الجديد لهذا المستخدم فقط.</i>"
+    )
+
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ نقل وتفعيل للجهاز الجديد", "callback_data": f"switch_{new_device.id}"},
+                {"text": "❌ رفض وحظر الجهاز الجديد", "callback_data": f"reject_{new_device.id}"}
+            ]
+        ]
+    }
+
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "reply_markup": reply_markup
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        if response.status_code != 200:
+            logger.error(f"Failed to send Telegram message: {response.text}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error sending Telegram message: {e}")
+        return False
+
+
 def answer_callback_query(callback_query_id, text, show_alert=False):
     bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
     if not bot_token: return

@@ -85,7 +85,14 @@ api.interceptors.response.use(
       error.response?.status === 403 &&
       (errorCode === 'ZTNA_BLOCKED' || String(error.response?.data?.error).includes('ZTNA'))
     ) {
-      window.location.reload();
+      if (
+        !window.location.pathname.startsWith('/login') &&
+        !window.location.pathname.startsWith('/blocked') &&
+        !originalRequest?.url?.includes('/auth/login') &&
+        !originalRequest?.url?.includes('/security/check-device')
+      ) {
+        window.location.href = '/blocked';
+      }
       return Promise.reject(error);
     }
 

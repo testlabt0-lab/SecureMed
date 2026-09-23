@@ -65,7 +65,8 @@ export default function Login() {
           // them instead of the localized detail text.
           const state = err.response.data.state || err.response.data.code || '';
           if (state === 'network_changed' || state === 'ZTNA_BLOCKED') {
-            window.location.reload();
+            setDeviceState('pending');
+            setDeviceCheckMessage(err.response.data.detail || 'تم رصد تغيير في شبكة الاتصال لهذا الجهاز. يلزم الحصول على موافقة الإدارة للشبكة الجديدة.');
             return;
           } else if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
             setDeviceState('blocked');
@@ -138,7 +139,8 @@ export default function Login() {
               const state = err.response.data.state || err.response.data.code || '';
               
               if (state === 'network_changed' || state === 'ZTNA_BLOCKED') {
-                  window.location.reload();
+                  setDeviceState('pending');
+                  setDeviceCheckMessage(err.response.data.detail || 'تم رصد تغيير في شبكة الاتصال لهذا الجهاز. يلزم الحصول على موافقة الإدارة للشبكة الجديدة.');
                   return;
               } else if (state === 'unknown' || state === 'DEVICE_UNKNOWN') {
                   setDeviceState('unknown');
@@ -196,7 +198,8 @@ export default function Login() {
           // them instead of the localized detail text.
           const state = err.response.data.state || err.response.data.code || '';
           if (state === 'network_changed' || state === 'ZTNA_BLOCKED') {
-            window.location.reload();
+            setDeviceState('pending');
+            setDeviceCheckMessage(err.response.data.detail || 'تم رصد تغيير في شبكة الاتصال لهذا الجهاز. يلزم الحصول على موافقة الإدارة للشبكة الجديدة.');
             return;
           } else if (state === 'blocked' || state === 'DEVICE_BLOCKED') {
             setDeviceState('blocked');
@@ -252,7 +255,11 @@ export default function Login() {
       // the text check stays only as a fallback for older payloads.
       const blockCode = err.response?.data?.code;
       const codeStr = Array.isArray(blockCode) ? blockCode[0] : blockCode;
-      if (
+      if (codeStr === 'DEVICE_LOCKED_TO_ANOTHER_DEVICE') {
+        setDeviceState('pending');
+        setDeviceCheckMessage(detail);
+        setBlockedAlert(detail);
+      } else if (
         codeStr === 'DEVICE_BLOCKED' ||
         codeStr === 'IP_BLOCKED' ||
         err.response?.status === 403 ||

@@ -217,30 +217,89 @@ fun DashboardScreen(
                 )
             }
             item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "المواعيد", icon = Icons.Default.Event, onClick = onNavigateToAppointments)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الصيدلية", icon = Icons.Default.LocalPharmacy, onClick = onNavigateToPharmacy)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "المختبر", icon = Icons.Default.Science, onClick = onNavigateToLab)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "المواعيد",
+                        icon = Icons.Default.Event,
+                        onClick = onNavigateToAppointments
+                    )
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "الصيدلية",
+                        icon = Icons.Default.LocalPharmacy,
+                        onClick = onNavigateToPharmacy
+                    )
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "المختبر",
+                        icon = Icons.Default.Science,
+                        onClick = onNavigateToLab
+                    )
                 }
             }
             item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "عن بعد", icon = Icons.Default.VideoCall, onClick = onNavigateToTelemedicine)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "التحليلات", icon = Icons.Default.Insights, onClick = onNavigateToAnalytics)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "نتائج المختبر", icon = Icons.Default.Biotech, onClick = onNavigateToLabResults)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "عن بعد",
+                        icon = Icons.Default.VideoCall,
+                        onClick = onNavigateToTelemedicine
+                    )
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "التحليلات",
+                        icon = Icons.Default.Insights,
+                        onClick = onNavigateToAnalytics
+                    )
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "نتائج المختبر",
+                        icon = Icons.Default.Biotech,
+                        onClick = onNavigateToLabResults
+                    )
                 }
             }
             item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الأسرّة", icon = Icons.Default.Hotel, onClick = onNavigateToWards)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "الفواتير", icon = Icons.AutoMirrored.Filled.ReceiptLong, onClick = onNavigateToInvoices)
-                    QuickServiceCard(modifier = Modifier.weight(1f), title = "التقارير", icon = Icons.Default.Assessment, onClick = onNavigateToReports)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "الأسرّة",
+                        icon = Icons.Default.Hotel,
+                        onClick = onNavigateToWards
+                    )
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "الفواتير",
+                        icon = Icons.AutoMirrored.Filled.ReceiptLong,
+                        onClick = onNavigateToInvoices
+                    )
+                    QuickServiceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "التقارير",
+                        icon = Icons.Default.Assessment,
+                        onClick = onNavigateToReports
+                    )
                 }
             }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (state.showAudit) {
-                        QuickServiceCard(modifier = Modifier.weight(1f), title = "التدقيق", icon = Icons.AutoMirrored.Filled.FactCheck, onClick = onNavigateToAudit)
+                        QuickServiceCard(
+                            modifier = Modifier.weight(1f),
+                            title = "التدقيق",
+                            icon = Icons.AutoMirrored.Filled.FactCheck,
+                            onClick = onNavigateToAudit
+                        )
                     } else {
                         Spacer(modifier = Modifier.weight(1f))
                     }

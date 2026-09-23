@@ -242,11 +242,7 @@ class AuthViewModel @Inject constructor(
         _uiState.value = AuthUiState.CheckingDevice
         stopZtnaPolling()
 
-        // Fast path: if already marked authorized on this device, skip remote check
-        if (SecurePreferences.isDeviceAuthorized) {
-            _uiState.value = AuthUiState.DeviceAuthorized
-            return
-        }
+        // Always verify with the server to ensure current network IP and authorization are valid
 
         viewModelScope.launch {
             // First check if there is an existing ZTNA approval status

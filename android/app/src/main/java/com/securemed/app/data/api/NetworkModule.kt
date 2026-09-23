@@ -203,8 +203,8 @@ object NetworkModule {
         val builder = OkHttpClient.Builder()
             .applyCertificatePinner()
             .connectionPool(connectionPool)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(45, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
         httpCache?.let { builder.cache(it) }
         builder.build()
     }
@@ -276,9 +276,9 @@ object NetworkModule {
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
             .authenticator(tokenAuthenticator)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(45, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
         httpCache?.let { builder.cache(it) }
         builder.build()
     }

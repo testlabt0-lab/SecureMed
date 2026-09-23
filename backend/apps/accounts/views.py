@@ -185,16 +185,6 @@ class LoginView (APIView ):
             pass
         if not ztna_approved:
             ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
-        if not ztna_approved:
-            try:
-                ztna_approved = ZTNAPendingApproval.objects.filter(
-                    device_fingerprint__in=fps_to_check,
-                    is_approved=True
-                ).exists()
-            except Exception:
-                pass
-        if not ztna_approved:
-            ztna_approved = any(cache.get(f'ztna_approved_{fp}') for fp in fps_to_check)
 
         # Check if currently blocked
         if ztna_approved:
@@ -304,9 +294,43 @@ class LoginView (APIView ):
         getattr (settings ,'ADAPTIVE_MFA_ENABLED',True )
         and not getattr (settings ,'ENFORCE_DEVICE_AUTHORIZATION',True )
         )
+        # Check if this user already has an active, trusted device
+        from apps.security.models import DeviceRegistry
+        trusted_devices = DeviceRegistry.objects.filter(user=user, is_trusted=True)
+        has_existing_trusted = trusted_devices.exists()
+
         # Track first; whether the alert fires is decided from the result.
         tracked =DeviceTracker .track_device (user ,request ,device_info ,notify =False )
         device ,is_suspicious_device =tracked if tracked else (None ,False )
+
+        # 1. Enforce strict Account-to-Device locking (الحساب مفعّل على جهاز محدد فقط):
+        # If the user already has a trusted device, and this attempt is from another device:
+        if has_existing_trusted and device and not device.is_trusted:
+            old_device = trusted_devices.order_by('-last_login').first()
+            from apps.security.telegram_service import send_device_switch_request
+            send_device_switch_request(user=user, new_device=device, old_device=old_device)
+
+            log_security_event(
+                user=user,
+                event_type='LOGIN_FAILED_ANOTHER_DEVICE',
+                request=request,
+                details={
+                    'reason': 'account_locked_to_another_device',
+                    'new_device_fingerprint': fingerprint,
+                    'old_device_fingerprint': old_device.device_fingerprint if old_device else '',
+                },
+                severity='WARNING'
+            )
+            return Response(
+                {
+                    'detail': 'هذا الحساب مفعّل على جهاز آخر ومقترن به. تم إرسال إشعار للمدير للموافقة على نقل التفعيل إلى هذا الجهاز.',
+                    'authorized': False,
+                    'code': 'DEVICE_LOCKED_TO_ANOTHER_DEVICE',
+                    'device_fingerprint': fingerprint,
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         # A challenge is pending whenever adaptive mode is on and the device is
         # not trusted — new or previously-seen-but-never-verified alike. Both
         # are exactly the devices DeviceTracker marked suspicious.
@@ -334,22 +358,15 @@ class LoginView (APIView ):
                 pass
             if not ztna_approved:
                 ztna_approved = any(cache.get(f'ztna_approved_{fp}_{ip_address}') for fp in fps_to_check)
-            if not ztna_approved:
-                try:
-                    ztna_approved = ZTNAPendingApproval.objects.filter(
-                        device_fingerprint__in=fps_to_check,
-                        is_approved=True
-                    ).exists()
-                except Exception:
-                    pass
-            if not ztna_approved:
-                ztna_approved = any(cache.get(f'ztna_approved_{fp}') for fp in fps_to_check)
 
-            if ztna_approved or user.role in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
+            if ztna_approved:
                 device.is_trusted = True
                 device.save(update_fields=['is_trusted'])
                 from apps.security import licensing
                 licensing.ensure_device_license(device)
+            else:
+                from apps.security.telegram_service import send_device_approval_request
+                send_device_approval_request(device)
 
         if getattr(settings, 'ENFORCE_DEVICE_AUTHORIZATION', True) and device and not device.is_trusted:
             log_security_event(

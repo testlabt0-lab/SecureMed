@@ -37,6 +37,12 @@ object ApiErrors {
      * anything a user can act on.
      */
     fun messageFor(throwable: Throwable, fallback: String): String {
+        if (throwable is java.net.SocketTimeoutException) {
+            return "انتهت مهلة الاتصال بالخادم. استغرق الخادم وقتاً أطول من المعتاد للاستجابة، يرجى المحاولة مرة أخرى."
+        }
+        if (throwable is java.net.UnknownHostException || throwable is java.net.ConnectException) {
+            return "تعذر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت وصلاحية الشبكة."
+        }
         val http = throwable as? HttpException ?: return throwable.localizedMessage ?: fallback
         // errorBody() is a one-shot stream; string() consumes and closes it.
         val body = runCatching { http.response()?.errorBody()?.string() }.getOrNull()

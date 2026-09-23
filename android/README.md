@@ -24,8 +24,8 @@
 
 | النمط | الافتراضي | التجاوز |
 |---|---|---|
-| debug | `http://10.0.2.2:8000/api/v1/` (محاكي → الجهاز المضيف) | `-PAPI_BASE_URL=...` |
-| release | `https://securemed-production.onrender.com/api/v1/` | `-PAPI_BASE_URL=...` |
+| debug | `https://securemed-web.onrender.com/api/v1/` | `-PAPI_BASE_URL=...` |
+| release | `https://securemed-web.onrender.com/api/v1/` | `-PAPI_BASE_URL=...` |
 
 قواعد هامة (انظر `app/build.gradle.kts`):
 

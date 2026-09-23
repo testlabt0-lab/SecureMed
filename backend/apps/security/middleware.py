@@ -557,7 +557,7 @@ class ZeroTrustConsentFirewallMiddleware:
         approved_fp = None
 
         for fp in fps_to_check:
-            if cache.get(f'ztna_approved_{fp}_{client_ip}') or cache.get(f'ztna_approved_{fp}'):
+            if cache.get(f'ztna_approved_{fp}_{client_ip}'):
                 is_approved = True
                 approved_fp = fp
                 break
@@ -572,23 +572,24 @@ class ZeroTrustConsentFirewallMiddleware:
                     is_approved=True
                 )
                 first_match = matching.first()
-                if not first_match:
-                    first_match = ZTNAPendingApproval.objects.filter(
-                        device_fingerprint__in=fps_to_check,
-                        is_approved=True
-                    ).first()
                 if first_match:
                     is_approved = True
                     approved_fp = first_match.device_fingerprint
                     # Cache the approval so subsequent requests hit cache
                     for fp in fps_to_check:
                         cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
-                        cache.set(f'ztna_approved_{fp}', True, timeout=86400 * 30)
-                elif DeviceRegistry.objects.filter(device_fingerprint__in=fps_to_check, is_trusted=True).exists():
-                    is_approved = True
-                    approved_fp = header_fp or cookie_fp
-                    for fp in fps_to_check:
-                        cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
+                else:
+                    # DeviceRegistry match only if device is trusted AND matches the current IP
+                    trusted_dev = DeviceRegistry.objects.filter(
+                        device_fingerprint__in=fps_to_check,
+                        is_trusted=True,
+                        last_ip_address=client_ip
+                    ).first()
+                    if trusted_dev:
+                        is_approved = True
+                        approved_fp = header_fp or cookie_fp
+                        for fp in fps_to_check:
+                            cache.set(f'ztna_approved_{fp}_{client_ip}', True, timeout=86400 * 30)
             except Exception as e:
                 logger.error(f"ZTNA DB Check Failed: {e}")
                 is_approved = False

@@ -452,7 +452,7 @@ def _process_callback(callback_query, request):
     device = None
     action = None
     ztna_req_id = None
-    for prefix in ('approve_', 'reject_', 'deactivate_'):
+    for prefix in ('approve_', 'reject_', 'deactivate_', 'switch_'):
         if data.startswith(prefix):
             action = prefix[:-1]
             device = DeviceRegistry.objects.filter(
@@ -468,9 +468,47 @@ def _process_callback(callback_query, request):
             action = 'ztna_reject'
             ztna_req_id = data[len('ztna_reject_'):]
             
-    if action in ('approve', 'reject', 'deactivate') and device is None:
+    if action in ('approve', 'reject', 'deactivate', 'switch') and device is None:
         if callback_id:
             answer_callback_query(callback_id, 'الجهاز غير موجود', show_alert=True)
+        return True
+
+    if action == 'switch':
+        # Switch device binding: untrust previous devices for THIS user only, and trust the new device
+        DeviceRegistry.objects.filter(user=device.user).exclude(id=device.id).update(is_trusted=False)
+        SessionManager.force_logout_user(device.user.id)
+
+        device.is_trusted = True
+        device.save(update_fields=['is_trusted'])
+
+        from apps.security.licensing import issue_license
+        license_obj, _created = issue_license(device, issued_by='telegram')
+        log_security_event(
+            user=device.user,
+            event_type='DEVICE_SWITCHED_VIA_TELEGRAM',
+            request=request,
+            details={'device_id': str(device.id),
+                     'device_fingerprint': device.device_fingerprint,
+                     'license_key': license_obj.license_key},
+            severity='INFO',
+        )
+        from apps.security.views import _notify_user
+        _notify_user(
+            device.user,
+            notification_type='LOGIN_ALERT',
+            title='تم نقل تفعيل الحساب لجهاز جديد',
+            message=(
+                f'تمت الموافقة على نقل وتفعيل حسابك على الجهاز الجديد ({device.os_info or "جهاز"} — '
+                f'بصمة: {device.device_fingerprint[:16]}…). تم إلغاء تفعيل الجهاز القديم، ويمكنك تسجيل الدخول الآن.'
+            ),
+            priority='HIGH',
+            data={'device_id': str(device.id)},
+        )
+        if callback_id:
+            answer_callback_query(callback_id, 'تم نقل تفعيل الحساب للجهاز الجديد بنجاح')
+        if message_id is not None:
+            edit_message_text(chat_id, message_id,
+                              f"{original_text}\n\n✅ <b>تم نقل وتفعيل الحساب لهذا الجهاز وإلغاء الجهاز القديم</b>")
         return True
 
     if action == 'approve':

@@ -215,7 +215,7 @@ elif _DATABASE_URL :
     )
     }
     DATABASES ['default']['CONN_HEALTH_CHECKS']=True 
-    DATABASES ['default']['ATOMIC_REQUESTS']=config ('DB_ATOMIC_REQUESTS',default =False ,cast =bool )
+    DATABASES ['default']['ATOMIC_REQUESTS']=config ('DB_ATOMIC_REQUESTS',default =True ,cast =bool )
     DATABASES ['default'].setdefault('OPTIONS', {})
     DATABASES ['default']['OPTIONS'].update({
         'keepalives': 1,

@@ -75,7 +75,7 @@ def _device_license_gate (user ,device ,request ,reason ):
 
     يعيد Response الرفض، أو None عند السماح.
     """
-    if device is None:
+    if device is None or not device.is_trusted:
         return None
     from apps .security import licensing
     license_obj =licensing .ensure_device_license (device )
@@ -305,7 +305,7 @@ class LoginView (APIView ):
 
         # 1. Enforce strict Account-to-Device locking (الحساب مفعّل على جهاز محدد فقط):
         # If the user already has a trusted device, and this attempt is from another device:
-        if has_existing_trusted and device and not device.is_trusted:
+        if getattr(settings, 'ENFORCE_DEVICE_AUTHORIZATION', True) and has_existing_trusted and device and not device.is_trusted:
             old_device = trusted_devices.order_by('-last_login').first()
             from apps.security.telegram_service import send_device_switch_request
             send_device_switch_request(user=user, new_device=device, old_device=old_device)

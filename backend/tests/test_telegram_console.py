@@ -236,10 +236,12 @@ class TestPollingCommand:
         with mock.patch(
             'requests.get', side_effect=fake_get,
         ) as get_updates, mock.patch(
+            'requests.post', return_value=mock.Mock(status_code=200, json=lambda: {'ok': True})
+        ), mock.patch(
             'time.sleep', side_effect=KeyboardInterrupt,
         ):
             out = StringIO()
-            call_command('telegram_bot', stdout=out)
+            call_command('telegram_bot', stdout=out, stderr=out)
         device.refresh_from_db()
         assert device.is_trusted is True
         assert get_updates.called

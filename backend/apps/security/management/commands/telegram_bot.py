@@ -54,11 +54,11 @@ class Command(BaseCommand):
 
         admin = getattr(settings, 'TELEGRAM_ADMIN_CHAT_ID', '')
         self.stdout.write(self.style.SUCCESS(
-            f'🤖 بوت الإدارة يعمل (polling كل {opts["interval"]}s) — '
-            f'شات الإدارة: {admin or "غير مضبوط!"}'
+            f'[Telegram] Bot polling active (every {opts["interval"]}s) - '
+            f'Admin chat: {admin or "not configured"}'
         ))
-        self.stdout.write('الأوامر: /pending /approve /block /unblock /devices '
-                          '/users /stats /backups /backup — أوقف بـ Ctrl+C')
+        self.stdout.write('Commands: /pending /approve /block /unblock /devices '
+                          '/users /stats /backups /backup - stop with Ctrl+C')
 
         from apps.security.telegram_bot import process_update
 
@@ -88,16 +88,16 @@ class Command(BaseCommand):
                     try:
                         handled = process_update(update)
                         if handled:
-                            self.stdout.write(f'↳ handled update {update["update_id"]}')
+                            self.stdout.write(f'-> handled update {update["update_id"]}')
                     except Exception:
                         import logging
                         logging.getLogger('security').exception(
                             'telegram update failed'
                         )
-                        self.stderr.write('⚠ فشل معالجة تحديث — راجع السجل')
+                        self.stderr.write('Warning: failed to process update')
+                time.sleep(opts['interval'])
             except requests.RequestException as e:
                 self.stderr.write(f'network: {e}')
             except KeyboardInterrupt:
-                self.stdout.write(self.style.SUCCESS('أُوقفت وحدة التحكم.'))
+                self.stdout.write(self.style.SUCCESS('Stopped.'))
                 return
-            time.sleep(opts['interval'])

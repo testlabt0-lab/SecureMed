@@ -225,7 +225,7 @@ elif _DATABASE_URL :
     })
     if _is_pooler:
         DATABASES ['default']['DISABLE_SERVER_SIDE_CURSORS']=True 
-        DATABASES ['default']['CONN_MAX_AGE']=0
+        DATABASES ['default']['CONN_MAX_AGE']=config ('CONN_MAX_AGE',default =0 ,cast =int )
 elif config ('DB_ENGINE',default ='')=='sqlite':
     DATABASES ={
     'default':{

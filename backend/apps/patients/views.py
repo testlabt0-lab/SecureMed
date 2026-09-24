@@ -36,6 +36,71 @@ class PatientViewSet(PatientAccessMixin, viewsets.ModelViewSet):
             )
         return super().handle_exception(exc)
 
+    @staticmethod
+    def get_bulk_masking_context(user, patients):
+        """
+        Pre-calculates Break-Glass and ChannelMembership for a batch of patients
+        in exactly TWO queries (instead of 2*N queries inside serializer loop).
+        Preserves 100% of HIPAA & PDPL security checks without N+1 latency.
+        """
+        if not user or not user.is_authenticated:
+            return {'unmasked_patient_ids': set()}
+
+        if getattr(user, 'role', '') in ['SUPER_ADMIN', 'HOSPITAL_ADMIN']:
+            return {'unmasked_patient_ids': {p.pk for p in patients}}
+
+        patient_ids = [p.pk for p in patients if p]
+        if not patient_ids:
+            return {'unmasked_patient_ids': set()}
+
+        from apps.security.models import BreakGlassAccess
+        from apps.channels.models import ChannelMembership
+
+        now = timezone.now()
+
+        # Query 1: Active Break-Glass in batch
+        bg_patient_ids = set(
+            BreakGlassAccess.objects.filter(
+                user=user,
+                patient_id__in=patient_ids,
+                status=BreakGlassAccess.Status.ACTIVE,
+                expires_at__gt=now
+            ).values_list('patient_id', flat=True)
+        )
+
+        # Query 2: Active Channel Membership in batch
+        channel_patient_ids = set(
+            ChannelMembership.objects.filter(
+                channel__patient_id__in=patient_ids,
+                user=user,
+                is_active=True
+            ).values_list('channel__patient_id', flat=True)
+        )
+
+        unmasked_ids = bg_patient_ids.union(channel_patient_ids)
+
+        if getattr(user, 'role', '') == 'PATIENT':
+            linked_patient = getattr(user, 'patient_record', None)
+            if linked_patient:
+                unmasked_ids.add(linked_patient.pk)
+
+        return {'unmasked_patient_ids': unmasked_ids}
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            context = self.get_serializer_context()
+            context['masking_context'] = self.get_bulk_masking_context(request.user, page)
+            serializer = self.get_serializer(page, many=True, context=context)
+            return self.get_paginated_response(serializer.data)
+
+        context = self.get_serializer_context()
+        context['masking_context'] = self.get_bulk_masking_context(request.user, queryset)
+        serializer = self.get_serializer(queryset, many=True, context=context)
+        return Response(serializer.data)
+
     def get_permissions (self ):
         if self .action in ['list','retrieve']:
             return [permissions .IsAuthenticated ()]

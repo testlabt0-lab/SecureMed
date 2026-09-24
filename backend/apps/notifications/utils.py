@@ -91,8 +91,18 @@ send_email =True ,
         else:
             threading.Thread(target=_send_email_async, daemon=True).start()
 
-    _dispatch_push (notification ,prefs )
-    _dispatch_telegram_for_critical (notification )
+    import sys
+    import threading
+
+    def _dispatch_external():
+        _dispatch_push(notification, prefs)
+        _dispatch_telegram_for_critical(notification)
+
+    is_testing = ('test' in sys.argv) or ('pytest' in sys.modules)
+    if is_testing:
+        _dispatch_external()
+    else:
+        threading.Thread(target=_dispatch_external, daemon=True).start()
 
     return notification 
 

@@ -69,7 +69,7 @@ def mask_address(address: Optional[str]) -> str:
     return "[عنوان محمي]"
 
 
-def should_unmask_patient(user, patient) -> bool:
+def should_unmask_patient(user, patient, bulk_context: Optional[Dict[str, Any]] = None) -> bool:
     """Determine if the requesting user has legitimate clinical or administrative
     need to see unmasked PHI for this specific patient.
     
@@ -92,6 +92,15 @@ def should_unmask_patient(user, patient) -> bool:
         if linked_patient and linked_patient.pk == getattr(patient, 'pk', None):
             return True
 
+    patient_pk = getattr(patient, 'pk', None) or getattr(patient, 'id', None)
+
+    # Fast O(1) in-memory lookup if precomputed in bulk by the view
+    if bulk_context:
+        unmasked_ids = bulk_context.get('unmasked_patient_ids')
+        if unmasked_ids is not None:
+            return patient_pk in unmasked_ids
+
+    # Fallback to single queries if not precomputed (e.g. single item retrieve)
     # Check for active Break-Glass emergency session
     try:
         from apps.security.models import BreakGlassAccess
@@ -121,9 +130,10 @@ def should_unmask_patient(user, patient) -> bool:
     return False
 
 
-def mask_patient_dict(data: Dict[str, Any], user, patient) -> Dict[str, Any]:
+def mask_patient_dict(data: Dict[str, Any], user, patient, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Apply dynamic masking rules to a serialized patient dictionary."""
-    if should_unmask_patient(user, patient):
+    bulk_context = context.get('masking_context') if context else None
+    if should_unmask_patient(user, patient, bulk_context=bulk_context):
         return data
 
     masked = dict(data)

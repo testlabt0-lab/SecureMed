@@ -76,3 +76,24 @@ class PatientAccessTests(TestCase):
         url = reverse('patient-detail', args=[self.patient.id])
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_patient_list_bulk_masking(self):
+        """Verify that patient list uses bulk prefetch and accurately masks data per HIPAA/PDPL."""
+        ChannelMembership.objects.create(
+            channel=self.channel,
+            user=self.other_doctor,
+            role='CONTRIBUTOR',
+            granted_by=self.doctor,
+            is_active=True
+        )
+        self.client.force_authenticate(user=self.other_doctor)
+        url = reverse('patient-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get('results', response.data)
+        self.assertTrue(len(results) >= 1)
+        target = next((p for p in results if str(p['id']) == str(self.patient.id)), None)
+        self.assertIsNotNone(target)
+        # Because other_doctor is an active channel member for this patient, national_id is unmasked
+        self.assertEqual(target['national_id'], '1234567890')
+

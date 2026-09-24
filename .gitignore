@@ -70,3 +70,4 @@ android/local.properties
 SecureMed-main/
 crypto.jar
 response.txt
+hs_err_pid*.log

@@ -46,7 +46,7 @@ class PatientSerializer (serializers .ModelSerializer ):
         user =request .user if request and getattr (request ,'user',None )and request .user .is_authenticated else None 
 
         from apps .core .masking import mask_patient_dict 
-        return mask_patient_dict (ret ,user ,instance ) 
+        return mask_patient_dict (ret ,user ,instance ,context =self .context ) 
 
 
 class MedicalRecordSerializer (serializers .ModelSerializer ):

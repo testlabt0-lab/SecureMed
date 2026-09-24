@@ -16,7 +16,11 @@ import com.securemed.app.security.BiometricHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.work.WorkManager
@@ -206,7 +210,9 @@ class SecureMedRepository @Inject constructor(
         val response = api.login(LoginRequest(email, password))
         if (response.isAuthenticated) {
             storeSession(response)
-            registerCurrentFcmToken() // best-effort; no-op without Firebase config
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { registerCurrentFcmToken() }
+            }
         }
         Result.success(response)
     } catch (e: Exception) {
@@ -238,7 +244,9 @@ class SecureMedRepository @Inject constructor(
         // branch left to take, so a 200 without tokens is not a session.
         if (!response.isAuthenticated) error("تعذر إكمال التحقق بخطوتين")
         storeSession(response)
-        registerCurrentFcmToken() // best-effort; no-op without Firebase config
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { registerCurrentFcmToken() }
+        }
         Result.success(response)
     } catch (e: Exception) {
         // messageFor reads the error body once, so it is called once and the
@@ -288,7 +296,9 @@ class SecureMedRepository @Inject constructor(
         // not a session, so it must not be reported as a successful login.
         if (!response.isAuthenticated) error("تعذر إكمال الدخول بالبصمة")
         storeSession(response)
-        registerCurrentFcmToken() // best-effort; no-op without Firebase config
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { registerCurrentFcmToken() }
+        }
         Result.success(response)
     } catch (e: Exception) {
         Result.failure(e)
@@ -1089,8 +1099,14 @@ class SecureMedRepository @Inject constructor(
      * case, swallowed deliberately; every other failure is reported.
      */
     suspend fun registerCurrentFcmToken(): Result<Unit> = try {
-        val t = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
-        registerPushToken(t)
+        val t = withTimeoutOrNull(5000L) {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+        }
+        if (t != null) {
+            registerPushToken(t)
+        } else {
+            Result.failure(Exception("FCM token fetch timed out"))
+        }
     } catch (e: IllegalStateException) {
         // Firebase not provisioned — push is optional, skip silently.
         Result.success(Unit)
@@ -1104,8 +1120,14 @@ class SecureMedRepository @Inject constructor(
      * keeps pushing clinical notifications to a device that just signed out.
      */
     suspend fun unregisterCurrentFcmToken(): Result<Unit> = try {
-        val t = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
-        unregisterPushToken(t)
+        val t = withTimeoutOrNull(5000L) {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+        }
+        if (t != null) {
+            unregisterPushToken(t)
+        } else {
+            Result.failure(Exception("FCM token fetch timed out"))
+        }
     } catch (e: IllegalStateException) {
         Result.success(Unit)
     } catch (e: Exception) {
